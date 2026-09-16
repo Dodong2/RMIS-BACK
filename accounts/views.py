@@ -6,7 +6,6 @@ from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from accounts.models import User
-from accounts.permissions import HasAccess
 from accounts.serializers import RoleTokenObtainPairSerializer
 
 
@@ -58,17 +57,3 @@ class GoogleExchangeView(APIView):
             "refresh": str(refresh),
             "is_pending_role": user.is_pending_role,
         })
-
-
-class ProjectManagementView(APIView):
-    permission_classes = [HasAccess(tiers=["project_management"])]
-
-    def get(self, request):
-        return Response({"message": f"Welcome, {request.user.role.name}."})
-
-
-class AdminOnlyView(APIView):
-    permission_classes = [HasAccess(codes=["system_admin"])]
-
-    def get(self, request):
-        return Response({"message": "Welcome, admin."})
