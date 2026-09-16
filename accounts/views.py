@@ -25,7 +25,7 @@ class GoogleExchangeView(APIView):
             f"{settings.SUPABASE_URL}/auth/v1/user",
             headers={
                 "Authorization": f"Bearer {token}",
-                "apikey": settings.SUPABASE_ANON_KEY,
+                "apikey": settings.SUPABASE_PUBLISHABLE_KEY,
             },
         )
         if resp.status_code != 200:
