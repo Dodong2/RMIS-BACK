@@ -3,9 +3,15 @@ from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from accounts.models import User
-from accounts.permissions import HasRole
+from accounts.permissions import HasAccess
+from accounts.serializers import RoleTokenObtainPairSerializer
+
+
+class RoleTokenObtainPairView(TokenObtainPairView):
+    serializer_class = RoleTokenObtainPairSerializer
 
 
 class GoogleExchangeView(APIView):
@@ -20,7 +26,7 @@ class GoogleExchangeView(APIView):
             f"{settings.SUPABASE_URL}/auth/v1/user",
             headers={
                 "Authorization": f"Bearer {token}",
-                "apikey": settings.SUPABASE_PUBLISHABLE_KEY,
+                "apikey": settings.SUPABASE_ANON_KEY,
             },
         )
         if resp.status_code != 200:
@@ -43,6 +49,10 @@ class GoogleExchangeView(APIView):
             user.save()
 
         refresh = RefreshToken.for_user(user)
+        refresh["role"] = user.role.code if user.role else None
+        refresh["role_tier"] = user.role.tier if user.role else None
+        refresh["is_pending_role"] = user.is_pending_role
+
         return Response({
             "access": str(refresh.access_token),
             "refresh": str(refresh),
@@ -50,8 +60,15 @@ class GoogleExchangeView(APIView):
         })
 
 
-class AdminOnlyView(APIView):
-    permission_classes = [HasRole(["system_admin"])]
+class ProjectManagementView(APIView):
+    permission_classes = [HasAccess(tiers=["project_management"])]
 
     def get(self, request):
-        return Response({"message": f"Welcome, {request.user.email} — you are a system_admin."})
+        return Response({"message": f"Welcome, {request.user.role.name}."})
+
+
+class AdminOnlyView(APIView):
+    permission_classes = [HasAccess(codes=["system_admin"])]
+
+    def get(self, request):
+        return Response({"message": "Welcome, admin."})
