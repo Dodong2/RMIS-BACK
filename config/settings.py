@@ -102,6 +102,11 @@ REST_FRAMEWORK = {
     ),
 }
 
+BREVO_API_KEY = env("BREVO_API_KEY")
+BREVO_SENDER_EMAIL = env("BREVO_SENDER_EMAIL")
+BREVO_SENDER_NAME = env("BREVO_SENDER_NAME")
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
+
 REST_AUTH = {
     "USE_JWT": True,
     "JWT_AUTH_HTTPONLY": False,   # simplest for polyrepo/cross-domain; see note below
