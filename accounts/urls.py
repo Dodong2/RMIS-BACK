@@ -7,6 +7,8 @@ from .views import (
     PendingUsersListView,
     UsersListView,
     AssignRoleView,
+    UpdateUserRoleView,
+    ToggleUserActiveView
 )
 
 urlpatterns = [
@@ -17,4 +19,6 @@ urlpatterns = [
     path("admin/pending-users/", PendingUsersListView.as_view()),
     path("admin/pending-users/<int:user_id>/assign-role/", AssignRoleView.as_view()),
     path("admin/users/", UsersListView.as_view()),
+    path("admin/users/<int:user_id>/update-role/", UpdateUserRoleView.as_view()),
+    path("admin/users/<int:user_id>/toggle-active/", ToggleUserActiveView.as_view()),
 ]

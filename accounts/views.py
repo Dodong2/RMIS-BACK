@@ -153,3 +153,31 @@ class AssignRoleView(APIView):
         send_role_confirmation_email(user)
 
         return Response({"detail": "Role assigned and confirmation sent."})
+    
+    
+class UpdateUserRoleView(APIView):
+    permission_classes = [HasRole(["system_admin"])]
+ 
+    def patch(self, request, user_id):
+        role_id = request.data.get("role_id")
+        if not role_id:
+            return Response({"detail": "role_id is required."}, status=400)
+ 
+        role = get_object_or_404(Role, id=role_id)
+        user = get_object_or_404(User, id=user_id, is_pending_role=False)
+ 
+        user.role = role
+        user.save()
+ 
+        return Response({"detail": "Role updated."})
+ 
+ 
+class ToggleUserActiveView(APIView):
+    permission_classes = [HasRole(["system_admin"])]
+ 
+    def patch(self, request, user_id):
+        user = get_object_or_404(User, id=user_id, is_pending_role=False)
+        user.is_active = not user.is_active
+        user.save()
+ 
+        return Response({"detail": "Activated." if user.is_active else "Deactivated.", "is_active": user.is_active})
