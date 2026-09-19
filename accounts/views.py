@@ -181,3 +181,14 @@ class ToggleUserActiveView(APIView):
         user.save()
  
         return Response({"detail": "Activated." if user.is_active else "Deactivated.", "is_active": user.is_active})
+    
+class UsersByRoleView(generics.ListAPIView):
+    serializer_class = UserListSerializer
+    permission_classes = [HasRole(["system_admin", "crc_chair"])]
+
+    def get_queryset(self):
+        code = self.request.query_params.get("code")
+        qs = User.objects.filter(is_pending_role=False, is_active=True)
+        if code:
+            qs = qs.filter(role__code=code)
+        return qs

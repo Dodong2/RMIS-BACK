@@ -6,9 +6,10 @@ from .views import (
     RolesListView,
     PendingUsersListView,
     UsersListView,
+    UsersByRoleView,
     AssignRoleView,
     UpdateUserRoleView,
-    ToggleUserActiveView
+    ToggleUserActiveView,
 )
 
 urlpatterns = [
@@ -16,6 +17,7 @@ urlpatterns = [
     path("auth/google/request/", GoogleRequestView.as_view()),
     path("auth/google/exchange/", GoogleExchangeView.as_view()),
     path("roles/", RolesListView.as_view()),
+    path("users/by-role/", UsersByRoleView.as_view()),
     path("admin/pending-users/", PendingUsersListView.as_view()),
     path("admin/pending-users/<int:user_id>/assign-role/", AssignRoleView.as_view()),
     path("admin/users/", UsersListView.as_view()),
