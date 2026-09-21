@@ -56,12 +56,35 @@ class ProjectSerializer(serializers.ModelSerializer):
             "id", "program", "title", "project_code", "funding_type",
             "ntp_number", "ntp_date", "toe_signed_date", "is_dry_research",
             "lead", "lead_detail", "status", "start_date", "target_end_date",
-            "rei_thrust", "created_at",
+            "rei_thrust", "is_continuing", "research_type", "sector", "sector_other",
+            "research_priority_area", "research_typology", "sdgs", "campus",
+            "implementing_unit", "cooperating_agencies", "total_cost", "created_at",
         ]
+
+    def validate_sdgs(self, value):
+        if not isinstance(value, list) or any(
+            not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 17 for n in value
+        ):
+            raise serializers.ValidationError("sdgs must be a list of integers from 1 to 17.")
+        return sorted(set(value))
+
+    def validate_research_typology(self, value):
+        valid = {code for code, _ in Project.TYPOLOGY_CHOICES}
+        if not isinstance(value, list) or not set(value) <= valid:
+            raise serializers.ValidationError(f"research_typology must be a list of: {', '.join(sorted(valid))}.")
+        return value
 
     def validate(self, attrs):
         lead = attrs.get("lead", getattr(self.instance, "lead", None))
         funding_type = attrs.get("funding_type", getattr(self.instance, "funding_type", None))
+        sector = attrs.get("sector", getattr(self.instance, "sector", ""))
+        sector_other = attrs.get("sector_other", getattr(self.instance, "sector_other", ""))
+        if not attrs.get("sdgs", getattr(self.instance, "sdgs", [])):
+            raise serializers.ValidationError({"sdgs": "Select at least one Sustainable Development Goal."})
+        if not sector:
+            raise serializers.ValidationError({"sector": "This field is required."})
+        if sector == "others" and not sector_other:
+            raise serializers.ValidationError({"sector_other": "Specify the sector when 'others' is selected."})
         validate_lead_role(lead, "project_leader")
         validate_lead_concurrency(
             lead, funding_type, Project.objects.all(),
