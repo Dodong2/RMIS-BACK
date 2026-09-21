@@ -1,0 +1,30 @@
+from django.urls import path
+from .views import (
+    AssignmentDetailView,
+    AssignmentListCreateView,
+    ClearanceView,
+    CompleteChangeView,
+    LeaderAssignmentView,
+    LeaderLoadView,
+    PersonnelChangeDetailView,
+    PersonnelChangeListCreateView,
+    StaffProfileDetailView,
+    StaffProfileListCreateView,
+    TaskDetailView,
+    TaskListCreateView,
+)
+
+urlpatterns = [
+    path("leaders/assign/", LeaderAssignmentView.as_view()),
+    path("leaders/load/", LeaderLoadView.as_view()),
+    path("staff-profiles/", StaffProfileListCreateView.as_view()),
+    path("staff-profiles/<int:pk>/", StaffProfileDetailView.as_view()),
+    path("assignments/", AssignmentListCreateView.as_view()),
+    path("assignments/<int:pk>/", AssignmentDetailView.as_view()),
+    path("tasks/", TaskListCreateView.as_view()),
+    path("tasks/<int:pk>/", TaskDetailView.as_view()),
+    path("changes/", PersonnelChangeListCreateView.as_view()),
+    path("changes/<int:pk>/", PersonnelChangeDetailView.as_view()),
+    path("changes/<int:pk>/clearance/", ClearanceView.as_view()),
+    path("changes/<int:pk>/complete/", CompleteChangeView.as_view()),
+]
