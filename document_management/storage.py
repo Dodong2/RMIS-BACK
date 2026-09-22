@@ -3,7 +3,12 @@ from django.conf import settings
 
 
 def _headers(content_type=None):
-    headers = {"Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"}
+    # Supabase's gateway requires both apikey (identifies the project/key) and
+    # Authorization (the actual credential) - Authorization alone 403s.
+    headers = {
+        "apikey": settings.SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}",
+    }
     if content_type:
         headers["Content-Type"] = content_type
     return headers
