@@ -52,6 +52,7 @@ class AIUseDeclarationSerializer(serializers.ModelSerializer):
             "id", "project", "study", "declared_by", "tool_name", "purpose",
             "extent", "declared_on", "created_at",
         ]
+        read_only_fields = ["declared_by"]
 
     def validate(self, attrs):
         return validate_study_belongs_to_project(attrs, self.instance)

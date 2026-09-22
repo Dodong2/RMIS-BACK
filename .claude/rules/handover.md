@@ -33,7 +33,16 @@ Module 6: Ethics, Integrity, and Compliance Tracking
 - See memory `client-priorities-module5plus` for the client's pinned feature list (Forecasting, Monitoring, Data Viz, best-performer analysis, Approved BOR, External Projects) — relevant when scoping Modules 9/10/11 later. Best-performer analysis will likely need a `college` field somewhere; only `campus` exists today on `Project`.
 
 ## Last thing done in this repo
-Built compliance app for Module 6 (EthicsReviewReference, SimilarityCheckRecord, AIUseDeclaration, ConflictOfInterestDisclosure, MisconductCaseReference — all reference/log models per the Manual's Article IV, no approval workflow since the module explicitly doesn't simulate external processes), wired into settings/urls, migration generated and applied, `manage.py check` passes, core logic verified via shell smoke test (rolled back, no data persisted).
+Fixed a real bug found via frontend browser testing 2026-09-22: `AIUseDeclarationSerializer`
+never listed `declared_by` in `read_only_fields` (every sibling serializer in the same
+file does this for its own `recorded_by`/`reported_by`), so DRF's `is_valid()` rejected
+every AI declaration with "declared_by: This field is required." before
+`perform_create`'s override ever ran. One-line fix: added `read_only_fields = ["declared_by"]`.
+Re-tested against the frontend's CompliancePage after the fix — works.
 
 ## Next thing to do in this repo
-Commit this work, then smoke-test the /api/compliance/ endpoints against a running server with real HTTP requests, and decide whether to build Module 7 (Document and Records Management) next per the module structure doc.
+Commit this work (including the AIUseDeclarationSerializer fix), then smoke-test the
+remaining /api/compliance/ endpoints against a running server with real HTTP requests
+(ethics-reviews, similarity-checks, coi-disclosures, misconduct-cases all confirmed
+working via the frontend already), and decide whether to build Module 7 (Document and
+Records Management) next per the module structure doc.
