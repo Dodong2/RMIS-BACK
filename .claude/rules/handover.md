@@ -13,12 +13,14 @@ Module 7: Document and Records Management
 - Module 7 (document_management app): done, migrated, **confirmed working end-to-end against real Supabase Storage** 2026-09-22 (upload → signed URL → download → content match → cleanup, all passed). Bucket is named `research-documents` (not `documents` — user created it with that name; `.env` and `settings.py`'s default both updated to match). Two real setup issues found+fixed during this test: (1) `storage.py` was only sending an `Authorization` header — Supabase's gateway also requires `apikey`, otherwise it 403s with "Invalid Compact JWS"; (2) the bucket has MIME-type restrictions configured (rejected `text/plain`, accepted `application/pdf`) — user should check/expand the allowed MIME types in the Supabase dashboard if Module 7 needs to accept non-PDF document types (.docx, .csv, .zip for datasets, etc.), otherwise valid uploads may get rejected server-side by Supabase.
 
 ## What the frontend still needs from this module
-- POST/GET /api/budget/budgets/, /api/budget/line-items/, POST .../certify/ — Module 4, not yet called from frontend
-- POST/GET /api/financial/disbursements/, /api/financial/realignments/, POST .../review/, GET /api/financial/budgets/<id>/summary/ — Module 5, not yet called from frontend
+- Modules 4 (budget_lib) and 5 (financial_monitoring) — frontend pages (BudgetPage,
+  DisbursementsPage) are built and call these endpoints, but haven't been
+  browser-tested against a live server yet (unlike Modules 6 and 7, below).
 - Module 6 endpoints (ethics-reviews, similarity-checks, ai-declarations, coi-disclosures, misconduct-cases) — confirmed working via frontend's CompliancePage
-- POST/GET /api/documents/documents/ (multipart, `file` field) — upload/list versioned project documents; storage layer confirmed working, not yet called from frontend
-- GET /api/documents/documents/<id>/ — retrieve one document, includes a signed `download_url` (1hr expiry); list view intentionally omits `download_url` to avoid N+1 Supabase calls
-- POST /api/documents/documents/<id>/archive/ — riuh/system_admin only
+- Module 7 endpoints (documents list/create/detail/archive) — confirmed working
+  via frontend's DocumentsPage, browser-tested against real Supabase Storage
+  2026-09-22 (upload → signed download_url → byte-identical download →
+  archive, no bugs found this time)
 
 ## Known open questions / decisions pending
 - Module 7's `research-documents` Supabase bucket may need its allowed MIME types expanded beyond PDF (see above) — user to check in the dashboard when frontend upload of non-PDF document types starts failing.
