@@ -7,8 +7,9 @@ from budget_lib.models import LineItemBudget
 from .models import BudgetRealignment, Disbursement
 from .serializers import (
     DISBURSEMENT_ROLES,
+    REALIGNMENT_BOR_REVIEW_ROLES,
+    REALIGNMENT_MAJOR_REVIEW_ROLES,
     REALIGNMENT_REQUEST_ROLES,
-    REALIGNMENT_REVIEW_ROLES,
     BudgetRealignmentSerializer,
     DisbursementSerializer,
     RealignmentReviewSerializer,
@@ -71,14 +72,24 @@ class RealignmentDetailView(generics.RetrieveAPIView):
 
 
 class RealignmentReviewView(APIView):
-    """Approve/reject a major (University Administration) or BOR-tier realignment."""
+    """
+    Approve/reject a major or BOR-tier realignment. Major (33-100%) may be
+    reviewed by University Administration; BOR-tier (>100%/new item) is
+    system_admin only, per client confirmation (no Board of Regents role exists).
+    """
 
-    permission_classes = [HasRole(REALIGNMENT_REVIEW_ROLES)]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
         realignment = generics.get_object_or_404(BudgetRealignment, pk=pk)
         if realignment.status not in ("pending_approval", "pending_bor"):
             return Response({"detail": "This realignment is not awaiting review."}, status=status.HTTP_400_BAD_REQUEST)
+
+        allowed_roles = REALIGNMENT_BOR_REVIEW_ROLES if realignment.tier == "bor" else REALIGNMENT_MAJOR_REVIEW_ROLES
+        user_role = request.user.role.code if request.user.role else None
+        if user_role not in allowed_roles:
+            return Response({"detail": "You do not have permission to review this realignment."}, status=status.HTTP_403_FORBIDDEN)
+
         serializer = RealignmentReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         realignment = review_realignment(

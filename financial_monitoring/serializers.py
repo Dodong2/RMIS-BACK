@@ -9,7 +9,8 @@ from budget_lib.models import LineItem
 from .models import APPLIED_STATUSES, BudgetRealignment, Disbursement
 
 REALIGNMENT_REQUEST_ROLES = ["system_admin", "project_leader"]
-REALIGNMENT_REVIEW_ROLES = ["system_admin", "university_admin"]
+REALIGNMENT_MAJOR_REVIEW_ROLES = ["system_admin", "university_admin"]
+REALIGNMENT_BOR_REVIEW_ROLES = ["system_admin"]  # client-confirmed: BOR-tier approval is system_admin only
 DISBURSEMENT_ROLES = ["system_admin", "finance_budget"]
 
 MINOR_TIER_MAX_PCT = 33
