@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "research_projects",
     "personnel",
     "budget_lib",
+    "financial_monitoring",
 ]
 
 SITE_ID = 1
