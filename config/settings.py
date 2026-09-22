@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "budget_lib",
     "financial_monitoring",
     "compliance",
+    "document_management",
 ]
 
 SITE_ID = 1
@@ -128,6 +129,8 @@ CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 
 SUPABASE_URL = env("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = env("SUPABASE_PUBLISHABLE_KEY")
+SUPABASE_SERVICE_ROLE_KEY = env("SUPABASE_SERVICE_ROLE_KEY", default="")
+SUPABASE_STORAGE_BUCKET = env("SUPABASE_STORAGE_BUCKET", default="documents")
 
 ACCOUNT_EMAIL_VERIFICATION = "none" 
 ACCOUNT_LOGIN_METHODS = {"email"}     
