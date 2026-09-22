@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "personnel",
     "budget_lib",
     "financial_monitoring",
+    "compliance",
 ]
 
 SITE_ID = 1
