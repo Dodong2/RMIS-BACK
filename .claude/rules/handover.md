@@ -16,13 +16,18 @@ Module 8: Research Output and IP Tracking
 ## What the frontend still needs from this module
 - Modules 4 (budget_lib) and 5 (financial_monitoring) — frontend pages (BudgetPage,
   DisbursementsPage) are built and call these endpoints, but haven't been
-  browser-tested against a live server yet (unlike Modules 6 and 7, below).
+  browser-tested against a live server yet (unlike Modules 6-8, below).
 - Module 6 endpoints (ethics-reviews, similarity-checks, ai-declarations, coi-disclosures, misconduct-cases) — confirmed working via frontend's CompliancePage
 - Module 7 endpoints (documents list/create/detail/archive) — confirmed working
   via frontend's DocumentsPage, browser-tested against real Supabase Storage
   2026-09-22 (upload → signed download_url → byte-identical download →
   archive, no bugs found this time)
-- Module 8 (outputs app): publications/, sense-publishers/, ip-records/, creative-works/ — not yet called from frontend
+- Module 8 endpoints (publications, sense-publishers, ip-records, creative-works) —
+  confirmed working via frontend's OutputsPage, browser-tested 2026-09-22:
+  compute_publication_incentive verified correct for both the ISI-journal path
+  (₱60,000 at impact factor 2.5) and the SENSE-publisher book path (₱75,000);
+  compute_ip_incentive_eligible verified correct through the full
+  disclosed→registered→claimed lifecycle. No bugs found this time.
 
 ## Known open questions / decisions pending
 - Module 7's `research-documents` Supabase bucket may need its allowed MIME types expanded beyond PDF (see above) — user to check in the dashboard when frontend upload of non-PDF document types starts failing.
