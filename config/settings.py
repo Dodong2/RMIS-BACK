@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "compliance",
     "document_management",
     "outputs",
+    "monitoring",
 ]
 
 SITE_ID = 1
