@@ -1,6 +1,6 @@
 from dj_rest_auth.serializers import UserDetailsSerializer
 from rest_framework import serializers
-from .models import Role, User
+from .models import AuditLog, Role, User
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -31,3 +31,11 @@ class UserListSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ["id", "email", "role", "is_active", "date_joined"]
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    actor_email = serializers.CharField(source="actor.email", read_only=True, default=None)
+
+    class Meta:
+        model = AuditLog
+        fields = ["id", "actor", "actor_email", "method", "path", "status_code", "ip_address", "created_at"]

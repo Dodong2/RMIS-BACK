@@ -8,8 +8,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User, Role
-from .serializers import RoleSerializer, PendingUserSerializer, UserListSerializer
+from .models import AuditLog, User, Role
+from .serializers import AuditLogSerializer, RoleSerializer, PendingUserSerializer, UserListSerializer
 from .permissions import HasRole
 from .emails import notify_admins_new_registration, send_role_confirmation_email
 
@@ -191,4 +191,19 @@ class UsersByRoleView(generics.ListAPIView):
         qs = User.objects.filter(is_pending_role=False, is_active=True)
         if code:
             qs = qs.filter(role__code=code)
+        return qs
+
+
+class AuditLogListView(generics.ListAPIView):
+    serializer_class = AuditLogSerializer
+    permission_classes = [HasRole(["system_admin"])]
+
+    def get_queryset(self):
+        qs = AuditLog.objects.select_related("actor").all()
+        actor_id = self.request.query_params.get("actor")
+        method = self.request.query_params.get("method")
+        if actor_id:
+            qs = qs.filter(actor_id=actor_id)
+        if method:
+            qs = qs.filter(method=method.upper())
         return qs

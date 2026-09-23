@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    AuditLogListView,
     RegisterView,
     GoogleRequestView,
     GoogleExchangeView,
@@ -23,4 +24,5 @@ urlpatterns = [
     path("admin/users/", UsersListView.as_view()),
     path("admin/users/<int:user_id>/update-role/", UpdateUserRoleView.as_view()),
     path("admin/users/<int:user_id>/toggle-active/", ToggleUserActiveView.as_view()),
+    path("admin/audit-logs/", AuditLogListView.as_view()),
 ]

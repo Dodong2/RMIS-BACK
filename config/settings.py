@@ -56,6 +56,7 @@ MIDDLEWARE = [
     "allauth.account.middleware.AccountMiddleware",   # required by allauth even if unused directly
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "accounts.middleware.AuditLogMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"

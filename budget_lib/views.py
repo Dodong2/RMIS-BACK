@@ -6,7 +6,7 @@ from accounts.permissions import HasRole
 from .models import LineItem, LineItemBudget
 from .serializers import CERTIFY_ROLES, LineItemBudgetSerializer, LineItemSerializer, certify_budget
 
-MANAGE_ROLES = ["system_admin", "finance_budget"]
+MANAGE_ROLES = ["system_admin", "finance_budget", "procurement_officer_lib"]
 
 
 class BudgetListCreateView(generics.ListCreateAPIView):
@@ -35,10 +35,16 @@ class LineItemListCreateView(generics.ListCreateAPIView):
     serializer_class = LineItemSerializer
 
     def get_queryset(self):
-        qs = LineItem.objects.all().order_by("category", "id")
+        qs = LineItem.objects.all().select_related("budget__project").order_by("category", "id")
         budget_id = self.request.query_params.get("budget")
+        project_id = self.request.query_params.get("project")
+        is_app_flagged = self.request.query_params.get("is_app_flagged")
         if budget_id:
             qs = qs.filter(budget_id=budget_id)
+        if project_id:
+            qs = qs.filter(budget__project_id=project_id)
+        if is_app_flagged is not None:
+            qs = qs.filter(is_app_flagged=is_app_flagged.lower() in ("true", "1", "yes"))
         return qs
 
     def get_permissions(self):
