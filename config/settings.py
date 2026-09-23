@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "monitoring",
     "dashboard",
     "forecasting",
+    "decision_support",
 ]
 
 SITE_ID = 1
