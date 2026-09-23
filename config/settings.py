@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "document_management",
     "outputs",
     "monitoring",
+    "dashboard",
 ]
 
 SITE_ID = 1
