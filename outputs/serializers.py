@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import CreativeWorkRecord, IPRecord, PublicationRecord, SenseRankedPublisher
+from .models import CreativeWorkRecord, IPRecord, PublicationRecord, SenseRankedPublisher, ExpectedOutput, ProjectOutcome
 
 MANAGE_ROLES = ["system_admin", "riuh"]
 REPORT_ROLES = ["system_admin", "riuh", "project_leader", "study_leader"]
@@ -117,4 +117,29 @@ class CreativeWorkRecordSerializer(serializers.ModelSerializer):
             "id", "project", "creator", "title", "work_type", "description", "date_created",
             "is_registered", "rights_holder", "recorded_by", "created_at",
         ]
+        read_only_fields = ["recorded_by"]
+
+
+COMPUTED_6P = {"publications": "publications", "patents": "ip_records"}
+
+
+class ExpectedOutputSerializer(serializers.ModelSerializer):
+    actual_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ExpectedOutput
+        fields = [
+            "id", "project", "category", "description", "target_count", "manual_actual_count",
+            "actual_count", "created_at",
+        ]
+
+    def get_actual_count(self, obj):
+        related = COMPUTED_6P.get(obj.category)
+        return getattr(obj.project, related).count() if related else obj.manual_actual_count
+
+
+class ProjectOutcomeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectOutcome
+        fields = ["id", "project", "kind", "description", "observed_on", "evidence", "recorded_by", "created_at"]
         read_only_fields = ["recorded_by"]

@@ -9,7 +9,7 @@ from research_projects.serializers import (
     validate_lead_concurrency,
     validate_lead_role,
 )
-from .models import PersonnelChange, ProjectAssignment, PropertyClearance, StaffProfile, Task
+from .models import PersonnelChange, ProjectAssignment, PropertyClearance, StaffProfile, Task, TaskUpdate
 
 MANAGE_ROLES = ["system_admin", "crc_chair", "drd", "riuh"]
 TASK_ASSIGNER_ROLES = MANAGE_ROLES + ["program_leader", "project_leader", "study_leader"]
@@ -76,7 +76,7 @@ class ProjectAssignmentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProjectAssignment
-        fields = ["id", "user", "user_detail", "project", "study", "role_label",
+        fields = ["id", "user", "user_detail", "project", "study", "role_label", "department",
                   "start_date", "end_date", "is_active", "created_at"]
 
     def validate(self, attrs):
@@ -87,6 +87,8 @@ class ProjectAssignmentSerializer(serializers.ModelSerializer):
         user = attrs.get("user", getattr(self.instance, "user", None))
         if not user.role or user.role.code != "project_staff":
             raise serializers.ValidationError(f"{user.email} is not a project_staff user.")
+        if not attrs.get("department") and not self.instance:
+            attrs["department"] = user.office
         return attrs
 
 
@@ -110,6 +112,22 @@ class TaskSerializer(serializers.ModelSerializer):
         project = attrs.get("project", getattr(self.instance, "project", None))
         if study and study.project_id != project.id:
             raise serializers.ValidationError({"study": "Study does not belong to this project."})
+        return attrs
+
+
+class TaskUpdateSerializer(serializers.ModelSerializer):
+    author_email = serializers.EmailField(source="author.email", read_only=True)
+
+    class Meta:
+        model = TaskUpdate
+        fields = ["id", "task", "author", "author_email", "note", "new_status", "created_at"]
+        read_only_fields = ["task", "author"]
+
+    def validate(self, attrs):
+        user = self.context["request"].user
+        task = self.context["task"]
+        if user.role.code not in TASK_ASSIGNER_ROLES and task.assignee_id != user.id:
+            raise serializers.ValidationError("Only the assignee or a task assigner can post updates on this task.")
         return attrs
 
 

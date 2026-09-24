@@ -1,5 +1,9 @@
 from django.urls import path
 from .views import (
+    ExpectedOutputDetailView,
+    ExpectedOutputListCreateView,
+    ExpectedVsActualView,
+    ProjectOutcomeListCreateView,
     CreativeWorkDetailView,
     CreativeWorkListCreateView,
     IPRecordDetailView,
@@ -17,4 +21,8 @@ urlpatterns = [
     path("ip-records/<int:pk>/", IPRecordDetailView.as_view()),
     path("creative-works/", CreativeWorkListCreateView.as_view()),
     path("creative-works/<int:pk>/", CreativeWorkDetailView.as_view()),
+    path("expected-outputs/", ExpectedOutputListCreateView.as_view()),
+    path("expected-outputs/<int:pk>/", ExpectedOutputDetailView.as_view()),
+    path("expected-vs-actual/<int:project_id>/", ExpectedVsActualView.as_view()),
+    path("outcomes/", ProjectOutcomeListCreateView.as_view()),
 ]

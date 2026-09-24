@@ -5,6 +5,7 @@ from .views import (
     AppendixFReportView,
     AppendixGReportView,
     GeneratedReportLogListView,
+    ModuleReportView,
     ProjectListReportView,
 )
 
@@ -14,4 +15,5 @@ urlpatterns = [
     path("appendix-g/", AppendixGReportView.as_view()),
     path("projects/", ProjectListReportView.as_view()),
     path("logs/", GeneratedReportLogListView.as_view()),
+    path("<str:report_type>/", ModuleReportView.as_view()),
 ]

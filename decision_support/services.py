@@ -6,6 +6,7 @@ from financial_monitoring.models import Disbursement
 from forecasting.models import ForecastRun
 from monitoring.serializers import compute_escalation_status, compute_renewal_eligible
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
+from risk_indicators.services import compute_project_risk
 
 # Saaty's Random Index (RI) table for consistency-ratio normalization, n=1..10.
 SAATY_RANDOM_INDEX = {1: 0.0, 2: 0.0, 3: 0.58, 4: 0.90, 5: 1.12, 6: 1.24, 7: 1.32, 8: 1.41, 9: 1.45, 10: 1.49}
@@ -94,6 +95,10 @@ def _overrun_risk_inverse(project):
     return 0.0 if latest.is_overrun_risk else 1.0
 
 
+def _risk_score_inverse(project):
+    return 25 - compute_project_risk(project)["risk_score"]  # 25 = max on the 5x5 scale
+
+
 # Every metric here is defined so a HIGHER raw value is always better —
 # _normalize()'s min-max scaling depends on that being true for all of them.
 CRITERIA_METRICS = {
@@ -103,6 +108,7 @@ CRITERIA_METRICS = {
     "monitoring_health": _monitoring_health,
     "renewal_eligible": _renewal_eligible,
     "overrun_risk_inverse": _overrun_risk_inverse,
+    "risk_score_inverse": _risk_score_inverse,
 }
 
 

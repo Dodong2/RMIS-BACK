@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "decision_support",
     "risk_indicators",
     "reports",
+    "budget_sync",
 ]
 
 SITE_ID = 1

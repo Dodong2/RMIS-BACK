@@ -1,4 +1,6 @@
-from django.db.models import Count, Q, Sum
+from datetime import date
+
+from django.db.models import Avg, Count, Q, Sum
 
 from budget_lib.models import LineItem, LineItemBudget
 from compliance.models import (
@@ -8,10 +10,13 @@ from compliance.models import (
     MisconductCaseReference,
     SimilarityCheckRecord,
 )
+from decision_support.models import FundingRecommendationRun
 from financial_monitoring.models import Disbursement
+from forecasting.models import ForecastRun
 from monitoring.models import MidtermReport, MonthlyProgressReport, TerminalReport
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
 from outputs.serializers import compute_ip_incentive_eligible, compute_publication_incentive
+from personnel.models import Task
 from research_projects.models import Project
 
 from .models import PlanningTarget
@@ -211,3 +216,77 @@ def appendix_g_export(campus=None, year=None):
         "creative_works": creative_works.count(),
         "monthly_reports_submitted": monthly_reports.count(),
     }
+
+
+def compute_forecasting_dashboard(campus=None, funding_type=None):
+    """Forecasting Analytics Dashboard (Objective 5c): latest successful ARIMA run per project."""
+    projects = _scoped_projects(campus, funding_type)
+    runs = []
+    for project in projects:
+        run = ForecastRun.objects.filter(project=project, status="success").order_by("-run_at").first()
+        if run:
+            runs.append(run)
+    accuracy = ForecastRun.objects.filter(pk__in=[r.pk for r in runs]).aggregate(
+        avg_mae=Avg("mae"), avg_rmse=Avg("rmse"), avg_mape=Avg("mape"),
+    )
+    return {
+        "projects_in_scope": projects.count(),
+        "projects_forecasted": len(runs),
+        "overrun_risk_count": sum(1 for r in runs if r.is_overrun_risk),
+        "accuracy": accuracy,
+        "projects": [
+            {
+                "project": r.project_id, "project_code": r.project.project_code, "run": r.id, "run_at": r.run_at,
+                "approved_budget_total": r.approved_budget_total, "actual_to_date": r.actual_to_date,
+                "projected_total_at_horizon": r.projected_total_at_horizon, "is_overrun_risk": r.is_overrun_risk,
+                "mae": r.mae, "rmse": r.rmse, "mape": r.mape,
+            }
+            for r in sorted(runs, key=lambda r: (not r.is_overrun_risk, r.project.project_code))
+        ],
+    }
+
+
+def compute_funding_allocation_dashboard(run_id=None):
+    """Funding Allocation Decision Dashboard (Objective 5d): a WSM run's ranking next to the decisions taken."""
+    runs = FundingRecommendationRun.objects.order_by("-created_at")
+    run = runs.filter(pk=run_id).first() if run_id else runs.first()
+    if run is None:
+        return None
+    decisions = {d.project_id: d for d in run.decisions.all()}
+    ranking = []
+    for score in run.scores.select_related("project").order_by("rank"):
+        decision = decisions.get(score.project_id)
+        ranking.append({
+            "rank": score.rank, "project": score.project_id, "project_code": score.project.project_code,
+            "title": score.project.title, "composite_score": score.composite_score,
+            "decision": decision.decision if decision else None,
+            "indicative_amount": decision.indicative_amount if decision else None,
+        })
+    return {
+        "run": run.id, "label": run.label, "created_at": run.created_at, "ahp_run": run.ahp_run_id,
+        "ranking": ranking,
+        "decision_summary": {
+            choice: sum(1 for d in decisions.values() if d.decision == choice) for choice in ("fund", "defer", "decline")
+        } | {"undecided": len(ranking) - len(decisions)},
+        "total_indicative_amount": sum((d.indicative_amount or 0) for d in decisions.values() if d.decision == "fund"),
+    }
+
+
+def compute_task_dashboard(project_id=None):
+    """Open/overdue/done task counts per project (feeds the Compliance & Activity Dashboard, Objective 5a)."""
+    tasks = Task.objects.all()
+    if project_id:
+        tasks = tasks.filter(project_id=project_id)
+    rows = (
+        tasks.values("project", "project__project_code")
+        .annotate(
+            open=Count("id", filter=~Q(status="done")),
+            overdue=Count("id", filter=Q(due_date__lt=date.today()) & ~Q(status="done")),
+            done=Count("id", filter=Q(status="done")),
+        )
+        .order_by("-overdue", "project__project_code")
+    )
+    return [
+        {"project": r["project"], "project_code": r["project__project_code"], "open": r["open"], "overdue": r["overdue"], "done": r["done"]}
+        for r in rows
+    ]

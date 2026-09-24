@@ -6,12 +6,15 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from budget_lib.models import LineItem
-from .models import APPLIED_STATUSES, BudgetRealignment, Disbursement
+from accounts.permissions import scoped_projects
+from .models import APPLIED_STATUSES, BudgetRealignment, Disbursement, ProcurementRequest
 
 REALIGNMENT_REQUEST_ROLES = ["system_admin", "project_leader"]
 REALIGNMENT_MAJOR_REVIEW_ROLES = ["system_admin", "university_admin"]
 REALIGNMENT_BOR_REVIEW_ROLES = ["system_admin"]  # client-confirmed: BOR-tier approval is system_admin only
 DISBURSEMENT_ROLES = ["system_admin", "finance_budget"]
+PROCUREMENT_REQUEST_ROLES = ["system_admin", "program_leader", "project_leader"]  # "signed by the Lead Proponent"
+PROCUREMENT_STATUS_ROLES = ["system_admin", "procurement_officer_lib"]
 
 MINOR_TIER_MAX_PCT = 33
 MAJOR_TIER_MAX_PCT = 100
@@ -39,16 +42,21 @@ def line_item_balance(line_item, exclude_realignment_pk=None):
 
 
 class DisbursementSerializer(serializers.ModelSerializer):
+    funding_source = serializers.CharField(source="line_item.funding_source", read_only=True)
+
     class Meta:
         model = Disbursement
         fields = [
-            "id", "line_item", "amount", "reference_number", "description",
-            "disbursed_on", "recorded_by", "created_at",
+            "id", "line_item", "amount", "reference_number", "description", "payee", "supporting_document",
+            "funding_source", "disbursed_on", "recorded_by", "created_at",
         ]
         read_only_fields = ["recorded_by"]
 
     def validate(self, attrs):
         line_item = attrs.get("line_item", getattr(self.instance, "line_item", None))
+        document = attrs.get("supporting_document", getattr(self.instance, "supporting_document", None))
+        if document and document.project_id != line_item.budget.project_id:
+            raise serializers.ValidationError({"supporting_document": "Document belongs to a different project."})
         amount = attrs.get("amount", getattr(self.instance, "amount", None))
         if line_item.budget.status != "certified":
             raise serializers.ValidationError("Disbursements can only be recorded against a certified budget.")
@@ -81,6 +89,7 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         from_item = attrs.get("from_line_item", getattr(self.instance, "from_line_item", None))
+        validate_in_scope(self, from_item)
         to_item = attrs.get("to_line_item", getattr(self.instance, "to_line_item", None))
         new_category = attrs.get("new_item_category", "")
         new_description = attrs.get("new_item_description", "")
@@ -163,3 +172,52 @@ def review_realignment(realignment, reviewer, decision, bor_resolution_number=""
         realignment.reviewed_at = timezone.now()
         realignment.save(update_fields=["status", "to_line_item", "bor_resolution_number", "reviewed_by", "reviewed_at"])
     return realignment
+
+
+def validate_in_scope(serializer, line_item):
+    """Leaders may only file requests against projects in their own scope."""
+    request = serializer.context.get("request")
+    projects = scoped_projects(request.user) if request else None
+    if projects is not None and not projects.filter(pk=line_item.budget.project_id).exists():
+        raise serializers.ValidationError("This line item belongs to a project outside your scope.")
+
+
+class ProcurementRequestSerializer(serializers.ModelSerializer):
+    project = serializers.IntegerField(source="line_item.budget.project_id", read_only=True)
+    routed_to = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = ProcurementRequest
+        fields = [
+            "id", "project", "line_item", "description", "amount", "fiscal_year", "quarter", "routed_to",
+            "status", "remarks", "requested_by", "requested_at", "processing_at", "released_at", "updated_by",
+        ]
+        read_only_fields = ["status", "requested_by", "requested_at", "processing_at", "released_at", "updated_by"]
+
+    def validate(self, attrs):
+        line_item = attrs["line_item"]
+        validate_in_scope(self, line_item)
+        if line_item.budget.status != "certified":
+            raise serializers.ValidationError("Procurement can only be requested against a certified budget.")
+        open_requests = line_item.procurement_requests.exclude(status__in=("released", "cancelled"))
+        committed = open_requests.aggregate(total=Sum("amount"))["total"] or 0
+        available = line_item_balance(line_item)["available"] - committed
+        if attrs["amount"] > available:
+            raise serializers.ValidationError(
+                f"Amount {attrs['amount']} exceeds what is still available on this line item ({available})."
+            )
+        return attrs
+
+
+PROCUREMENT_TRANSITIONS = {"requested": ("processing", "cancelled"), "processing": ("released", "cancelled")}
+
+
+class ProcurementStatusSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=["processing", "released", "cancelled"])
+    remarks = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_status(self, value):
+        current = self.context["procurement"].status
+        if value not in PROCUREMENT_TRANSITIONS.get(current, ()):
+            raise serializers.ValidationError(f"Cannot move a '{current}' request to '{value}'.")
+        return value

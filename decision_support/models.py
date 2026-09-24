@@ -10,6 +10,7 @@ CRITERIA_METRIC_CHOICES = (
     ("monitoring_health", "Monitoring/Reporting Health"),
     ("renewal_eligible", "Renewal Eligibility"),
     ("overrun_risk_inverse", "Forecast Overrun-Risk (inverse — no risk scores higher)"),
+    ("risk_score_inverse", "Project Risk Score (inverse of the 5x5 early-warning score)"),
 )
 
 
@@ -111,3 +112,23 @@ class ProjectScore(models.Model):
 
     def __str__(self):
         return f"run {self.run_id}: {self.project_id} rank {self.rank}"
+
+
+class DecisionRecord(models.Model):
+    """The management decision actually taken on a WSM recommendation (DPMIS-based spec decision_records).
+    The DSS output is advisory (client clarification Q6); the peso amount, if any, is entered by the
+    decider — not computed — since final approval rests with the University President/BOR."""
+
+    DECISION_CHOICES = (("fund", "Fund"), ("defer", "Defer"), ("decline", "Decline"))
+
+    run = models.ForeignKey(FundingRecommendationRun, on_delete=models.PROTECT, related_name="decisions")
+    project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="funding_decisions")
+    decision = models.CharField(max_length=10, choices=DECISION_CHOICES)
+    indicative_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    rationale = models.TextField(blank=True)
+    reference_number = models.CharField(max_length=100, blank=True, help_text="e.g. BOR resolution / memo number")
+    decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="funding_decisions")
+    decided_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["run", "project"], name="unique_decision_per_run_project")]

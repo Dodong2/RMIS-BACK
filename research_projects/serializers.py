@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from accounts.models import User
-from .models import Program, Project, Study, WorkPlanMilestone
+from .models import Program, Project, ProjectStatusHistory, Study, WorkPlanMilestone
 
 
 class LeadSerializer(serializers.ModelSerializer):
@@ -58,7 +58,10 @@ class ProjectSerializer(serializers.ModelSerializer):
             "lead", "lead_detail", "status", "start_date", "target_end_date",
             "rei_thrust", "is_continuing", "research_type", "sector", "sector_other",
             "research_priority_area", "research_typology", "sdgs", "campus",
-            "implementing_unit", "cooperating_agencies", "total_cost", "created_at",
+            "implementing_unit", "cooperating_agencies", "total_cost",
+            "description", "objectives", "beneficiaries", "expected_outcomes", "expected_impacts",
+            "proposal_submitted_on", "proposal_reviewed_on", "proposal_approved_on", "reviewing_body",
+            "created_at",
         ]
 
     def validate_sdgs(self, value):
@@ -107,6 +110,26 @@ class StudySerializer(serializers.ModelSerializer):
 
 
 class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
+    responsible_detail = LeadSerializer(source="responsible", read_only=True)
+
     class Meta:
         model = WorkPlanMilestone
-        fields = ["id", "project", "title", "target_date", "status", "remarks", "created_at"]
+        fields = [
+            "id", "project", "title", "start_date", "target_date", "status", "objective", "deliverable",
+            "responsible", "responsible_detail", "remarks", "created_at",
+        ]
+
+    def validate(self, attrs):
+        start = attrs.get("start_date", getattr(self.instance, "start_date", None))
+        target = attrs.get("target_date", getattr(self.instance, "target_date", None))
+        if start and target and start > target:
+            raise serializers.ValidationError({"start_date": "Start date cannot be after the target date."})
+        return attrs
+
+
+class ProjectStatusHistorySerializer(serializers.ModelSerializer):
+    changed_by_email = serializers.EmailField(source="changed_by.email", read_only=True)
+
+    class Meta:
+        model = ProjectStatusHistory
+        fields = ["id", "project", "from_status", "to_status", "remarks", "changed_by", "changed_by_email", "changed_at"]

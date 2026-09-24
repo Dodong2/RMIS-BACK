@@ -105,3 +105,28 @@ class GeneratedReportLogListView(generics.ListAPIView):
     queryset = GeneratedReportLog.objects.all()
     serializer_class = GeneratedReportLogSerializer
     permission_classes = [HasRole(REPORT_LOG_VIEW_ROLES)]
+
+
+MODULE_REPORTS = {
+    "financial": ("Financial / Procurement Report", services.financial_report, True),
+    "compliance": ("Compliance Report", services.compliance_report, False),
+    "personnel": ("Personnel and Task Report", services.personnel_report, False),
+    "outputs": ("Research Outputs (6Ps) Report", services.outputs_report, False),
+}
+
+
+class ModuleReportView(APIView):
+    """GET reports/<financial|compliance|personnel|outputs>/?file_format=&campus=&funding_type="""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, report_type):
+        if report_type not in MODULE_REPORTS:
+            return Response({"detail": "Unknown report type."}, status=404)
+        title, builder, needs_user = MODULE_REPORTS[report_type]
+        filters = {"campus": request.query_params.get("campus"), "funding_type": request.query_params.get("funding_type")}
+        data = builder(request.user, **filters) if needs_user else builder(**filters)
+        response, error = build_report_response(request, report_type, title, data, filters=filters)
+        if error:
+            return Response({"detail": error}, status=400)
+        return response

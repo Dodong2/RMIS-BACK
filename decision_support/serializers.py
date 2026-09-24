@@ -1,8 +1,11 @@
 from rest_framework import serializers
 
-from .models import AHPMatrixRun, AHPPairwiseComparison, DecisionCriterion, FundingRecommendationRun, ProjectScore
+from .models import (
+    AHPMatrixRun, AHPPairwiseComparison, DecisionCriterion, DecisionRecord, FundingRecommendationRun, ProjectScore,
+)
 
 DSS_ROLES = ["system_admin", "drd", "vprei"]
+DECISION_ROLES = DSS_ROLES + ["university_admin"]  # final approval: University President
 
 
 class DecisionCriterionSerializer(serializers.ModelSerializer):
@@ -42,3 +45,16 @@ class FundingRecommendationRunSerializer(serializers.ModelSerializer):
         model = FundingRecommendationRun
         fields = ["id", "ahp_run", "label", "funding_type_filter", "campus_filter", "created_by", "created_at", "scores"]
         read_only_fields = ["created_by"]
+
+
+class DecisionRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DecisionRecord
+        fields = ["id", "run", "project", "decision", "indicative_amount", "rationale", "reference_number", "decided_by", "decided_at"]
+        read_only_fields = ["run", "decided_by", "decided_at"]
+
+    def validate_project(self, project):
+        run = self.context["run"]
+        if not run.scores.filter(project=project).exists():
+            raise serializers.ValidationError("Project was not ranked in this recommendation run.")
+        return project

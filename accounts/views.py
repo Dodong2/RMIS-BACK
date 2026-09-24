@@ -173,15 +173,61 @@ class UpdateUserRoleView(APIView):
  
  
 class ToggleUserActiveView(APIView):
+    """Kept for the existing frontend: flips active <-> suspended. A deactivated account can't be toggled back."""
+
     permission_classes = [HasRole(["system_admin"])]
- 
+
     def patch(self, request, user_id):
         user = get_object_or_404(User, id=user_id, is_pending_role=False)
-        user.is_active = not user.is_active
-        user.save()
- 
-        return Response({"detail": "Activated." if user.is_active else "Deactivated.", "is_active": user.is_active})
-    
+        if user.account_status == "deactivated":
+            return Response({"detail": "Account is deactivated and can't be reactivated."}, status=400)
+        user.account_status = "suspended" if user.is_active else "active"
+        user.is_active = user.account_status == "active"
+        user.save(update_fields=["account_status", "is_active"])
+        return Response({"detail": "Activated." if user.is_active else "Suspended.", "is_active": user.is_active,
+                         "account_status": user.account_status})
+
+
+def active_responsibilities(user):
+    """What must be handed over (via the personnel-change workflow) before a permanent deactivation."""
+    from datetime import date
+    from django.db.models import Q
+    from personnel.models import ProjectAssignment
+
+    today = date.today()
+    return {
+        "programs": user.led_programs.filter(status="active").count(),
+        "projects": user.led_projects.filter(status="active").count(),
+        "studies": user.led_studies.filter(status="active").count(),
+        "assignments": ProjectAssignment.objects.filter(user=user).filter(Q(end_date__isnull=True) | Q(end_date__gte=today)).count(),
+    }
+
+
+class UserAccountStatusView(APIView):
+    """POST {"action": "suspend" | "reactivate" | "deactivate"}."""
+
+    permission_classes = [HasRole(["system_admin"])]
+
+    def post(self, request, user_id):
+        user = get_object_or_404(User, id=user_id, is_pending_role=False)
+        action = request.data.get("action")
+        if action not in ("suspend", "reactivate", "deactivate"):
+            return Response({"action": "must be 'suspend', 'reactivate', or 'deactivate'."}, status=400)
+        if user.account_status == "deactivated":
+            return Response({"detail": "Account is already deactivated (permanent)."}, status=400)
+        if action == "deactivate":
+            pending = {k: v for k, v in active_responsibilities(user).items() if v}
+            if pending:
+                return Response({
+                    "detail": "Hand over this user's active leadership/assignments through a personnel change first.",
+                    "active": pending,
+                }, status=400)
+        user.account_status = {"suspend": "suspended", "reactivate": "active", "deactivate": "deactivated"}[action]
+        user.is_active = user.account_status == "active"
+        user.save(update_fields=["account_status", "is_active"])
+        return Response({"id": user.id, "account_status": user.account_status, "is_active": user.is_active})
+
+
 class UsersByRoleView(generics.ListAPIView):
     serializer_class = UserListSerializer
     permission_classes = [HasRole(["system_admin", "crc_chair"])]

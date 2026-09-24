@@ -141,3 +141,63 @@ class RenewalApplication(models.Model):
 
     def __str__(self):
         return f"{self.project.project_code} renewal Y{self.application_year}"
+
+
+class ExtensionRequest(models.Model):
+    """
+    Request to extend a project's end date (Manual Art. III 1.3a): endorsed by the DRD
+    (or the campus coordinator), approved by the University President, and it must be
+    approved at least one month before the expected termination date.
+    """
+
+    STATUS_CHOICES = (
+        ("pending", "Pending Endorsement"),
+        ("endorsed", "Endorsed"),
+        ("approved", "Approved"),
+        ("denied", "Denied"),
+    )
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="extension_requests")
+    current_end_date = models.DateField(editable=False)
+    requested_end_date = models.DateField()
+    justification = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="extension_requests_submitted")
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    endorsed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="extension_requests_endorsed"
+    )
+    endorsed_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="extension_requests_decided"
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+    remarks = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"{self.project} extension to {self.requested_end_date} ({self.status})"
+
+
+class EvaluationCriterion(models.Model):
+    """Configurable annual-evaluation rubric line (client clarification Q9: the panel's actual rubric /
+    Manual Appendix B wasn't provided, so criteria + weights are entered by the evaluation panel)."""
+
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    weight = models.PositiveSmallIntegerField(help_text="Percent; active criteria must total 100")
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.weight}%)"
+
+
+class EvaluationScore(models.Model):
+    evaluation = models.ForeignKey(ProjectEvaluation, on_delete=models.CASCADE, related_name="scores")
+    criterion = models.ForeignKey(EvaluationCriterion, on_delete=models.PROTECT, related_name="scores")
+    score = models.DecimalField(max_digits=5, decimal_places=2, help_text="0-100")
+    remarks = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["evaluation", "criterion"], name="unique_evaluation_criterion_score"),
+        ]

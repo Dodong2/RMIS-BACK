@@ -2,14 +2,14 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import HasRole
+from accounts.permissions import BudgetScopedMixin, HasRole
 from .models import LineItem, LineItemBudget
 from .serializers import CERTIFY_ROLES, LineItemBudgetSerializer, LineItemSerializer, certify_budget
 
 MANAGE_ROLES = ["system_admin", "finance_budget", "procurement_officer_lib"]
 
 
-class BudgetListCreateView(generics.ListCreateAPIView):
+class BudgetListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
     serializer_class = LineItemBudgetSerializer
 
     def get_queryset(self):
@@ -25,13 +25,14 @@ class BudgetListCreateView(generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class BudgetDetailView(generics.RetrieveAPIView):
+class BudgetDetailView(BudgetScopedMixin, generics.RetrieveAPIView):
     queryset = LineItemBudget.objects.select_related("project")
     serializer_class = LineItemBudgetSerializer
     permission_classes = [permissions.IsAuthenticated]
 
 
-class LineItemListCreateView(generics.ListCreateAPIView):
+class LineItemListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
+    project_lookup = "budget__project"
     serializer_class = LineItemSerializer
 
     def get_queryset(self):
@@ -53,7 +54,8 @@ class LineItemListCreateView(generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class LineItemDetailView(generics.RetrieveUpdateDestroyAPIView):
+class LineItemDetailView(BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    project_lookup = "budget__project"
     queryset = LineItem.objects.all()
     serializer_class = LineItemSerializer
 

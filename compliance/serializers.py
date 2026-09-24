@@ -1,6 +1,8 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
+    ComplianceRequirement,
     AIUseDeclaration,
     ConflictOfInterestDisclosure,
     EthicsReviewReference,
@@ -9,6 +11,8 @@ from .models import (
 )
 
 MANAGE_ROLES = ["system_admin", "riuh"]
+# Leaders encode compliance records; RIUH verifies (client clarification Q1a).
+ENCODE_ROLES = MANAGE_ROLES + ["program_leader", "project_leader", "study_leader"]
 
 
 def validate_study_belongs_to_project(attrs, instance):
@@ -24,9 +28,9 @@ class EthicsReviewReferenceSerializer(serializers.ModelSerializer):
         model = EthicsReviewReference
         fields = [
             "id", "project", "study", "review_body", "reference_number", "status",
-            "decision_date", "remarks", "recorded_by", "created_at",
+            "decision_date", "remarks", "recorded_by", "created_at", "verified_by", "verified_at",
         ]
-        read_only_fields = ["recorded_by"]
+        read_only_fields = ["recorded_by", "verified_by", "verified_at"]
 
     def validate(self, attrs):
         return validate_study_belongs_to_project(attrs, self.instance)
@@ -37,9 +41,9 @@ class SimilarityCheckRecordSerializer(serializers.ModelSerializer):
         model = SimilarityCheckRecord
         fields = [
             "id", "project", "study", "document_type", "document_title", "similarity_index",
-            "is_within_threshold", "software_used", "checked_on", "recorded_by", "created_at",
+            "is_within_threshold", "software_used", "checked_on", "recorded_by", "created_at", "verified_by", "verified_at",
         ]
-        read_only_fields = ["is_within_threshold", "recorded_by"]
+        read_only_fields = ["is_within_threshold", "recorded_by", "verified_by", "verified_at"]
 
     def validate(self, attrs):
         return validate_study_belongs_to_project(attrs, self.instance)
@@ -50,9 +54,9 @@ class AIUseDeclarationSerializer(serializers.ModelSerializer):
         model = AIUseDeclaration
         fields = [
             "id", "project", "study", "declared_by", "tool_name", "purpose",
-            "extent", "declared_on", "created_at",
+            "extent", "declared_on", "created_at", "verified_by", "verified_at",
         ]
-        read_only_fields = ["declared_by"]
+        read_only_fields = ["declared_by", "verified_by", "verified_at"]
 
     def validate(self, attrs):
         return validate_study_belongs_to_project(attrs, self.instance)
@@ -63,9 +67,9 @@ class ConflictOfInterestDisclosureSerializer(serializers.ModelSerializer):
         model = ConflictOfInterestDisclosure
         fields = [
             "id", "project", "discloser", "description", "mitigation_measures",
-            "status", "disclosed_on", "recorded_by", "created_at",
+            "status", "disclosed_on", "recorded_by", "created_at", "verified_by", "verified_at",
         ]
-        read_only_fields = ["recorded_by"]
+        read_only_fields = ["recorded_by", "verified_by", "verified_at"]
 
 
 class MisconductCaseReferenceSerializer(serializers.ModelSerializer):
@@ -82,4 +86,26 @@ class MisconductCaseReferenceSerializer(serializers.ModelSerializer):
         subject_name = attrs.get("subject_name", getattr(self.instance, "subject_name", ""))
         if not subject and not subject_name:
             raise serializers.ValidationError("Provide either subject (system user) or subject_name.")
+        return attrs
+
+
+class ComplianceRequirementSerializer(serializers.ModelSerializer):
+    is_overdue = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ComplianceRequirement
+        fields = [
+            "id", "project", "title", "description", "responsible", "deadline", "status", "is_overdue",
+            "document", "submitted_at", "review_remarks", "reviewed_by", "reviewed_at", "created_by", "created_at",
+        ]
+        read_only_fields = ["status", "submitted_at", "review_remarks", "reviewed_by", "reviewed_at", "created_by"]
+
+    def get_is_overdue(self, obj):
+        return obj.status in ("pending", "returned") and obj.deadline < timezone.localdate()
+
+    def validate(self, attrs):
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        document = attrs.get("document", getattr(self.instance, "document", None))
+        if document and document.project_id != project.id:
+            raise serializers.ValidationError({"document": "Document belongs to a different project."})
         return attrs

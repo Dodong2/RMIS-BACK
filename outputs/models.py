@@ -119,3 +119,43 @@ class CreativeWorkRecord(models.Model):
 
     def __str__(self):
         return self.title
+
+
+SIX_PS = (
+    ("publications", "Publications"),
+    ("patents", "Patents / IP"),
+    ("products", "Products"),
+    ("people_services", "People Services"),
+    ("places_partnerships", "Places and Partnerships"),
+    ("policies", "Policies"),
+)
+
+
+class ExpectedOutput(models.Model):
+    """Expected deliverable per DOST 6Ps category (client clarification Q11 — DOST standard, RDO to confirm).
+    Actual count is computed from PublicationRecord / IPRecord for publications/patents, and entered
+    manually for the other four Ps, which have no dedicated record type in RMIS."""
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="expected_outputs")
+    category = models.CharField(max_length=30, choices=SIX_PS)
+    description = models.CharField(max_length=300)
+    target_count = models.PositiveIntegerField(default=1)
+    manual_actual_count = models.PositiveIntegerField(default=0, help_text="Used for products/people/places/policies")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.project.project_code}: {self.get_category_display()} x{self.target_count}"
+
+
+class ProjectOutcome(models.Model):
+    """Observed outcome or impact of a project (DPMIS-based spec ROM-07)."""
+
+    KIND_CHOICES = (("outcome", "Outcome"), ("impact", "Impact"))
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="outcomes")
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    description = models.TextField()
+    observed_on = models.DateField(null=True, blank=True)
+    evidence = models.TextField(blank=True, help_text="Where this is documented (report, MOA, news, etc.)")
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="outcomes_recorded")
+    created_at = models.DateTimeField(auto_now_add=True)

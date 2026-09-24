@@ -7,18 +7,27 @@ from rest_framework.views import APIView
 from accounts.permissions import HasRole
 from research_projects.models import Project
 
-from .models import MidtermReport, MonthlyProgressReport, ProjectEvaluation, RenewalApplication, TerminalReport
+from .models import (
+    EvaluationCriterion, ExtensionRequest, MidtermReport, MonthlyProgressReport, ProjectEvaluation, RenewalApplication, TerminalReport,
+)
 from .serializers import (
     EVALUATION_PANEL_ROLES,
+    EXTENSION_APPROVE_ROLES,
+    EXTENSION_ENDORSE_ROLES,
+    EXTENSION_REQUEST_ROLES,
     RENEWAL_DECISION_ROLES,
     REPORT_ROLES,
     TERMINAL_CERTIFY_ROLES,
+    EvaluationCriterionSerializer,
+    EvaluationScoreSerializer,
+    ExtensionRequestSerializer,
     MidtermReportSerializer,
     MonthlyProgressReportSerializer,
     ProjectEvaluationSerializer,
     ProjectMonitoringStatusSerializer,
     RenewalApplicationSerializer,
     TerminalReportSerializer,
+    extension_deadline_passed,
 )
 
 
@@ -121,6 +130,84 @@ class RenewalApplicationDecideView(APIView):
         application.decided_at = timezone.now()
         application.save()
         return Response(RenewalApplicationSerializer(application).data)
+
+
+class EvaluationCriterionListCreateView(RoleWritesMixin, generics.ListCreateAPIView):
+    write_roles = EVALUATION_PANEL_ROLES
+    queryset = EvaluationCriterion.objects.order_by("-is_active", "id")
+    serializer_class = EvaluationCriterionSerializer
+
+
+class EvaluationCriterionDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIView):
+    write_roles = EVALUATION_PANEL_ROLES
+    queryset = EvaluationCriterion.objects.all()
+    serializer_class = EvaluationCriterionSerializer
+
+
+class EvaluationScoreView(RoleWritesMixin, generics.ListCreateAPIView):
+    """GET the scores of one evaluation; POST {criterion, score, remarks} creates or replaces that criterion's score."""
+
+    write_roles = EVALUATION_PANEL_ROLES
+    serializer_class = EvaluationScoreSerializer
+
+    def get_queryset(self):
+        return get_object_or_404(ProjectEvaluation, pk=self.kwargs["pk"]).scores.select_related("criterion")
+
+    def create(self, request, *args, **kwargs):
+        evaluation = get_object_or_404(ProjectEvaluation, pk=self.kwargs["pk"])
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        score, _ = evaluation.scores.update_or_create(
+            criterion=data["criterion"], defaults={"score": data["score"], "remarks": data.get("remarks", "")},
+        )
+        return Response(EvaluationScoreSerializer(score).data, status=status.HTTP_201_CREATED)
+
+
+class ExtensionRequestListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
+    queryset = ExtensionRequest.objects.select_related("project").order_by("-submitted_at")
+    serializer_class = ExtensionRequestSerializer
+    write_roles = EXTENSION_REQUEST_ROLES
+
+    def perform_create(self, serializer):
+        project = serializer.validated_data["project"]
+        serializer.save(submitted_by=self.request.user, current_end_date=project.target_end_date)
+
+
+class ExtensionRequestActionView(APIView):
+    """POST {"action": "endorse" | "approve" | "deny", "remarks": ...}. Approval moves Project.target_end_date."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        extension = get_object_or_404(ExtensionRequest.objects.select_related("project"), pk=pk)
+        action = request.data.get("action")
+        user_role = request.user.role.code if request.user.role else None
+        allowed = {"endorse": EXTENSION_ENDORSE_ROLES, "approve": EXTENSION_APPROVE_ROLES, "deny": EXTENSION_APPROVE_ROLES}
+        if action not in allowed:
+            return Response({"action": "must be 'endorse', 'approve', or 'deny'."}, status=status.HTTP_400_BAD_REQUEST)
+        if user_role not in allowed[action]:
+            return Response({"detail": f"You may not {action} extension requests."}, status=status.HTTP_403_FORBIDDEN)
+        expected = "pending" if action == "endorse" else "endorsed"
+        if extension.status != expected:
+            return Response({"detail": f"Only a '{expected}' request can be {action}d."}, status=status.HTTP_400_BAD_REQUEST)
+        if action == "approve" and extension_deadline_passed(extension.project):
+            return Response(
+                {"detail": "Too late: an extension must be approved at least one month before termination."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        now = timezone.now()
+        extension.remarks = request.data.get("remarks", extension.remarks)
+        if action == "endorse":
+            extension.status, extension.endorsed_by, extension.endorsed_at = "endorsed", request.user, now
+        else:
+            extension.status = "approved" if action == "approve" else "denied"
+            extension.decided_by, extension.decided_at = request.user, now
+        extension.save()
+        if action == "approve":
+            Project.objects.filter(pk=extension.project_id).update(target_end_date=extension.requested_end_date)
+        return Response(ExtensionRequestSerializer(extension).data)
 
 
 class ProjectMonitoringStatusView(APIView):

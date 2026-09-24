@@ -2,7 +2,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import LineItem, LineItemBudget
+from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, LineItem, LineItemBudget
 
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
 
@@ -10,7 +10,10 @@ CERTIFY_ROLES = ["system_admin", "finance_budget"]
 class LineItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = LineItem
-        fields = ["id", "budget", "category", "description", "amount", "is_app_flagged", "created_at"]
+        fields = [
+            "id", "budget", "category", "description", "amount", "fiscal_year", "funding_source", "is_counterpart",
+            "is_app_flagged", "created_at",
+        ]
         read_only_fields = ["is_app_flagged"]
 
     def validate(self, attrs):
@@ -23,17 +26,26 @@ class LineItemSerializer(serializers.ModelSerializer):
 class LineItemBudgetSerializer(serializers.ModelSerializer):
     line_items = LineItemSerializer(many=True, read_only=True)
     total_amount = serializers.SerializerMethodField()
+    exceeds_dry_cap = serializers.SerializerMethodField()
 
     class Meta:
         model = LineItemBudget
         fields = [
             "id", "project", "version_number", "is_current", "status",
-            "certified_by", "certified_at", "created_at", "line_items", "total_amount",
+            "certified_by", "certified_at", "created_at", "line_items", "total_amount", "exceeds_dry_cap",
         ]
         read_only_fields = ["version_number", "is_current", "status", "certified_by", "certified_at"]
 
     def get_total_amount(self, obj):
         return obj.line_items.aggregate(total=Sum("amount"))["total"] or 0
+
+    def get_exceeds_dry_cap(self, obj):
+        """Warning only: institutional dry research over the Manual's P100k/year cap (per fiscal year if set)."""
+        project = obj.project
+        if project.funding_type != "institutional" or not project.is_dry_research:
+            return False
+        per_year = obj.line_items.values("fiscal_year").annotate(total=Sum("amount"))
+        return any(row["total"] > INSTITUTIONAL_DRY_RESEARCH_CAP for row in per_year)
 
     def create(self, validated_data):
         project = validated_data["project"]

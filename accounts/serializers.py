@@ -14,7 +14,7 @@ class CustomUserDetailsSerializer(UserDetailsSerializer):
     is_pending_role = serializers.BooleanField(read_only=True)
 
     class Meta(UserDetailsSerializer.Meta):
-        fields = UserDetailsSerializer.Meta.fields + ("role", "is_pending_role", "is_active")
+        fields = UserDetailsSerializer.Meta.fields + ("role", "is_pending_role", "is_active", "office", "position")
 
 
 class PendingUserSerializer(serializers.ModelSerializer):
@@ -30,7 +30,7 @@ class UserListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "email", "role", "is_active", "date_joined"]
+        fields = ["id", "email", "role", "office", "position", "is_active", "account_status", "date_joined"]
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

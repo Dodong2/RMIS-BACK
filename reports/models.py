@@ -6,6 +6,10 @@ REPORT_TYPE_CHOICES = (
     ("appendix_f", "Appendix F - Terminal Report"),
     ("appendix_g", "Appendix G - R&D Accomplishment Report"),
     ("project_list", "Custom Filtered Project List"),
+    ("financial", "Financial / Procurement Report"),
+    ("compliance", "Compliance Report"),
+    ("personnel", "Personnel and Task Report"),
+    ("outputs", "Research Outputs (6Ps) Report"),
 )
 FORMAT_CHOICES = (("csv", "CSV"), ("xlsx", "XLSX"), ("pdf", "PDF"), ("docx", "DOCX"))
 

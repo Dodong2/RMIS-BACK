@@ -18,4 +18,5 @@ urlpatterns = [
     path("api/decision-support/", include("decision_support.urls")),
     path("api/risk/", include("risk_indicators.urls")),
     path("api/reports/", include("reports.urls")),
+    path("api/budget-sync/", include("budget_sync.urls")),
 ]

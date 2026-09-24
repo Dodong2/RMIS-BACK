@@ -7,12 +7,14 @@ from accounts.permissions import HasRole
 from research_projects.models import Project
 
 from . import services
-from .models import AHPMatrixRun, AHPPairwiseComparison, DecisionCriterion, FundingRecommendationRun
+from .models import AHPMatrixRun, AHPPairwiseComparison, DecisionCriterion, DecisionRecord, FundingRecommendationRun
 from .serializers import (
+    DECISION_ROLES,
     DSS_ROLES,
     AHPMatrixRunSerializer,
     AHPPairwiseComparisonSerializer,
     DecisionCriterionSerializer,
+    DecisionRecordSerializer,
     FundingRecommendationRunSerializer,
 )
 
@@ -175,3 +177,29 @@ class SensitivityAnalysisView(APIView):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(result)
+
+
+class DecisionRecordView(RoleWritesMixin, generics.ListCreateAPIView):
+    """GET decisions on a recommendation run; POST {project, decision, indicative_amount?, rationale, reference_number}
+    records (or replaces) the decision for one ranked project."""
+
+    write_roles = DECISION_ROLES
+    serializer_class = DecisionRecordSerializer
+
+    def get_run(self):
+        return get_object_or_404(FundingRecommendationRun, pk=self.kwargs["pk"])
+
+    def get_queryset(self):
+        return self.get_run().decisions.select_related("project").order_by("project_id")
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "run": self.get_run()}
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        record, _ = DecisionRecord.objects.update_or_create(
+            run=self.get_run(), project=data.pop("project"), defaults={**data, "decided_by": request.user},
+        )
+        return Response(DecisionRecordSerializer(record).data, status=status.HTTP_201_CREATED)

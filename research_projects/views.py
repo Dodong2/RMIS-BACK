@@ -1,7 +1,11 @@
+from datetime import date
+
 from rest_framework import generics, permissions
 from accounts.permissions import HasRole
-from .models import Program, Project, Study, WorkPlanMilestone
-from .serializers import ProgramSerializer, ProjectSerializer, StudySerializer, WorkPlanMilestoneSerializer
+from .models import Program, Project, ProjectStatusHistory, Study, WorkPlanMilestone
+from .serializers import (
+    ProgramSerializer, ProjectSerializer, ProjectStatusHistorySerializer, StudySerializer, WorkPlanMilestoneSerializer,
+)
 
 REGISTRATION_ROLES = ["system_admin", "crc_chair"]
 
@@ -45,6 +49,23 @@ class ProjectDetailView(generics.RetrieveUpdateAPIView):
             return [HasRole(REGISTRATION_ROLES)]
         return [permissions.IsAuthenticated()]
 
+    def perform_update(self, serializer):
+        old_status = serializer.instance.status
+        project = serializer.save()
+        if project.status != old_status:
+            ProjectStatusHistory.objects.create(
+                project=project, from_status=old_status, to_status=project.status,
+                remarks=self.request.data.get("status_remarks", ""), changed_by=self.request.user,
+            )
+
+
+class ProjectStatusHistoryView(generics.ListAPIView):
+    serializer_class = ProjectStatusHistorySerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return ProjectStatusHistory.objects.filter(project_id=self.kwargs["pk"]).select_related("changed_by").order_by("-changed_at", "-id")
+
 
 class StudyListCreateView(generics.ListCreateAPIView):
     serializer_class = StudySerializer
@@ -76,10 +97,12 @@ class MilestoneListCreateView(generics.ListCreateAPIView):
     serializer_class = WorkPlanMilestoneSerializer
 
     def get_queryset(self):
-        qs = WorkPlanMilestone.objects.all().order_by("target_date")
+        qs = WorkPlanMilestone.objects.select_related("responsible").order_by("target_date")
         project_id = self.request.query_params.get("project")
         if project_id:
             qs = qs.filter(project_id=project_id)
+        if self.request.query_params.get("delayed") == "true":
+            qs = qs.filter(target_date__lt=date.today()).exclude(status="done")
         return qs
 
     def get_permissions(self):

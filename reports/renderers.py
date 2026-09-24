@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 
 CONTENT_TYPES = {
     "csv": "text/csv",
@@ -41,7 +42,7 @@ def render_xlsx(title, data):
     rows, fieldnames = normalize_to_rows(data)
     wb = Workbook()
     ws = wb.active
-    ws.title = title[:31] or "Report"
+    ws.title = re.sub(r"[\[\]:*?/\\]", "-", title)[:31] or "Report"  # Excel forbids []:*?/\ in sheet names
     ws.append(fieldnames)
     for row in rows:
         ws.append([row[f] for f in fieldnames])

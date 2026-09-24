@@ -28,6 +28,16 @@ class Document(models.Model):
         ("manuscript", "Manuscript"),
         ("other", "Other"),
     )
+    REVIEW_CHOICES = (
+        ("pending", "Pending Review"),
+        ("approved", "Approved"),
+        ("returned", "Returned for Revision"),
+    )
+    SENSITIVITY_CHOICES = (
+        ("project_team", "Project Team"),
+        ("financial", "Financial"),
+        ("restricted", "Restricted"),
+    )
     STAGE_CHOICES = (
         ("inception", "Inception"),
         ("midterm", "Midterm"),
@@ -39,6 +49,15 @@ class Document(models.Model):
     study = models.ForeignKey(Study, on_delete=models.CASCADE, null=True, blank=True, related_name="documents")
     document_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
     stage = models.CharField(max_length=20, choices=STAGE_CHOICES, blank=True)
+    # Client clarification Q8: access = role + scope + sensitivity level.
+    sensitivity = models.CharField(max_length=20, choices=SENSITIVITY_CHOICES, default="project_team")
+    # Upload -> Classify -> Version -> Review/Approve -> Store (DPMIS-based spec Module 8 workflow).
+    review_status = models.CharField(max_length=20, choices=REVIEW_CHOICES, default="pending")
+    review_remarks = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="documents_reviewed"
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
 
     version_number = models.PositiveIntegerField(editable=False)
     is_current = models.BooleanField(default=True, editable=False)

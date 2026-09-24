@@ -3,6 +3,7 @@ from .views import (
     AssignmentDetailView,
     AssignmentListCreateView,
     ClearanceView,
+    CollaborationView,
     CompleteChangeView,
     LeaderAssignmentView,
     LeaderLoadView,
@@ -12,6 +13,8 @@ from .views import (
     StaffProfileListCreateView,
     TaskDetailView,
     TaskListCreateView,
+    TaskUpdateListCreateView,
+    WorkloadView,
 )
 
 urlpatterns = [
@@ -23,6 +26,9 @@ urlpatterns = [
     path("assignments/<int:pk>/", AssignmentDetailView.as_view()),
     path("tasks/", TaskListCreateView.as_view()),
     path("tasks/<int:pk>/", TaskDetailView.as_view()),
+    path("tasks/<int:pk>/updates/", TaskUpdateListCreateView.as_view()),
+    path("workload/", WorkloadView.as_view()),
+    path("collaboration/", CollaborationView.as_view()),
     path("changes/", PersonnelChangeListCreateView.as_view()),
     path("changes/<int:pk>/", PersonnelChangeDetailView.as_view()),
     path("changes/<int:pk>/clearance/", ClearanceView.as_view()),

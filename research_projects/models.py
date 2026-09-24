@@ -88,10 +88,38 @@ class Project(models.Model):
     cooperating_agencies = models.TextField(blank=True)
     total_cost = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
 
+    # DPMIS-based spec PM-03 project details
+    description = models.TextField(blank=True)
+    objectives = models.TextField(blank=True)
+    beneficiaries = models.TextField(blank=True)
+    expected_outcomes = models.TextField(blank=True)
+    expected_impacts = models.TextField(blank=True)
+
+    # Pre-RMIS proposal pipeline, reference only — RMIS starts at NTP (Module Structure docx, Module 2),
+    # so Proposal -> Review -> Approval is recorded here, not run as an in-system workflow.
+    proposal_submitted_on = models.DateField(null=True, blank=True)
+    proposal_reviewed_on = models.DateField(null=True, blank=True)
+    proposal_approved_on = models.DateField(null=True, blank=True)
+    reviewing_body = models.CharField(max_length=150, blank=True, help_text="e.g. ITRC, ETRC, CRC")
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.project_code} - {self.title}"
+
+
+class ProjectStatusHistory(models.Model):
+    """One row per Project.status change (DPMIS-based spec PM-09), written by ProjectDetailView."""
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="status_history")
+    from_status = models.CharField(max_length=20, choices=Project.STATUS_CHOICES)
+    to_status = models.CharField(max_length=20, choices=Project.STATUS_CHOICES)
+    remarks = models.TextField(blank=True)
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="project_status_changes")
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.project.project_code}: {self.from_status} -> {self.to_status}"
 
 
 class Study(models.Model):
@@ -117,8 +145,14 @@ class WorkPlanMilestone(models.Model):
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="milestones")
     title = models.CharField(max_length=300)
+    start_date = models.DateField(null=True, blank=True)
     target_date = models.DateField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    objective = models.TextField(blank=True, help_text="Which project objective this activity serves")
+    deliverable = models.TextField(blank=True)
+    responsible = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="milestones_responsible"
+    )
     remarks = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

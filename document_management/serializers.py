@@ -19,9 +19,10 @@ class DocumentListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
         fields = [
-            "id", "project", "study", "document_type", "stage", "version_number", "is_current",
+            "id", "project", "study", "document_type", "stage", "sensitivity", "version_number", "is_current",
             "file_name", "file_size", "content_type",
             "is_archived", "retention_until", "uploaded_by", "uploaded_at",
+            "review_status", "review_remarks", "reviewed_by", "reviewed_at",
         ]
 
 
@@ -32,13 +33,15 @@ class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
         fields = [
-            "id", "project", "study", "document_type", "stage", "version_number", "is_current",
+            "id", "project", "study", "document_type", "stage", "sensitivity", "version_number", "is_current",
             "file", "file_name", "file_size", "content_type", "download_url",
             "is_archived", "retention_until", "uploaded_by", "uploaded_at",
+            "review_status", "review_remarks", "reviewed_by", "reviewed_at",
         ]
         read_only_fields = [
             "version_number", "is_current", "file_name", "file_size", "content_type",
             "is_archived", "retention_until", "uploaded_by",
+            "review_status", "review_remarks", "reviewed_by", "reviewed_at",
         ]
 
     def get_download_url(self, obj):
@@ -55,6 +58,8 @@ class DocumentSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        if "sensitivity" not in self.initial_data and validated_data["document_type"] == "lib":
+            validated_data["sensitivity"] = "financial"
         file_obj = validated_data.pop("file")
         project = validated_data["project"]
         document_type = validated_data["document_type"]

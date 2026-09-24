@@ -24,6 +24,17 @@ class User(AbstractUser):
     supabase_uid = models.CharField(max_length=64, blank=True, null=True, unique=True)
     is_pending_role = models.BooleanField(default=True)
     registration_method = models.CharField(max_length=10, choices=REGISTRATION_METHOD_CHOICES, default="email")
+    # Suspend = temporary login block, role/assignments kept (e.g. leave, sabbatical).
+    # Deactivate = permanent end of the account (retired, resigned) — no hard delete.
+    # Login itself is still gated by is_active, which these keep in sync (client clarification Q3).
+    ACCOUNT_STATUS_CHOICES = (
+        ("active", "Active"),
+        ("suspended", "Suspended"),
+        ("deactivated", "Deactivated"),
+    )
+    account_status = models.CharField(max_length=20, choices=ACCOUNT_STATUS_CHOICES, default="active")
+    office = models.CharField(max_length=150, blank=True, help_text="Office/department (college, unit, campus office)")
+    position = models.CharField(max_length=150, blank=True, help_text="Plantilla/academic position, e.g. Associate Professor II")
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]

@@ -3,6 +3,19 @@ from django.db import models
 
 from research_projects.models import Project, Study
 
+class RIUHVerifiable(models.Model):
+    """Encoded by the Project/Study Leader, verified by RIUH at college level (client clarification Q1a).
+    Any later edit clears the verification so RIUH re-checks it."""
+
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="%(class)s_verified"
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+
 SIMILARITY_THRESHOLDS = {
     "published_article": 15,
     "thesis_dissertation": 20,
@@ -10,14 +23,15 @@ SIMILARITY_THRESHOLDS = {
 }
 
 
-class EthicsReviewReference(models.Model):
-    """Status reference for an external review body's decision. RMIS logs the
-    outcome only — TRC/Ethics Review Board/IACUC conduct the actual review."""
+class EthicsReviewReference(RIUHVerifiable):
+    """Review-status reference (status only, no internal adjudication). LSPU has no
+    formal Ethics Committee (client alignment doc, Module 6 "Compliance Tracking"),
+    so review bodies are generic technical/integrity/external reviewers."""
 
     BODY_CHOICES = (
         ("trc", "Technical Review Committee"),
-        ("ethics_review_board", "Ethics Review Board"),
-        ("iacuc", "Institutional Animal Care and Use Committee"),
+        ("integrity_review", "Research Integrity Review"),
+        ("external_review", "External Review Body"),
     )
     STATUS_CHOICES = (
         ("pending", "Pending"),
@@ -41,7 +55,7 @@ class EthicsReviewReference(models.Model):
         return f"{self.get_review_body_display()} - {self.project} ({self.status})"
 
 
-class SimilarityCheckRecord(models.Model):
+class SimilarityCheckRecord(RIUHVerifiable):
     DOCUMENT_TYPE_CHOICES = (
         ("published_article", "Article for Publication"),
         ("thesis_dissertation", "Thesis/Dissertation"),
@@ -68,7 +82,7 @@ class SimilarityCheckRecord(models.Model):
         return f"{self.document_title or self.project} - {self.similarity_index}%"
 
 
-class AIUseDeclaration(models.Model):
+class AIUseDeclaration(RIUHVerifiable):
     """AI declaration form, per the Manual's 'Use of Generative AI' section."""
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="ai_use_declarations")
@@ -84,7 +98,7 @@ class AIUseDeclaration(models.Model):
         return f"{self.tool_name} - {self.project} ({self.declared_by.email})"
 
 
-class ConflictOfInterestDisclosure(models.Model):
+class ConflictOfInterestDisclosure(RIUHVerifiable):
     STATUS_CHOICES = (
         ("disclosed", "Disclosed"),
         ("under_review", "Under Review"),
@@ -138,3 +152,38 @@ class MisconductCaseReference(models.Model):
 
     def __str__(self):
         return f"{self.get_case_type_display()} - {self.subject_name or self.subject} ({self.status})"
+
+
+class ComplianceRequirement(models.Model):
+    """A generic, project-specific compliance requirement with an owner and deadline
+    (DPMIS-based spec CM-01..06): Requirement -> Assignment -> Submission -> Review ->
+    Compliant / Returned / Non-Compliant."""
+
+    STATUS_CHOICES = (
+        ("pending", "Pending"),
+        ("submitted", "Submitted"),
+        ("compliant", "Compliant"),
+        ("returned", "Returned"),
+        ("non_compliant", "Non-Compliant"),
+    )
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="compliance_requirements")
+    title = models.CharField(max_length=300)
+    description = models.TextField(blank=True)
+    responsible = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="compliance_requirements")
+    deadline = models.DateField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    document = models.ForeignKey(
+        "document_management.Document", on_delete=models.SET_NULL, null=True, blank=True, related_name="compliance_requirements"
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    review_remarks = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="compliance_requirements_reviewed"
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="compliance_requirements_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.project.project_code}: {self.title} ({self.status})"

@@ -99,3 +99,31 @@ class AppendixGExportView(APIView):
                 year=int(year) if year else None,
             )
         )
+
+
+class ForecastingDashboardView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response(services.compute_forecasting_dashboard(
+            campus=request.query_params.get("campus"), funding_type=request.query_params.get("funding_type"),
+        ))
+
+
+class FundingAllocationDashboardView(APIView):
+    """?run=<id> (defaults to the latest recommendation run)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        data = services.compute_funding_allocation_dashboard(run_id=request.query_params.get("run"))
+        if data is None:
+            return Response({"detail": "No funding recommendation run found."}, status=404)
+        return Response(data)
+
+
+class TaskDashboardView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response(services.compute_task_dashboard(project_id=request.query_params.get("project")))

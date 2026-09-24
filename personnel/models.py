@@ -22,6 +22,9 @@ class ProjectAssignment(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, null=True, blank=True, related_name="assignments")
     study = models.ForeignKey(Study, on_delete=models.CASCADE, null=True, blank=True, related_name="assignments")
     role_label = models.CharField(max_length=120, blank=True)
+    # Home department/college of the member (Objective 1c cross-departmental collaboration).
+    # Defaults to the user's office on create.
+    department = models.CharField(max_length=150, blank=True)
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -54,6 +57,19 @@ class Task(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class TaskUpdate(models.Model):
+    """Progress note on a task (DPMIS-based spec PTM-04); a non-blank new_status also moves the task."""
+
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="updates")
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="task_updates")
+    note = models.TextField()
+    new_status = models.CharField(max_length=20, choices=Task.STATUS_CHOICES, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.task} update by {self.author}"
 
 
 class PersonnelChange(models.Model):

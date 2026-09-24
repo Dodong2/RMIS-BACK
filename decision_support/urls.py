@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    DecisionRecordView,
     AHPComparisonSubmitView,
     AHPMatrixRunDetailView,
     AHPMatrixRunFinalizeView,
@@ -22,4 +23,5 @@ urlpatterns = [
     path("recommendation-runs/trigger/", FundingRecommendationRunTriggerView.as_view()),
     path("recommendation-runs/<int:pk>/", FundingRecommendationRunDetailView.as_view()),
     path("recommendation-runs/<int:pk>/sensitivity/", SensitivityAnalysisView.as_view()),
+    path("recommendation-runs/<int:pk>/decisions/", DecisionRecordView.as_view()),
 ]
