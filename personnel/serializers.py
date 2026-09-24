@@ -9,7 +9,9 @@ from research_projects.serializers import (
     validate_lead_concurrency,
     validate_lead_role,
 )
-from .models import PersonnelChange, ProjectAssignment, PropertyClearance, StaffProfile, Task, TaskUpdate
+from .models import (
+    PersonnelChange, ProjectAssignment, PropertyClearance, StaffProfile, Task, TaskDeliverable, TaskUpdate,
+)
 
 MANAGE_ROLES = ["system_admin", "crc_chair", "drd", "riuh"]
 TASK_ASSIGNER_ROLES = MANAGE_ROLES + ["program_leader", "project_leader", "study_leader"]
@@ -92,21 +94,40 @@ class ProjectAssignmentSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class TaskDeliverableSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskDeliverable
+        fields = ["id", "task", "text", "done"]
+        read_only_fields = ["task"]
+
+
 class TaskSerializer(serializers.ModelSerializer):
     assignee_detail = LeadSerializer(source="assignee", read_only=True)
+    deliverables = TaskDeliverableSerializer(many=True, read_only=True)
+    logged_hours = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
 
     class Meta:
         model = Task
-        fields = ["id", "project", "study", "title", "description", "due_date", "status",
-                  "assignee", "assignee_detail", "assigned_by", "created_at"]
+        fields = ["id", "project", "study", "title", "description", "due_date", "status", "priority",
+                  "estimated_hours", "logged_hours", "tags", "deliverables", "assignee", "assignee_detail", "assigned_by",
+                  "started_at", "completed_at", "created_at"]
         read_only_fields = ["assigned_by"]
+
+    def validate_tags(self, value):
+        if not isinstance(value, list) or not all(isinstance(t, str) and t.strip() for t in value):
+            raise serializers.ValidationError("tags must be a list of non-empty strings.")
+        return sorted({t.strip() for t in value})
 
     def validate(self, attrs):
         user = self.context["request"].user
         if user.role.code not in TASK_ASSIGNER_ROLES:
-            # Assignees may only update the status of their own task.
+            # Assignees may only update the status of their own task, and can't approve their own work:
+            # "done" only comes from a leader/assigner review (client prototype "For Review" column;
+            # MIT proposal: the Project Leader "approves task and activity submissions").
             if not self.instance or self.instance.assignee_id != user.id or set(attrs) - {"status"}:
                 raise serializers.ValidationError("You may only update the status of your own tasks.")
+            if attrs.get("status") == "done":
+                raise serializers.ValidationError({"status": "Submit the task for review; a leader marks it done."})
             return attrs
         study = attrs.get("study", getattr(self.instance, "study", None))
         project = attrs.get("project", getattr(self.instance, "project", None))
@@ -120,7 +141,7 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TaskUpdate
-        fields = ["id", "task", "author", "author_email", "note", "new_status", "created_at"]
+        fields = ["id", "task", "author", "author_email", "note", "kind", "hours", "new_status", "created_at"]
         read_only_fields = ["task", "author"]
 
     def validate(self, attrs):
@@ -128,6 +149,8 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
         task = self.context["task"]
         if user.role.code not in TASK_ASSIGNER_ROLES and task.assignee_id != user.id:
             raise serializers.ValidationError("Only the assignee or a task assigner can post updates on this task.")
+        if attrs.get("new_status") == "done" and user.role.code not in TASK_ASSIGNER_ROLES:
+            raise serializers.ValidationError({"new_status": "Submit the task for review; a leader marks it done."})
         return attrs
 
 

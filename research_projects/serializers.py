@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from accounts.models import User
+from accounts.permissions import ensure_in_scope
 from .models import Program, Project, ProjectStatusHistory, Study, WorkPlanMilestone
 
 
@@ -120,6 +121,7 @@ class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
+        ensure_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
         start = attrs.get("start_date", getattr(self.instance, "start_date", None))
         target = attrs.get("target_date", getattr(self.instance, "target_date", None))
         if start and target and start > target:

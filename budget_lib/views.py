@@ -1,4 +1,5 @@
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -6,7 +7,9 @@ from accounts.permissions import BudgetScopedMixin, HasRole
 from .models import LineItem, LineItemBudget
 from .serializers import CERTIFY_ROLES, LineItemBudgetSerializer, LineItemSerializer, certify_budget
 
-MANAGE_ROLES = ["system_admin", "finance_budget", "procurement_officer_lib"]
+# Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
+# ensure_in_scope. Certification stays with the Budget Officer (CERTIFY_ROLES).
+MANAGE_ROLES = ["system_admin", "finance_budget", "procurement_officer_lib", "program_leader", "project_leader"]
 
 
 class BudgetListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
@@ -63,6 +66,11 @@ class LineItemDetailView(BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIVie
         if self.request.method in ("PUT", "PATCH", "DELETE"):
             return [HasRole(MANAGE_ROLES)]
         return [permissions.IsAuthenticated()]
+
+    def perform_destroy(self, instance):
+        if instance.budget.status == "certified":
+            raise ValidationError("This budget is certified and can no longer be edited.")
+        instance.delete()
 
 
 class CertifyBudgetView(APIView):

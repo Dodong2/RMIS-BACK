@@ -42,6 +42,16 @@ def scoped_projects(user):
     return None
 
 
+def ensure_in_scope(serializer, project):
+    """Serializer-side guard for writes: the request user must have the project in scope."""
+    from rest_framework.exceptions import ValidationError
+
+    request = serializer.context.get("request")
+    projects = scoped_projects(request.user) if request else None
+    if projects is not None and not projects.filter(pk=project.pk).exists():
+        raise ValidationError("This project is outside your scope.")
+
+
 class BudgetScopedMixin:
     """Restricts list and detail lookups to the user's scoped projects. Hooks filter_queryset (used by both
     list() and get_object()) so views with their own get_queryset still get scoped.

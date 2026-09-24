@@ -319,3 +319,71 @@ Legend: ✅ answered by the Module Structure docx · 🟡 partly answered / lean
   Director/Admin/Mgmt/Finance/Compliance roles see everything.
 - **Multi-role assignment** (Module 1: "multi-role/multi-scope assignment"). `User.role` is a single
   FK. Needs a decision: is one role per user OK for the thesis?
+
+## Audit: RMIS_Clarification_Answers.docx vs built backend (2026-09-24, after commit 80cf678)
+Carl: this doc is the project core and must be followed ("must na makikita"). ✅ built · 🟡 partial · ❌ missing
+
+| Q | Client answer | Status |
+|---|---|---|
+| 1a | Leaders encode compliance, RIUH verifies; CRC read-only campus-wide | ✅ encode/verify · 🟡 CRC campus limit not applied (reads are open to all) |
+| 1b | VPREI with DRD; BOR = reference no. only; record who approved | ✅ |
+| 1c | Scope levels: University / Campus (CRC, Finance, Procurement) / College (RIUH) / own program-project-study / Staff = own tasks | 🟡 only budget endpoints scoped; campus via `User.scope` (no API to set it); ❌ RIUH college (no college field); other modules unscoped |
+| 2 | **Capstone scope: seeded Role_Permission table + read-only permission view screen + user role/scope assignment screen** | ❌ skipped as "future work" under the earlier minimal-RBAC decision — CONFLICTS with the doc |
+| 3 | Suspend ≠ deactivate; suspend keeps assignments, **can assign a temporary replacement**; deactivate via personnel change first | ✅ states + deactivate guard · ❌ temporary replacement |
+| 4 | Internal auto ID + manual unique code encoded by CRC, format validation | ✅ · 🟡 format pending RDO |
+| 5 | Proposal flow outside RMIS, read-only reference | ✅ |
+| 6 | Ranking + score; optional advisory peso (rank-ordered fulfillment, LIB + ₱100k dry cap), confirm | ✅ ranking · ❌ indicative allocation (client to confirm) |
+| 7 | 5×5, 4 bands, actions (reminder to PL / notice to RIUH+CRC / escalate to VP-DRD) | ✅ scoring · 🟡 actions are text only, no notification |
+| 8 | Role + scope + sensitivity; **limited per-doc sharing with expiry, logged** | ✅ sensitivity · ❌ per-doc sharing |
+| 9 | Rubric configurable until Appendix B arrives | ✅ |
+| 10 | 14 indicators | 🟡 13/14 — AI-use ~20% threshold not tracked (`AIUseDeclaration` has no percentage field) |
+| 11 | DOST 6Ps | ✅ |
+| 12 | View: Program Leader roll-up, Project Leader own, Study Leader **own study allocation**, Staff none, Procurement = campus procurement items, Finance = campus. Request: **Project Leader encodes LIB**, procurement, realignment | 🟡 Study Leader sees whole project budget (line items aren't per study) · ❌ **Project Leader can't encode LIB** (`budget_lib` MANAGE_ROLES = admin/finance/procurement) |
+
+Also found while auditing (Module Structure M2 lists leaders as work-plan users): **leaders can't create milestones** —
+milestone writes are `system_admin`/`crc_chair` only.
+
+Task gaps come from the client UI prototype, not this doc (`rmis-frontend/University Research Operations Website/src/components/PersonnelTasks.tsx`):
+For Review status + leader approval (also backed by MIT proposal: "Project Leader approves task and activity submissions"),
+priority, estimated/logged hours, started/completed dates, update kinds (update/comment/blocker/completion),
+deliverables checklist, tags.
+
+## Phase 3 plan — close the Clarification-Answers audit + prototype task gaps (2026-09-24)
+Tasks and acceptance criteria: `tasks/todo.md` → "Phase 3". Order is bottom-up and risk-first.
+
+### Architecture decisions
+- **Q2 permission table without a new permission class.** Add `Permission(code, name, module)` + `RolePermission(role, permission)`
+  in `accounts`. A data migration seeds them from today's ~33 `*_ROLES` constants: one code per constant, e.g.
+  `budget_lib MANAGE_ROLES` → `budget.manage`, so behavior is identical on day one. `HasRole` gets one change: if it's given
+  a string, it's a permission code resolved from the DB at request time; a list still works as before. This keeps the
+  CLAUDE.md rule "reuse HasRole". Inline checks (`user_role not in X`) switch to `role_can(user, code)`.
+  Parity is proven with a script that checks old-constant membership == DB lookup for every code × 12 roles.
+- **Screens are the frontend's job.** The backend adds `GET admin/permissions/` (read-only role×permission matrix) and
+  `PATCH admin/users/<id>/scope/` (campus / college). Role assignment already exists (`update-role/`). Changes are
+  audit-logged by the existing `AuditLogMiddleware`. No permission editor (client: "future enhancement").
+- **Scope (Q1c).** Add `Project.college` (the RIUH college level; also unblocks best-performer-by-college). Reuse
+  `accounts.permissions.scoped_projects()` everywhere reads are project-bound. Leaders and staff see only their own
+  program/project/study (staff: assigned). Campus roles use `scope["campus"]` and RIUH uses `scope["college"]` when set.
+  University-wide roles stay unrestricted. Study-leader budget view = line items tagged to their study (`LineItem.study`, nullable).
+- **Tasks follow the client prototype** (`PersonnelTasks.tsx`) mapped onto existing codes: pending = To Do, done = Completed,
+  plus a new `for_review`. Assignees can't jump to `done`; leaders/assigners approve or return.
+- **No push notifications (no Celery).** Q7's "notice to RIUH/CRC / escalate to VP-DRD" becomes a live
+  `risk/alerts/` inbox for the requesting user's role and scope, the same live-computed pattern as the risk dashboard.
+
+### Dependency order
+P1–P4 (independent, small) → **Q2 gate** → P5 → P6/P7/P8 → P9 → P11 (needs P5 for scope codes) → P12a/b/c → P13–P15.
+P11–P15 don't strictly need Q2. If Carl says no to Q2, skip P5–P10 and the rest still applies.
+
+### Risks
+| Risk | Impact | Mitigation |
+|---|---|---|
+| Permission conversion silently changes who can do what | High | Seed from the exact constants + parity script before/after each app group |
+| Scope on every module makes frontend pages show fewer rows for leaders/staff | High | Client-mandated (Q1c). Listed per endpoint in handover for the frontend |
+| Assignees lose "mark done" (For Review) | Med | Client prototype + MIT proposal require approval. Frontend kanban gets a For Review column |
+| DB lookup per request for permissions | Low | One small indexed query; fine at capstone scale |
+
+### Open questions
+1. **Q2 go/no-go.** It reverses the earlier "minimal RBAC" decision; the doc says it's capstone scope.
+2. Q6 indicative peso allocation: the client itself says "i-confirm". Not planned until confirmed.
+3. `Project.college` values: free text (like `campus`) or a fixed list of LSPU colleges (CA, CAS, CBAA, CCJE, CCS, CFND,
+   CIHMT, COE, CTE… as seen in the Budget Office summary sheet)? Default: free text.

@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
+    AI_CONTENT_THRESHOLD,
     ComplianceRequirement,
     AIUseDeclaration,
     ConflictOfInterestDisclosure,
@@ -50,11 +51,21 @@ class SimilarityCheckRecordSerializer(serializers.ModelSerializer):
 
 
 class AIUseDeclarationSerializer(serializers.ModelSerializer):
+    exceeds_ai_threshold = serializers.SerializerMethodField()
+
+    def get_exceeds_ai_threshold(self, obj):
+        return obj.ai_content_pct is not None and obj.ai_content_pct > AI_CONTENT_THRESHOLD
+
+    def validate_ai_content_pct(self, value):
+        if value is not None and not 0 <= value <= 100:
+            raise serializers.ValidationError("Must be between 0 and 100.")
+        return value
+
     class Meta:
         model = AIUseDeclaration
         fields = [
             "id", "project", "study", "declared_by", "tool_name", "purpose",
-            "extent", "declared_on", "created_at", "verified_by", "verified_at",
+            "extent", "ai_content_pct", "exceeds_ai_threshold", "declared_on", "created_at", "verified_by", "verified_at",
         ]
         read_only_fields = ["declared_by", "verified_by", "verified_at"]
 

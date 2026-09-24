@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from compliance.models import SimilarityCheckRecord
+from compliance.models import AI_CONTENT_THRESHOLD, AIUseDeclaration, SimilarityCheckRecord
 from financial_monitoring.models import PROCUREMENT_DELAY_DAYS, BudgetRealignment, ProcurementRequest
 from forecasting.models import ForecastRun
 
@@ -47,6 +47,10 @@ def compute_indicators(project):
             from_line_item__budget__project=project, created_at__year=today.year,
         ).exclude(status="rejected").count(),
         "procurement_delayed": delayed_procurement,
+        "ai_declarations": {
+            "total": AIUseDeclaration.objects.filter(project=project).count(),
+            "over_threshold": AIUseDeclaration.objects.filter(project=project, ai_content_pct__gt=AI_CONTENT_THRESHOLD).count(),
+        },
         "similarity_checks": {"total": similarity.count(), "over_threshold": similarity.filter(is_within_threshold=False).count()},
         "outputs_6ps": {"target": outputs_target, "expected_output_rows": project.expected_outputs.count()},
         "forecast_overrun_risk": latest_forecast.is_overrun_risk if latest_forecast else None,

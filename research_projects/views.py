@@ -1,13 +1,15 @@
 from datetime import date
 
 from rest_framework import generics, permissions
-from accounts.permissions import HasRole
+from accounts.permissions import HasRole, ensure_in_scope
 from .models import Program, Project, ProjectStatusHistory, Study, WorkPlanMilestone
 from .serializers import (
     ProgramSerializer, ProjectSerializer, ProjectStatusHistorySerializer, StudySerializer, WorkPlanMilestoneSerializer,
 )
 
 REGISTRATION_ROLES = ["system_admin", "crc_chair"]
+# Leaders capture their own work plan (Module Structure M2); ensure_in_scope limits them to their projects.
+MILESTONE_ROLES = REGISTRATION_ROLES + ["program_leader", "project_leader", "study_leader"]
 
 
 class ProgramListCreateView(generics.ListCreateAPIView):
@@ -107,7 +109,7 @@ class MilestoneListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(REGISTRATION_ROLES)]
+            return [HasRole(MILESTONE_ROLES)]
         return [permissions.IsAuthenticated()]
 
 
@@ -117,5 +119,9 @@ class MilestoneDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH", "DELETE"):
-            return [HasRole(REGISTRATION_ROLES)]
+            return [HasRole(MILESTONE_ROLES)]
         return [permissions.IsAuthenticated()]
+
+    def perform_destroy(self, instance):
+        ensure_in_scope(self.get_serializer(), instance.project)
+        instance.delete()

@@ -1,15 +1,16 @@
 from datetime import date
 
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.permissions import HasRole
 from research_projects.models import Project
-from .models import PersonnelChange, ProjectAssignment, StaffProfile, Task, TaskUpdate
+from .models import PersonnelChange, ProjectAssignment, StaffProfile, Task, TaskDeliverable, TaskUpdate
 from .serializers import (
     CLEARANCE_ROLES,
     MANAGE_ROLES,
@@ -19,6 +20,7 @@ from .serializers import (
     ProjectAssignmentSerializer,
     PropertyClearanceSerializer,
     StaffProfileSerializer,
+    TaskDeliverableSerializer,
     TaskSerializer,
     TaskUpdateSerializer,
     complete_change,
@@ -53,8 +55,8 @@ class LeaderLoadView(APIView):
         users = User.objects.filter(
             is_active=True, role__code__in=["program_leader", "project_leader"],
         ).annotate(
-            programs=Count("led_programs", filter=Q(led_programs__status="active"), distinct=True),
-            projects=Count("led_projects", filter=Q(led_projects__status="active"), distinct=True),
+            programs=Count("led_programs", filter=Q(led_programs__status="active")),
+            projects=Count("led_projects", filter=Q(led_projects__status="active")),
         )
         return Response([
             {
@@ -108,12 +110,14 @@ class TaskListCreateView(generics.ListCreateAPIView):
         qs = Task.objects.all().order_by("due_date", "-created_at")
         if user.role and user.role.code == "project_staff":
             qs = qs.filter(assignee=user)
-        for param in ("project", "study", "assignee", "status"):
+        for param in ("project", "study", "assignee", "status", "priority"):
             value = self.request.query_params.get(param)
             if value:
-                qs = qs.filter(**{param if param == "status" else f"{param}_id": value})
+                qs = qs.filter(**{param if param in ("status", "priority") else f"{param}_id": value})
         if self.request.query_params.get("overdue") == "true":
             qs = qs.filter(due_date__lt=date.today()).exclude(status="done")
+        if self.request.query_params.get("tag"):
+            qs = qs.filter(tags__contains=[self.request.query_params["tag"]])
         return qs
 
     def perform_create(self, serializer):
@@ -163,7 +167,66 @@ class TaskUpdateListCreateView(generics.ListCreateAPIView):
         update = serializer.save(task=task, author=self.request.user)
         if update.new_status and update.new_status != task.status:
             task.status = update.new_status
-            task.save(update_fields=["status"])
+            task.save(update_fields=["status", "started_at", "completed_at"])
+
+
+def _can_touch_task(user, task):
+    return user.role and (user.role.code in TASK_ASSIGNER_ROLES or task.assignee_id == user.id)
+
+
+class TaskDeliverableListCreateView(generics.ListCreateAPIView):
+    """Checklist of one task. Assigners add items; the assignee (or an assigner) ticks them off."""
+
+    serializer_class = TaskDeliverableSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [HasRole(TASK_ASSIGNER_ROLES)]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        return TaskDeliverable.objects.filter(task_id=self.kwargs["pk"]).order_by("id")
+
+    def perform_create(self, serializer):
+        serializer.save(task=generics.get_object_or_404(Task, pk=self.kwargs["pk"]))
+
+
+class TaskDeliverableDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = TaskDeliverable.objects.select_related("task")
+    serializer_class = TaskDeliverableSerializer
+
+    def get_permissions(self):
+        if self.request.method == "DELETE":
+            return [HasRole(TASK_ASSIGNER_ROLES)]
+        return [permissions.IsAuthenticated()]
+
+    def perform_update(self, serializer):
+        if not _can_touch_task(self.request.user, serializer.instance.task):
+            raise PermissionDenied("Only the assignee or a task assigner can update this checklist.")
+        serializer.save()
+
+
+class TaskReviewView(APIView):
+    """Leader/assigner decision on a task in For Review: POST {"action": "approve" | "return", "remarks": ...}.
+    Approve -> done, return -> in_progress; recorded as a TaskUpdate so it shows in the task's history."""
+
+    permission_classes = [HasRole(TASK_ASSIGNER_ROLES)]
+
+    def post(self, request, pk):
+        task = generics.get_object_or_404(Task, pk=pk)
+        action = request.data.get("action")
+        if action not in ("approve", "return"):
+            return Response({"action": "must be 'approve' or 'return'."}, status=status.HTTP_400_BAD_REQUEST)
+        if task.status != "for_review":
+            return Response({"detail": "Only a task in For Review can be approved or returned."}, status=status.HTTP_400_BAD_REQUEST)
+        task.status = "done" if action == "approve" else "in_progress"
+        task.save()
+        remarks = request.data.get("remarks", "")
+        TaskUpdate.objects.create(
+            task=task, author=request.user, new_status=task.status,
+            note=remarks or ("Approved." if action == "approve" else "Returned for revision."),
+        )
+        return Response(TaskSerializer(task, context={"request": request}).data)
 
 
 class WorkloadView(APIView):
@@ -182,11 +245,16 @@ class WorkloadView(APIView):
                 open=Count("id", filter=~Q(status="done")),
                 overdue=Count("id", filter=Q(due_date__lt=date.today()) & ~Q(status="done")),
                 done=Count("id", filter=Q(status="done")),
+                estimated_hours=Sum("estimated_hours"),
             )
             .order_by("-open", "assignee__email")
         )
+        logged = dict(
+            TaskUpdate.objects.filter(task__in=tasks).values("task__assignee").annotate(total=Sum("hours")).values_list("task__assignee", "total")
+        )
         return Response([
-            {"assignee": r["assignee"], "email": r["assignee__email"], "open": r["open"], "overdue": r["overdue"], "done": r["done"]}
+            {"assignee": r["assignee"], "email": r["assignee__email"], "open": r["open"], "overdue": r["overdue"], "done": r["done"],
+             "estimated_hours": r["estimated_hours"] or 0, "logged_hours": logged.get(r["assignee"]) or 0}
             for r in rows
         ])
 

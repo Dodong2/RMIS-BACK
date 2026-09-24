@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from research_projects.models import Program, Project, Study
 
@@ -41,8 +42,15 @@ class Task(models.Model):
     STATUS_CHOICES = (
         ("pending", "Pending"),
         ("in_progress", "In Progress"),
+        ("for_review", "For Review"),
         ("done", "Done"),
         ("blocked", "Blocked"),
+    )
+    PRIORITY_CHOICES = (
+        ("critical", "Critical"),
+        ("high", "High"),
+        ("medium", "Medium"),
+        ("low", "Low"),
     )
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="tasks")
@@ -51,12 +59,39 @@ class Task(models.Model):
     description = models.TextField(blank=True)
     due_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default="medium")
+    estimated_hours = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    tags = models.JSONField(default=list, blank=True)
     assignee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="tasks")
     assigned_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="tasks_assigned")
+    started_at = models.DateTimeField(null=True, blank=True, editable=False)
+    completed_at = models.DateTimeField(null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        # Timestamps follow the status, whichever path changed it (PATCH, task update, or review).
+        if self.status != "pending" and self.started_at is None:
+            self.started_at = timezone.now()
+        self.completed_at = (self.completed_at or timezone.now()) if self.status == "done" else None
+        super().save(*args, **kwargs)
+
+    @property
+    def logged_hours(self):
+        return self.updates.aggregate(total=models.Sum("hours"))["total"] or 0
 
     def __str__(self):
         return self.title
+
+
+class TaskDeliverable(models.Model):
+    """Checklist item inside a task (client prototype task detail)."""
+
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="deliverables")
+    text = models.CharField(max_length=300)
+    done = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.text
 
 
 class TaskUpdate(models.Model):
@@ -64,7 +99,16 @@ class TaskUpdate(models.Model):
 
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="updates")
     author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="task_updates")
+    KIND_CHOICES = (
+        ("update", "Update"),
+        ("comment", "Comment"),
+        ("blocker", "Blocker"),
+        ("completion", "Completion"),
+    )
+
     note = models.TextField()
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default="update")
+    hours = models.DecimalField(max_digits=6, decimal_places=2, default=0, help_text="Hours worked since the last update")
     new_status = models.CharField(max_length=20, choices=Task.STATUS_CHOICES, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

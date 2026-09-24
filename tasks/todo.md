@@ -239,3 +239,110 @@ Every task: check + makemigrations --check + rolled-back smoke test.
 - [ ] `.claude/rules/handover.md`: new module numbering, role mapping, new endpoints, and a note
       that the "Module 15 pending" entry is superseded (Reports = spec Module 15)
 - [ ] memory `module15-pending-and-thesis-objectives` updated
+
+
+---
+
+## Phase 3 — Clarification-Answers audit + prototype task gaps (planned 2026-09-24)
+Context/decisions: `tasks/plan.md` → "Audit" + "Phase 3 plan". Standard verification applies to every task
+(check + makemigrations --check + rolled-back smoke test via `APIClient(HTTP_HOST="localhost")`).
+
+### P1: Project Leader encodes LIB (Q12) ✅ DONE
+**Result:** Program/project leaders added to budget_lib `MANAGE_ROLES`, and `ensure_in_scope` (new, shared in `accounts/permissions.py`; financial_monitoring's copy was replaced by it) limits them to their own projects. Also closed a hole: DELETE of a line item on a certified budget → 400 (it skipped serializer validation before).
+Add program/project leaders to budget writes (create budget, add/edit/delete line items on **draft** budgets), limited to
+their own projects via `scoped_projects`. Certification stays `finance_budget`/`system_admin`.
+- [ ] Leader creates a budget + line items on own project → 201; on another project → 400
+- [ ] Certified budget still locked for everyone
+**Files:** `budget_lib/views.py`, `budget_lib/serializers.py` · **Scope:** S
+
+### P2: Leaders write work-plan milestones (Module Structure M2) ✅ DONE
+**Result:** `MILESTONE_ROLES` = registration roles + leaders. Serializer `validate` + `perform_destroy` enforce scope (another leader's milestone → 400).
+Program/project/study leaders create/edit milestones on their own projects; `system_admin`/`crc_chair` unchanged.
+- [ ] Leader → own project 201, other project 400; staff 403
+**Files:** `research_projects/views.py`, `serializers.py` · **Scope:** S
+
+### P3a: Task "For Review" + approval ✅ DONE
+**Result:** personnel 0004. `Task.save()` sets `started_at`/`completed_at` from the status on every path. Assignee → done is refused (PATCH and task updates). `tasks/<id>/review/` approve/return is logged as a TaskUpdate.
+Add `for_review` status, `started_at`, `completed_at` (auto-set on transitions). Assignee may move to in_progress/blocked/for_review
+only; `tasks/<id>/review/` {approve|return, remarks} by `TASK_ASSIGNER_ROLES` → done / in_progress (logged as a TaskUpdate).
+- [ ] Assignee PATCH status=done → 400; → for_review OK
+- [ ] Approve sets done + completed_at; return sets in_progress
+**Files:** `personnel/models.py`, `serializers.py`, `views.py`, `urls.py`, migration · **Scope:** M
+
+### P3b: Task priority + hours + update kinds ✅ DONE
+**Result:** personnel 0005. `priority`, `estimated_hours`, `TaskUpdate.kind` + `hours`, computed `logged_hours`, `?priority=`, and est/logged hours in the workload endpoint.
+`priority` (critical/high/medium/low, default medium), `estimated_hours`; `TaskUpdate.hours` + `kind`
+(update/comment/blocker/completion); `logged_hours` = sum of update hours (computed). Workload endpoint adds est/logged hours.
+- [ ] logged_hours sums correctly; `?priority=` filter; workload shows hours
+**Files:** same as P3a · **Dependencies:** P3a · **Scope:** S
+
+### P3c: Task deliverables checklist + tags ✅ DONE
+**Result:** personnel 0006. `tasks/<id>/deliverables/` (assigners add), `task-deliverables/<id>/` (assignee/assigner tick, assigners delete). `tags` normalized (deduped, sorted), `?tag=`.
+`TaskDeliverable` (task, text, done) with `tasks/<id>/deliverables/` CRUD; `tags` JSON list + `?tag=` filter.
+- [ ] Checklist toggling works; tag filter works
+**Dependencies:** P3a · **Scope:** S
+
+### P4: AI-use percentage (Q10 "~20% AI") ✅ DONE
+**Result:** compliance 0004. `ai_content_pct` (0–100) + `exceeds_ai_threshold` (> `AI_CONTENT_THRESHOLD` = 20) + `ai_declarations` in the monitoring indicators.
+`AIUseDeclaration.ai_content_pct` (nullable decimal) + computed `exceeds_ai_threshold` (> 20, constant) + count in the indicators block.
+- [ ] 25% → flagged; 10% → not; null → not
+**Files:** `compliance/models.py`, `serializers.py`, `monitoring/indicators.py`, migration · **Scope:** S
+
+### Checkpoint 3A
+- [x] check clean, all smoke tests rolled back · [x] Carl: Q2 GO, college = free text, **system_admin must keep full access everywhere (demo)** — verified: every gate list includes system_admin, and system_admin is never scoped
+
+### P5 (Q2 — gated): Permission + RolePermission tables, seeded
+Models + data migration seeding one code per current `*_ROLES` constant; `HasRole("code")` resolves from DB; `role_can(user, code)`;
+`scripts/permission_parity.py` compares each constant vs DB for all 12 roles.
+- [ ] Seed contains every constant; parity script = 0 differences
+- [ ] `HasRole([...])` list form still works (no call site changed yet)
+**Files:** `accounts/models.py`, `accounts/permissions.py`, migration, parity script · **Scope:** M
+
+### P6 / P7 / P8 (gated): Convert call sites to permission codes
+P6: accounts, research_projects, personnel, budget_lib, financial_monitoring, budget_sync · P7: compliance, document_management, outputs,
+monitoring · P8: forecasting, decision_support, dashboard, risk_indicators, reports + the 15 inline checks.
+- [ ] No `*_ROLES` list used for gating in the group (constants kept only as seed source)
+- [ ] Parity script still 0 differences; the regression GET sweep has no 5xx/400
+**Scope:** M each
+
+### P9 (gated): Permission view + scope assignment API
+`GET admin/permissions/` (matrix: permission × roles, read-only, system_admin); `PATCH admin/users/<id>/scope/` {campus, college}.
+- [ ] Matrix lists every seeded code; scope PATCH validates keys; non-admin 403
+**Scope:** S
+
+### P10 (gated): Update CLAUDE.md convention (HasRole now takes a permission code; permission list lives in the DB)
+**Scope:** XS
+
+### Checkpoint 3B
+- [ ] Parity 0 diffs · [ ] regression sweep clean · [ ] commit
+
+### P11: `Project.college` + college/campus scope in `scoped_projects`; `LineItem.study` for Study Leader allocation
+- [ ] riuh with scope.college sees only that college's projects; study leader sees only own-study line items
+**Files:** `research_projects/models.py`, `budget_lib/models.py`, `accounts/permissions.py`, migrations · **Scope:** M
+
+### P12a / P12b / P12c: Apply scope beyond budget (Q1c)
+P12a: projects/programs/studies, milestones, monitoring, outputs · P12b: compliance, documents (combine with sensitivity) ·
+P12c: dashboards, risk dashboard/status, reports, forecasting list.
+- [ ] project_leader lists only own projects in each module; drd sees all; out-of-scope detail → 404
+**Scope:** M each
+
+### P13: Temporary replacement while a leader is suspended (Q3)
+`Project.acting_lead` (+ `acting_until`), set via the `account-status` suspend action or project PATCH; `scoped_projects` includes acting leads.
+- [ ] Suspend lead with acting_lead → acting lead sees/manages the project; reactivation clears it
+**Scope:** S
+
+### P14: Limited per-document sharing (Q8)
+`DocumentShare(document, user, granted_by, expires_at)`; project leader grants; `visible_documents` includes unexpired shares.
+- [ ] Shared user sees doc until expiry; non-leader grant → 403
+**Scope:** S
+
+### P15: Risk alerts inbox (Q7 actions)
+`GET risk/alerts/`: leaders get medium+ on own projects, RIUH/CRC get high+ in scope, VP/DRD get critical. Live, no push.
+- [ ] Each role gets the right band set for a constructed high + critical project
+**Scope:** S
+
+### Checkpoint 3C
+- [ ] Regression sweep clean · [ ] handover (frontend impact list per endpoint) · [ ] commit
+
+### Not planned (client says confirm first)
+- Q6 indicative peso allocation · project-code format validation (Q4)

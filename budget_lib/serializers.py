@@ -2,6 +2,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
+from accounts.permissions import ensure_in_scope
 from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, LineItem, LineItemBudget
 
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
@@ -18,6 +19,7 @@ class LineItemSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         budget = attrs.get("budget", getattr(self.instance, "budget", None))
+        ensure_in_scope(self, budget.project)
         if budget.status == "certified":
             raise serializers.ValidationError("This budget is certified and can no longer be edited.")
         return attrs
@@ -38,6 +40,10 @@ class LineItemBudgetSerializer(serializers.ModelSerializer):
 
     def get_total_amount(self, obj):
         return obj.line_items.aggregate(total=Sum("amount"))["total"] or 0
+
+    def validate_project(self, project):
+        ensure_in_scope(self, project)
+        return project
 
     def get_exceeds_dry_cap(self, obj):
         """Warning only: institutional dry research over the Manual's P100k/year cap (per fiscal year if set)."""

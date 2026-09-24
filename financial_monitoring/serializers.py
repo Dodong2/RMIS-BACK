@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from budget_lib.models import LineItem
-from accounts.permissions import scoped_projects
+from accounts.permissions import ensure_in_scope
 from .models import APPLIED_STATUSES, BudgetRealignment, Disbursement, ProcurementRequest
 
 REALIGNMENT_REQUEST_ROLES = ["system_admin", "project_leader"]
@@ -89,7 +89,7 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         from_item = attrs.get("from_line_item", getattr(self.instance, "from_line_item", None))
-        validate_in_scope(self, from_item)
+        ensure_in_scope(self, from_item.budget.project)
         to_item = attrs.get("to_line_item", getattr(self.instance, "to_line_item", None))
         new_category = attrs.get("new_item_category", "")
         new_description = attrs.get("new_item_description", "")
@@ -174,14 +174,6 @@ def review_realignment(realignment, reviewer, decision, bor_resolution_number=""
     return realignment
 
 
-def validate_in_scope(serializer, line_item):
-    """Leaders may only file requests against projects in their own scope."""
-    request = serializer.context.get("request")
-    projects = scoped_projects(request.user) if request else None
-    if projects is not None and not projects.filter(pk=line_item.budget.project_id).exists():
-        raise serializers.ValidationError("This line item belongs to a project outside your scope.")
-
-
 class ProcurementRequestSerializer(serializers.ModelSerializer):
     project = serializers.IntegerField(source="line_item.budget.project_id", read_only=True)
     routed_to = serializers.CharField(read_only=True)
@@ -196,7 +188,7 @@ class ProcurementRequestSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         line_item = attrs["line_item"]
-        validate_in_scope(self, line_item)
+        ensure_in_scope(self, line_item.budget.project)
         if line_item.budget.status != "certified":
             raise serializers.ValidationError("Procurement can only be requested against a certified budget.")
         open_requests = line_item.procurement_requests.exclude(status__in=("released", "cancelled"))
