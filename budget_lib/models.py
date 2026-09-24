@@ -4,7 +4,6 @@ from django.db import models
 from research_projects.models import Project
 
 APP_FLAG_THRESHOLD = 50000
-INSTITUTIONAL_DRY_RESEARCH_CAP = 100000
 
 
 class LineItemBudget(models.Model):

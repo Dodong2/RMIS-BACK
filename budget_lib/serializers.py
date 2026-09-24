@@ -2,7 +2,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, LineItem, LineItemBudget
+from .models import LineItem, LineItemBudget
 
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
 
@@ -15,21 +15,8 @@ class LineItemSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         budget = attrs.get("budget", getattr(self.instance, "budget", None))
-        amount = attrs.get("amount", getattr(self.instance, "amount", None))
         if budget.status == "certified":
             raise serializers.ValidationError("This budget is certified and can no longer be edited.")
-
-        project = budget.project
-        if project.funding_type == "institutional" and project.is_dry_research:
-            existing = budget.line_items.all()
-            if self.instance:
-                existing = existing.exclude(pk=self.instance.pk)
-            total = (existing.aggregate(total=Sum("amount"))["total"] or 0) + amount
-            if total > INSTITUTIONAL_DRY_RESEARCH_CAP:
-                raise serializers.ValidationError(
-                    f"Total line items would be {total}, exceeding the "
-                    f"{INSTITUTIONAL_DRY_RESEARCH_CAP} cap for institutionally-funded dry research."
-                )
         return attrs
 
 
