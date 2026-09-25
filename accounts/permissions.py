@@ -2,6 +2,9 @@ from rest_framework.permissions import BasePermission
 
 
 class HasRole(BasePermission):
+    """HasRole("budget.certify") checks a permission code against the RolePermission table (client clarification Q2).
+    HasRole([...role codes]) still works as before, until every call site is converted."""
+
     def __init__(self, allowed_codes):
         self.allowed_codes = allowed_codes
 
@@ -10,11 +13,20 @@ class HasRole(BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        return (
-            user.is_authenticated
-            and user.role is not None
-            and user.role.code in self.allowed_codes
-        )
+        if not (user.is_authenticated and user.role is not None):
+            return False
+        if isinstance(self.allowed_codes, str):
+            return role_can(user, self.allowed_codes)
+        return user.role.code in self.allowed_codes
+
+
+def role_can(user, permission_code):
+    """True if the user's role holds this permission code in the DB. For inline checks outside permission_classes."""
+    from accounts.models import RolePermission
+
+    if not user.is_authenticated or user.role_id is None:
+        return False
+    return RolePermission.objects.filter(role_id=user.role_id, permission__code=permission_code).exists()
 
 # Row-level scope for budget/financial data (client clarification Q12, Q1c).
 # Leaders see only projects they lead (directly, or via a study/program they lead); project_staff see

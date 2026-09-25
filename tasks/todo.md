@@ -294,8 +294,8 @@ only; `tasks/<id>/review/` {approve|return, remarks} by `TASK_ASSIGNER_ROLES` �
 ### P5 (Q2 — gated): Permission + RolePermission tables, seeded
 Models + data migration seeding one code per current `*_ROLES` constant; `HasRole("code")` resolves from DB; `role_can(user, code)`;
 `scripts/permission_parity.py` compares each constant vs DB for all 12 roles.
-- [ ] Seed contains every constant; parity script = 0 differences
-- [ ] `HasRole([...])` list form still works (no call site changed yet)
+- [x] Seed contains every constant; parity script = 0 differences (12 roles × 36 codes, 2026-09-25)
+- [x] `HasRole([...])` list form still works (no call site changed yet)
 **Files:** `accounts/models.py`, `accounts/permissions.py`, migration, parity script · **Scope:** M
 
 ### P6 / P7 / P8 (gated): Convert call sites to permission codes

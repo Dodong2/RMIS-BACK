@@ -64,3 +64,26 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.method} {self.path} ({self.status_code}) by {self.actor_id} at {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class Permission(models.Model):
+    """One gated action, e.g. "budget.certify" (client clarification Q2: role -> permission lives in the
+    database, seeded at deployment, viewable — not hardcoded in if-statements)."""
+
+    code = models.CharField(max_length=80, unique=True)
+    module = models.CharField(max_length=50)
+    name = models.CharField(max_length=200)
+
+    def __str__(self):
+        return self.code
+
+
+class RolePermission(models.Model):
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name="role_permissions")
+    permission = models.ForeignKey(Permission, on_delete=models.CASCADE, related_name="role_permissions")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["role", "permission"], name="unique_role_permission")]
+
+    def __str__(self):
+        return f"{self.role.code} -> {self.permission.code}"
