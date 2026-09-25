@@ -12,6 +12,7 @@ from .models import GeneratedReportLog
 from .renderers import CONTENT_TYPES, render
 from .serializers import GeneratedReportLogSerializer
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 REPORT_LOG_VIEW_ROLES = ["system_admin", "riuh", "drd", "vprei"]
 
 
@@ -104,7 +105,7 @@ class ProjectListReportView(APIView):
 class GeneratedReportLogListView(generics.ListAPIView):
     queryset = GeneratedReportLog.objects.all()
     serializer_class = GeneratedReportLogSerializer
-    permission_classes = [HasRole(REPORT_LOG_VIEW_ROLES)]
+    permission_classes = [HasRole("reports.view_logs")]
 
 
 MODULE_REPORTS = {

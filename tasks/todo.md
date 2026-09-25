@@ -301,12 +301,15 @@ Models + data migration seeding one code per current `*_ROLES` constant; `HasRol
 ### P6 / P7 / P8 (gated): Convert call sites to permission codes
 P6: accounts, research_projects, personnel, budget_lib, financial_monitoring, budget_sync · P7: compliance, document_management, outputs,
 monitoring · P8: forecasting, decision_support, dashboard, risk_indicators, reports + the 15 inline checks.
-- [ ] No `*_ROLES` list used for gating in the group (constants kept only as seed source)
-- [ ] Parity script still 0 differences; the regression GET sweep has no 5xx/400
+- [x] No `*_ROLES` list used for gating in the group (constants kept only as seed source)
+- [x] Parity script still 0 differences; the regression GET sweep has no 5xx/400
 - [x] P6 done 2026-09-25: no role-list gates left in its 6 apps; parity 0; role-gate matrix old (c960c3f) vs new identical
   for all 243 route/methods × 12 roles; inline checks match; GET sweep (25 routes × 3 roles) no 5xx/400
 - [x] P7 done 2026-09-25: compliance, document_management, outputs, monitoring (RoleWritesMixin.write_roles → write_permission);
   parity 0; matrix vs 9e8cb84 identical (243); 5 inline checks match; GET sweep (20 routes × 3 roles) no 5xx/400
+- [x] P8 done 2026-09-25: forecasting, decision_support, dashboard, risk_indicators, reports; repo-wide no role-list gates left
+  (remaining role.code uses are identity checks/filters by design); parity 0; matrix vs 5f3410a identical (243);
+  inline checks match; GET sweep (22 routes × 3 roles) no 5xx/400
 **Scope:** M each
 
 ### P9 (gated): Permission view + scope assignment API

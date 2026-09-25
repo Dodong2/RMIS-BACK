@@ -4,6 +4,7 @@ from .models import ProjectRisk, RiskUpdate
 from .services import risk_band
 
 # Spec section 16 authorized users: Project Leader, Research Director, Compliance Officer (mapped to our role codes).
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 RISK_REGISTER_ROLES = ["system_admin", "drd", "vprei", "crc_chair", "riuh", "program_leader", "project_leader"]
 
 

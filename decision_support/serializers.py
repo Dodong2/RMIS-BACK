@@ -4,6 +4,7 @@ from .models import (
     AHPMatrixRun, AHPPairwiseComparison, DecisionCriterion, DecisionRecord, FundingRecommendationRun, ProjectScore,
 )
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 DSS_ROLES = ["system_admin", "drd", "vprei"]
 DECISION_ROLES = DSS_ROLES + ["university_admin"]  # final approval: University President
 

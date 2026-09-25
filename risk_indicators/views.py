@@ -8,14 +8,14 @@ from research_projects.models import Project
 
 from . import services
 from .models import ProjectRisk
-from .serializers import RISK_REGISTER_ROLES, ProjectRiskSerializer, RiskUpdateSerializer
+from .serializers import ProjectRiskSerializer, RiskUpdateSerializer
 
 
 class RegisterWritesMixin:
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
-        return [HasRole(RISK_REGISTER_ROLES)]
+        return [HasRole("risk.manage_register")]
 
 
 class ProjectRiskStatusView(APIView):

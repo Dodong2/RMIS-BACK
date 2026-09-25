@@ -3,7 +3,7 @@ from rest_framework.permissions import BasePermission
 
 class HasRole(BasePermission):
     """HasRole("budget.certify") checks a permission code against the RolePermission table (client clarification Q2).
-    HasRole([...role codes]) still works as before, until every call site is converted."""
+    Every app gates by permission code; the HasRole([...role codes]) list form is kept only for compatibility."""
 
     def __init__(self, allowed_codes):
         self.allowed_codes = allowed_codes

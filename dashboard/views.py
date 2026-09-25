@@ -6,7 +6,7 @@ from accounts.permissions import HasRole
 
 from . import services
 from .models import PlanningTarget
-from .serializers import MANAGE_ROLES, PlanningTargetSerializer
+from .serializers import PlanningTargetSerializer
 
 
 class PlanningTargetListCreateView(generics.ListCreateAPIView):
@@ -15,7 +15,7 @@ class PlanningTargetListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(MANAGE_ROLES)]
+            return [HasRole("dashboard.manage_targets")]
         return [permissions.IsAuthenticated()]
 
     def perform_create(self, serializer):

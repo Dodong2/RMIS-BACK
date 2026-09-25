@@ -3,14 +3,12 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import HasRole
+from accounts.permissions import HasRole, role_can
 from research_projects.models import Project
 
 from . import services
 from .models import AHPMatrixRun, AHPPairwiseComparison, DecisionCriterion, DecisionRecord, FundingRecommendationRun
 from .serializers import (
-    DECISION_ROLES,
-    DSS_ROLES,
     AHPMatrixRunSerializer,
     AHPPairwiseComparisonSerializer,
     DecisionCriterionSerializer,
@@ -20,12 +18,12 @@ from .serializers import (
 
 
 class RoleWritesMixin:
-    write_roles = DSS_ROLES
+    write_permission = "dss.manage"
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
-        return [HasRole(self.write_roles)]
+        return [HasRole(self.write_permission)]
 
 
 class DecisionCriterionListCreateView(RoleWritesMixin, generics.ListCreateAPIView):
@@ -50,8 +48,7 @@ class AHPComparisonSubmitView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
-        user_role = request.user.role.code if request.user.role else None
-        if user_role not in DSS_ROLES:
+        if not role_can(request.user, "dss.manage"):
             return Response(
                 {"detail": "Only DRD/VPREI/system_admin may submit AHP comparisons."}, status=status.HTTP_403_FORBIDDEN
             )
@@ -82,8 +79,7 @@ class AHPMatrixRunFinalizeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
-        user_role = request.user.role.code if request.user.role else None
-        if user_role not in DSS_ROLES:
+        if not role_can(request.user, "dss.manage"):
             return Response(
                 {"detail": "Only DRD/VPREI/system_admin may finalize an AHP run."}, status=status.HTTP_403_FORBIDDEN
             )
@@ -110,8 +106,7 @@ class FundingRecommendationRunTriggerView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        user_role = request.user.role.code if request.user.role else None
-        if user_role not in DSS_ROLES:
+        if not role_can(request.user, "dss.manage"):
             return Response(
                 {"detail": "Only DRD/VPREI/system_admin may run a funding recommendation."}, status=status.HTTP_403_FORBIDDEN
             )
@@ -183,7 +178,7 @@ class DecisionRecordView(RoleWritesMixin, generics.ListCreateAPIView):
     """GET decisions on a recommendation run; POST {project, decision, indicative_amount?, rationale, reference_number}
     records (or replaces) the decision for one ranked project."""
 
-    write_roles = DECISION_ROLES
+    write_permission = "dss.decide"
     serializer_class = DecisionRecordSerializer
 
     def get_run(self):

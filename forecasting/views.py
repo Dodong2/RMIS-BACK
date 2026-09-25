@@ -3,19 +3,19 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.permissions import role_can
 from research_projects.models import Project
 
 from . import services
 from .models import FORECASTABLE_FUNDING_TYPES, ForecastRun
-from .serializers import FORECAST_ROLES, ForecastRunSerializer
+from .serializers import ForecastRunSerializer
 
 
 class ForecastRunTriggerView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        user_role = request.user.role.code if request.user.role else None
-        if user_role not in FORECAST_ROLES:
+        if not role_can(request.user, "forecasting.run"):
             return Response(
                 {"detail": "Only DRD/VPREI/Budget Officer/system_admin may run a forecast."},
                 status=status.HTTP_403_FORBIDDEN,
