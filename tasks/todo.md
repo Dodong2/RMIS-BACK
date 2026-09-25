@@ -319,10 +319,11 @@ monitoring · P8: forecasting, decision_support, dashboard, risk_indicators, rep
 **Scope:** S
 
 ### P10 (gated): Update CLAUDE.md convention (HasRole now takes a permission code; permission list lives in the DB)
+- [x] Done 2026-09-25 (CLAUDE.md conventions + handover.md updated)
 **Scope:** XS
 
 ### Checkpoint 3B
-- [ ] Parity 0 diffs · [ ] regression sweep clean · [ ] commit
+- [x] Parity 0 diffs · [x] regression sweep clean · [x] commit
 
 ### P11: `Project.college` + college/campus scope in `scoped_projects`; `LineItem.study` for Study Leader allocation
 - [ ] riuh with scope.college sees only that college's projects; study leader sees only own-study line items

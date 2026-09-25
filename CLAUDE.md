@@ -15,7 +15,9 @@ Migrations: `python manage.py makemigrations <app> && python manage.py migrate`
 - `research_projects` — Module 2: Program → Project → Study hierarchy, work-plan milestones. (Named `research_projects`, not `projects` — that name conflicts with an existing module, don't rename back.)
 
 ## Conventions
-- Every app that needs role-gated writes uses `accounts.permissions.HasRole([...])`, never a fresh permission class — reuse it.
+- Every app that needs role-gated writes uses `accounts.permissions.HasRole("<permission code>")` (e.g. `HasRole("budget.certify")`), never a fresh permission class — reuse it. Inline checks use `role_can(user, "<code>")`. Role → permission lives in the DB (`Permission`/`RolePermission`, client clarification Q2); don't gate on `*_ROLES` lists — those constants are only the seed source.
+- New permission = add it to `accounts/permission_seed.py`, add a data migration that seeds it (system_admin always included), then run `python scripts/permission_parity.py` (must be 0 differences).
+- Identity checks (`role.code == "project_staff"`, lead-role validation) and row scope (`scoped_projects`, `visible_documents`, `User.scope`) stay role-code based — they aren't permissions.
 - Role codes are fixed (12 total, seeded via `accounts/management/commands/seed_roles.py`): `system_admin, vprei, drd, riuh, crc_chair, finance_budget, procurement_officer_lib, program_leader, project_leader, study_leader, project_staff, university_admin`. Don't invent new codes without checking this file first.
 - New user-facing model fields should be checked against `RMIS_Complete_Module_Structure_FORApproval.docx` and the R&D Manual (both in the `RMIS chap1` folder, add with `/add-dir` when needed) before naming — the client's terminology (e.g. "LSPU Faculty Research Number" for project code) should be preserved.
 - Registration/confirmation email logic lives in `accounts/emails.py` using Brevo's REST API directly (no Django email backend). Reuse `send_brevo_email()`.

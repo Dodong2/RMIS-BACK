@@ -14,7 +14,7 @@ answers to 12 questions). Full plan, decisions, and per-task results: `tasks/pla
 
 **Carl's decisions:** 12 role codes are final (the DPMIS 7 roles are only mapped, see plan.md). Auth/login is unchanged.
 RBAC: a *minimal subset* only (suspend state, budget row-level scope, document sensitivity, compliance
-leader-encode + RIUH-verify). NO DB permission tables, multi-role, or per-doc sharing (future work). The ₱100k dry cap
+leader-encode + RIUH-verify). NO multi-role or per-doc sharing (future work). (DB permission tables were later approved as Q2 on 2026-09-25 and built in Phase 3B — see "Last thing done".) The ₱100k dry cap
 is back as a **non-blocking warning** (`exceeds_dry_cap`). Budget Office sync = XLSX import + reconcile.
 Cross-department = `department` on assignments.
 
@@ -180,15 +180,20 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-09-24: the DPMIS alignment round above (Phase 1 T6–T12 + Phase 2 A–K and T13–T20). Final regression: every
-parameterless GET endpoint + P77's per-project endpoints were hit as system_admin/project_staff/project_leader, with no
-5xx/400 (404/405 only where expected). NOTE for future smoke tests: `APIClient` needs `HTTP_HOST="localhost"`,
+2026-09-25: **Phase 3B (client clarification Q2) — permission table, all committed** (`c960c3f` → `676165a`):
+`Permission`/`RolePermission` seeded with 36 codes (migration `accounts.0008`, frozen from the old `*_ROLES` constants);
+every app now gates with `HasRole("<code>")` / `role_can()`; `GET admin/permissions/` (read-only matrix) and
+`PATCH admin/users/<id>/scope/` {campus, college}. Verified per app group by diffing a role-gate matrix (243 route/methods ×
+12 roles) against the previous commit — identical every time; `scripts/permission_parity.py` = 0 differences.
+`scope.college` is stored but NOT enforced (no `college` field on `Project`) — pending Carl's call.
+Earlier (2026-09-24): the DPMIS alignment round above. NOTE for smoke tests: `APIClient` needs `HTTP_HOST="localhost"`,
 since `ALLOWED_HOSTS` rejects the default `testserver` with a 400 that looks like a pass if you only check for 5xx.
-**Not committed yet** at the time of writing. Check `git status`.
 
 ## Next thing to do in this repo
-1. Commit the round (Carl to OK).
-2. Frontend: wire the new endpoints + the `critical` risk level (see "Frontend impact" above).
+1. Frontend: wire the new endpoints + the `critical` risk level (see "Frontend impact" above), plus the Phase 3B
+   permission-matrix screen (`admin/permissions/`) and user scope assignment (`admin/users/<id>/scope/`; `scope` is
+   now in `admin/users/`). No 403 behavior changed in Phase 3B.
+2. Decide whether RIUH college scoping (Q12) is needed → `Project.college` + `scoped_projects` update.
 3. When the client/RDO answers the "still to confirm" items, adjust the constants (all named, in the respective
    services/models) rather than logic.
 4. Optional: the DPMIS traceability HTML (`docs/dpmis_traceability.html`, T21) for the panel.
