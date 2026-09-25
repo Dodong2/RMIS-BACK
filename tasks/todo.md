@@ -303,6 +303,8 @@ P6: accounts, research_projects, personnel, budget_lib, financial_monitoring, bu
 monitoring · P8: forecasting, decision_support, dashboard, risk_indicators, reports + the 15 inline checks.
 - [ ] No `*_ROLES` list used for gating in the group (constants kept only as seed source)
 - [ ] Parity script still 0 differences; the regression GET sweep has no 5xx/400
+- [x] P6 done 2026-09-25: no role-list gates left in its 6 apps; parity 0; role-gate matrix old (c960c3f) vs new identical
+  for all 243 route/methods × 12 roles; inline checks match; GET sweep (25 routes × 3 roles) no 5xx/400
 **Scope:** M each
 
 ### P9 (gated): Permission view + scope assignment API

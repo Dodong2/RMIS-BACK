@@ -7,14 +7,14 @@ from accounts.permissions import HasRole
 
 from . import services
 from .models import BudgetOfficeImport, BudgetOfficeRecord
-from .serializers import SYNC_ROLES, BudgetOfficeImportSerializer, BudgetOfficeRecordSerializer
+from .serializers import BudgetOfficeImportSerializer, BudgetOfficeRecordSerializer
 
 
 class SyncWritesMixin:
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
-        return [HasRole(SYNC_ROLES)]
+        return [HasRole("budget_sync.manage")]
 
 
 class ImportListCreateView(SyncWritesMixin, generics.ListCreateAPIView):

@@ -8,13 +8,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from accounts.permissions import HasRole
+from accounts.permissions import HasRole, role_can
 from research_projects.models import Project
 from .models import PersonnelChange, ProjectAssignment, StaffProfile, Task, TaskDeliverable, TaskUpdate
 from .serializers import (
-    CLEARANCE_ROLES,
-    MANAGE_ROLES,
-    TASK_ASSIGNER_ROLES,
     LeaderAssignmentSerializer,
     PersonnelChangeSerializer,
     ProjectAssignmentSerializer,
@@ -28,16 +25,16 @@ from .serializers import (
 
 
 class ManageWritesMixin:
-    """Authenticated read, MANAGE_ROLES write."""
+    """Authenticated read, personnel.manage write."""
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
-        return [HasRole(MANAGE_ROLES)]
+        return [HasRole("personnel.manage")]
 
 
 class LeaderAssignmentView(APIView):
-    permission_classes = [HasRole(MANAGE_ROLES)]
+    permission_classes = [HasRole("personnel.manage")]
 
     def post(self, request):
         serializer = LeaderAssignmentSerializer(data=request.data)
@@ -49,7 +46,7 @@ class LeaderAssignmentView(APIView):
 class LeaderLoadView(APIView):
     """Active leadership count per leader vs. the concurrency caps (programs 2, projects 3)."""
 
-    permission_classes = [HasRole(MANAGE_ROLES + ["program_leader", "project_leader"])]
+    permission_classes = [HasRole("personnel.view_leader_load")]
 
     def get(self, request):
         users = User.objects.filter(
@@ -102,7 +99,7 @@ class TaskListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(TASK_ASSIGNER_ROLES)]
+            return [HasRole("personnel.assign_tasks")]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
@@ -130,7 +127,7 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_permissions(self):
         if self.request.method == "DELETE":
-            return [HasRole(TASK_ASSIGNER_ROLES)]
+            return [HasRole("personnel.assign_tasks")]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
@@ -171,7 +168,7 @@ class TaskUpdateListCreateView(generics.ListCreateAPIView):
 
 
 def _can_touch_task(user, task):
-    return user.role and (user.role.code in TASK_ASSIGNER_ROLES or task.assignee_id == user.id)
+    return user.role and (role_can(user, "personnel.assign_tasks") or task.assignee_id == user.id)
 
 
 class TaskDeliverableListCreateView(generics.ListCreateAPIView):
@@ -181,7 +178,7 @@ class TaskDeliverableListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(TASK_ASSIGNER_ROLES)]
+            return [HasRole("personnel.assign_tasks")]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
@@ -197,7 +194,7 @@ class TaskDeliverableDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_permissions(self):
         if self.request.method == "DELETE":
-            return [HasRole(TASK_ASSIGNER_ROLES)]
+            return [HasRole("personnel.assign_tasks")]
         return [permissions.IsAuthenticated()]
 
     def perform_update(self, serializer):
@@ -210,7 +207,7 @@ class TaskReviewView(APIView):
     """Leader/assigner decision on a task in For Review: POST {"action": "approve" | "return", "remarks": ...}.
     Approve -> done, return -> in_progress; recorded as a TaskUpdate so it shows in the task's history."""
 
-    permission_classes = [HasRole(TASK_ASSIGNER_ROLES)]
+    permission_classes = [HasRole("personnel.assign_tasks")]
 
     def post(self, request, pk):
         task = generics.get_object_or_404(Task, pk=pk)
@@ -232,7 +229,7 @@ class TaskReviewView(APIView):
 class WorkloadView(APIView):
     """Open/overdue/done task counts per assignee (DPMIS-based spec PTM-06/07)."""
 
-    permission_classes = [HasRole(TASK_ASSIGNER_ROLES)]
+    permission_classes = [HasRole("personnel.assign_tasks")]
 
     def get(self, request):
         tasks = Task.objects.all()
@@ -301,7 +298,7 @@ class PersonnelChangeDetailView(generics.RetrieveAPIView):
 class ClearanceView(APIView):
     """Record PAR details and, when `acknowledge` is true, sign off the clearance."""
 
-    permission_classes = [HasRole(CLEARANCE_ROLES)]
+    permission_classes = [HasRole("personnel.clearance")]
 
     def patch(self, request, pk):
         change = generics.get_object_or_404(PersonnelChange.objects.select_related("clearance"), pk=pk)
@@ -326,7 +323,7 @@ class ClearanceView(APIView):
 
 
 class CompleteChangeView(APIView):
-    permission_classes = [HasRole(MANAGE_ROLES)]
+    permission_classes = [HasRole("personnel.manage")]
 
     def post(self, request, pk):
         change = generics.get_object_or_404(PersonnelChange, pk=pk)

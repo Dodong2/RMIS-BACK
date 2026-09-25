@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import BudgetOfficeImport, BudgetOfficeRecord
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 SYNC_ROLES = ["system_admin", "finance_budget"]
 
 

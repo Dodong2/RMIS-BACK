@@ -5,16 +5,10 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import BudgetScopedMixin, HasRole, scoped_projects
+from accounts.permissions import BudgetScopedMixin, HasRole, role_can, scoped_projects
 from budget_lib.models import LineItemBudget
 from .models import PROCUREMENT_DELAY_DAYS, BudgetRealignment, Disbursement, ProcurementRequest
 from .serializers import (
-    DISBURSEMENT_ROLES,
-    PROCUREMENT_REQUEST_ROLES,
-    PROCUREMENT_STATUS_ROLES,
-    REALIGNMENT_BOR_REVIEW_ROLES,
-    REALIGNMENT_MAJOR_REVIEW_ROLES,
-    REALIGNMENT_REQUEST_ROLES,
     BudgetRealignmentSerializer,
     DisbursementSerializer,
     ProcurementRequestSerializer,
@@ -48,7 +42,7 @@ class DisbursementListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(DISBURSEMENT_ROLES)]
+            return [HasRole("financial.record_disbursement")]
         return [permissions.IsAuthenticated()]
 
     def perform_create(self, serializer):
@@ -75,7 +69,7 @@ class RealignmentListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(REALIGNMENT_REQUEST_ROLES)]
+            return [HasRole("financial.request_realignment")]
         return [permissions.IsAuthenticated()]
 
     def perform_create(self, serializer):
@@ -103,9 +97,8 @@ class RealignmentReviewView(APIView):
         if realignment.status not in ("pending_approval", "pending_bor"):
             return Response({"detail": "This realignment is not awaiting review."}, status=status.HTTP_400_BAD_REQUEST)
 
-        allowed_roles = REALIGNMENT_BOR_REVIEW_ROLES if realignment.tier == "bor" else REALIGNMENT_MAJOR_REVIEW_ROLES
-        user_role = request.user.role.code if request.user.role else None
-        if user_role not in allowed_roles:
+        code = "financial.review_bor_realignment" if realignment.tier == "bor" else "financial.review_major_realignment"
+        if not role_can(request.user, code):
             return Response({"detail": "You do not have permission to review this realignment."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = RealignmentReviewSerializer(data=request.data)
@@ -137,7 +130,7 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(PROCUREMENT_REQUEST_ROLES)]
+            return [HasRole("financial.request_procurement")]
         return [permissions.IsAuthenticated()]
 
     def perform_create(self, serializer):
@@ -147,7 +140,7 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
 class ProcurementStatusView(APIView):
     """Procurement Office moves a request Requested -> Processing -> Released (or Cancelled)."""
 
-    permission_classes = [HasRole(PROCUREMENT_STATUS_ROLES)]
+    permission_classes = [HasRole("financial.update_procurement")]
 
     def post(self, request, pk):
         procurement = generics.get_object_or_404(ProcurementRequest, pk=pk)

@@ -7,6 +7,7 @@ from .serializers import (
     ProgramSerializer, ProjectSerializer, ProjectStatusHistorySerializer, StudySerializer, WorkPlanMilestoneSerializer,
 )
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 REGISTRATION_ROLES = ["system_admin", "crc_chair"]
 # Leaders capture their own work plan (Module Structure M2); ensure_in_scope limits them to their projects.
 MILESTONE_ROLES = REGISTRATION_ROLES + ["program_leader", "project_leader", "study_leader"]
@@ -18,7 +19,7 @@ class ProgramListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(REGISTRATION_ROLES)]
+            return [HasRole("projects.register")]
         return [permissions.IsAuthenticated()]
 
 
@@ -28,7 +29,7 @@ class ProgramDetailView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
-            return [HasRole(REGISTRATION_ROLES)]
+            return [HasRole("projects.register")]
         return [permissions.IsAuthenticated()]
 
 
@@ -38,7 +39,7 @@ class ProjectListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(REGISTRATION_ROLES)]
+            return [HasRole("projects.register")]
         return [permissions.IsAuthenticated()]
 
 
@@ -48,7 +49,7 @@ class ProjectDetailView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
-            return [HasRole(REGISTRATION_ROLES)]
+            return [HasRole("projects.register")]
         return [permissions.IsAuthenticated()]
 
     def perform_update(self, serializer):
@@ -81,7 +82,7 @@ class StudyListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(REGISTRATION_ROLES)]
+            return [HasRole("projects.register")]
         return [permissions.IsAuthenticated()]
 
 
@@ -91,7 +92,7 @@ class StudyDetailView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
-            return [HasRole(REGISTRATION_ROLES)]
+            return [HasRole("projects.register")]
         return [permissions.IsAuthenticated()]
 
 
@@ -109,7 +110,7 @@ class MilestoneListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(MILESTONE_ROLES)]
+            return [HasRole("projects.manage_milestones")]
         return [permissions.IsAuthenticated()]
 
 
@@ -119,7 +120,7 @@ class MilestoneDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH", "DELETE"):
-            return [HasRole(MILESTONE_ROLES)]
+            return [HasRole("projects.manage_milestones")]
         return [permissions.IsAuthenticated()]
 
     def perform_destroy(self, instance):

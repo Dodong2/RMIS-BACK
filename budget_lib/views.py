@@ -5,10 +5,11 @@ from rest_framework.views import APIView
 
 from accounts.permissions import BudgetScopedMixin, HasRole
 from .models import LineItem, LineItemBudget
-from .serializers import CERTIFY_ROLES, LineItemBudgetSerializer, LineItemSerializer, certify_budget
+from .serializers import LineItemBudgetSerializer, LineItemSerializer, certify_budget
 
 # Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
-# ensure_in_scope. Certification stays with the Budget Officer (CERTIFY_ROLES).
+# ensure_in_scope. Certification stays with the Budget Officer (budget.certify).
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 MANAGE_ROLES = ["system_admin", "finance_budget", "procurement_officer_lib", "program_leader", "project_leader"]
 
 
@@ -24,7 +25,7 @@ class BudgetListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(MANAGE_ROLES)]
+            return [HasRole("budget.manage")]
         return [permissions.IsAuthenticated()]
 
 
@@ -53,7 +54,7 @@ class LineItemListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(MANAGE_ROLES)]
+            return [HasRole("budget.manage")]
         return [permissions.IsAuthenticated()]
 
 
@@ -64,7 +65,7 @@ class LineItemDetailView(BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIVie
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH", "DELETE"):
-            return [HasRole(MANAGE_ROLES)]
+            return [HasRole("budget.manage")]
         return [permissions.IsAuthenticated()]
 
     def perform_destroy(self, instance):
@@ -74,7 +75,7 @@ class LineItemDetailView(BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIVie
 
 
 class CertifyBudgetView(APIView):
-    permission_classes = [HasRole(CERTIFY_ROLES)]
+    permission_classes = [HasRole("budget.certify")]
 
     def post(self, request, pk):
         budget = generics.get_object_or_404(LineItemBudget, pk=pk)

@@ -5,6 +5,7 @@ from rest_framework import serializers
 from accounts.permissions import ensure_in_scope
 from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, LineItem, LineItemBudget
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
 
 

@@ -127,18 +127,18 @@ class RolesListView(generics.ListAPIView):
 
 class PendingUsersListView(generics.ListAPIView):
     serializer_class = PendingUserSerializer
-    permission_classes = [HasRole(["system_admin"])]
+    permission_classes = [HasRole("accounts.manage_users")]
     queryset = User.objects.filter(is_pending_role=True)
 
 
 class UsersListView(generics.ListAPIView):
     serializer_class = UserListSerializer
-    permission_classes = [HasRole(["system_admin"])]
+    permission_classes = [HasRole("accounts.manage_users")]
     queryset = User.objects.filter(is_pending_role=False)
 
 
 class AssignRoleView(APIView):
-    permission_classes = [HasRole(["system_admin"])]
+    permission_classes = [HasRole("accounts.manage_users")]
 
     def patch(self, request, user_id):
         role_id = request.data.get("role_id")
@@ -156,7 +156,7 @@ class AssignRoleView(APIView):
     
     
 class UpdateUserRoleView(APIView):
-    permission_classes = [HasRole(["system_admin"])]
+    permission_classes = [HasRole("accounts.manage_users")]
  
     def patch(self, request, user_id):
         role_id = request.data.get("role_id")
@@ -175,7 +175,7 @@ class UpdateUserRoleView(APIView):
 class ToggleUserActiveView(APIView):
     """Kept for the existing frontend: flips active <-> suspended. A deactivated account can't be toggled back."""
 
-    permission_classes = [HasRole(["system_admin"])]
+    permission_classes = [HasRole("accounts.manage_users")]
 
     def patch(self, request, user_id):
         user = get_object_or_404(User, id=user_id, is_pending_role=False)
@@ -206,7 +206,7 @@ def active_responsibilities(user):
 class UserAccountStatusView(APIView):
     """POST {"action": "suspend" | "reactivate" | "deactivate"}."""
 
-    permission_classes = [HasRole(["system_admin"])]
+    permission_classes = [HasRole("accounts.manage_users")]
 
     def post(self, request, user_id):
         user = get_object_or_404(User, id=user_id, is_pending_role=False)
@@ -230,7 +230,7 @@ class UserAccountStatusView(APIView):
 
 class UsersByRoleView(generics.ListAPIView):
     serializer_class = UserListSerializer
-    permission_classes = [HasRole(["system_admin", "crc_chair"])]
+    permission_classes = [HasRole("accounts.view_users_by_role")]
 
     def get_queryset(self):
         code = self.request.query_params.get("code")
@@ -242,7 +242,7 @@ class UsersByRoleView(generics.ListAPIView):
 
 class AuditLogListView(generics.ListAPIView):
     serializer_class = AuditLogSerializer
-    permission_classes = [HasRole(["system_admin"])]
+    permission_classes = [HasRole("accounts.manage_users")]
 
     def get_queryset(self):
         qs = AuditLog.objects.select_related("actor").all()

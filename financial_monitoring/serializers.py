@@ -9,6 +9,7 @@ from budget_lib.models import LineItem
 from accounts.permissions import ensure_in_scope
 from .models import APPLIED_STATUSES, BudgetRealignment, Disbursement, ProcurementRequest
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 REALIGNMENT_REQUEST_ROLES = ["system_admin", "project_leader"]
 REALIGNMENT_MAJOR_REVIEW_ROLES = ["system_admin", "university_admin"]
 REALIGNMENT_BOR_REVIEW_ROLES = ["system_admin"]  # client-confirmed: BOR-tier approval is system_admin only

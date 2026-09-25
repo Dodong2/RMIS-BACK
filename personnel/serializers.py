@@ -3,6 +3,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.models import User
+from accounts.permissions import role_can
 from research_projects.models import Program, Project, Study
 from research_projects.serializers import (
     LeadSerializer,
@@ -13,6 +14,7 @@ from .models import (
     PersonnelChange, ProjectAssignment, PropertyClearance, StaffProfile, Task, TaskDeliverable, TaskUpdate,
 )
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 MANAGE_ROLES = ["system_admin", "crc_chair", "drd", "riuh"]
 TASK_ASSIGNER_ROLES = MANAGE_ROLES + ["program_leader", "project_leader", "study_leader"]
 CLEARANCE_ROLES = MANAGE_ROLES + ["procurement_officer_lib"]
@@ -120,7 +122,7 @@ class TaskSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         user = self.context["request"].user
-        if user.role.code not in TASK_ASSIGNER_ROLES:
+        if not role_can(user, "personnel.assign_tasks"):
             # Assignees may only update the status of their own task, and can't approve their own work:
             # "done" only comes from a leader/assigner review (client prototype "For Review" column;
             # MIT proposal: the Project Leader "approves task and activity submissions").
@@ -147,9 +149,9 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         user = self.context["request"].user
         task = self.context["task"]
-        if user.role.code not in TASK_ASSIGNER_ROLES and task.assignee_id != user.id:
+        if not role_can(user, "personnel.assign_tasks") and task.assignee_id != user.id:
             raise serializers.ValidationError("Only the assignee or a task assigner can post updates on this task.")
-        if attrs.get("new_status") == "done" and user.role.code not in TASK_ASSIGNER_ROLES:
+        if attrs.get("new_status") == "done" and not role_can(user, "personnel.assign_tasks"):
             raise serializers.ValidationError({"new_status": "Submit the task for review; a leader marks it done."})
         return attrs
 
