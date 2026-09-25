@@ -8,9 +8,6 @@ from .models import (
     SIX_PS, CreativeWorkRecord, ExpectedOutput, IPRecord, ProjectOutcome, PublicationRecord, SenseRankedPublisher,
 )
 from .serializers import (
-    CREATIVE_WORK_ROLES,
-    MANAGE_ROLES,
-    REPORT_ROLES,
     CreativeWorkRecordSerializer,
     ExpectedOutputSerializer,
     ProjectOutcomeSerializer,
@@ -21,12 +18,12 @@ from .serializers import (
 
 
 class RoleWritesMixin:
-    write_roles = REPORT_ROLES
+    write_permission = "outputs.report"
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
-        return [HasRole(self.write_roles)]
+        return [HasRole(self.write_permission)]
 
 
 class ProjectScopedMixin:
@@ -45,7 +42,7 @@ class SenseRankedPublisherListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole(MANAGE_ROLES)]
+            return [HasRole("outputs.manage")]
         return [permissions.IsAuthenticated()]
 
 
@@ -76,7 +73,7 @@ class IPRecordDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIView):
 
 
 class CreativeWorkListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
-    write_roles = CREATIVE_WORK_ROLES
+    write_permission = "outputs.report_creative_work"
     queryset = CreativeWorkRecord.objects.all().order_by("-date_created")
     serializer_class = CreativeWorkRecordSerializer
 
@@ -85,7 +82,7 @@ class CreativeWorkListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.L
 
 
 class CreativeWorkDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIView):
-    write_roles = CREATIVE_WORK_ROLES
+    write_permission = "outputs.report_creative_work"
     queryset = CreativeWorkRecord.objects.all()
     serializer_class = CreativeWorkRecordSerializer
 

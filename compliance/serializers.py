@@ -11,6 +11,7 @@ from .models import (
     SimilarityCheckRecord,
 )
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 MANAGE_ROLES = ["system_admin", "riuh"]
 # Leaders encode compliance records; RIUH verifies (client clarification Q1a).
 ENCODE_ROLES = MANAGE_ROLES + ["program_leader", "project_leader", "study_leader"]

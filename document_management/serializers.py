@@ -5,6 +5,7 @@ from rest_framework import serializers
 from .models import Document
 from .storage import get_signed_url, upload_document
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 MANAGE_ROLES = ["system_admin", "riuh"]
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB
 

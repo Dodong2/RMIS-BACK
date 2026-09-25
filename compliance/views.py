@@ -3,7 +3,7 @@ from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import HasRole
+from accounts.permissions import HasRole, role_can
 from .models import (
     ComplianceRequirement,
     AIUseDeclaration,
@@ -14,8 +14,6 @@ from .models import (
 )
 from .serializers import (
     ComplianceRequirementSerializer,
-    ENCODE_ROLES,
-    MANAGE_ROLES,
     AIUseDeclarationSerializer,
     ConflictOfInterestDisclosureSerializer,
     EthicsReviewReferenceSerializer,
@@ -25,21 +23,21 @@ from .serializers import (
 
 
 class ManageWritesMixin:
-    """Authenticated read, MANAGE_ROLES (riuh/system_admin) write."""
+    """Authenticated read, compliance.manage (riuh/system_admin) write."""
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
-        return [HasRole(MANAGE_ROLES)]
+        return [HasRole("compliance.manage")]
 
 
 class EncodeWritesMixin:
-    """Authenticated read, ENCODE_ROLES (leaders + riuh/system_admin) write. Edits clear RIUH verification."""
+    """Authenticated read, compliance.encode (leaders + riuh/system_admin) write. Edits clear RIUH verification."""
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
-        return [HasRole(ENCODE_ROLES)]
+        return [HasRole("compliance.encode")]
 
     def perform_update(self, serializer):
         serializer.save(verified_by=None, verified_at=None)
@@ -134,7 +132,7 @@ class MisconductCaseDetailView(ManageWritesMixin, generics.RetrieveUpdateAPIView
 class VerifyRecordView(APIView):
     """RIUH verifies a leader-encoded compliance record. POST sets verified_by/at."""
 
-    permission_classes = [HasRole(MANAGE_ROLES)]
+    permission_classes = [HasRole("compliance.manage")]
     model = None
     serializer_class = None
 
@@ -178,8 +176,7 @@ class ComplianceRequirementSubmitView(APIView):
 
     def post(self, request, pk):
         requirement = generics.get_object_or_404(ComplianceRequirement, pk=pk)
-        user_role = request.user.role.code if request.user.role else None
-        if requirement.responsible_id != request.user.id and user_role not in ENCODE_ROLES:
+        if requirement.responsible_id != request.user.id and not role_can(request.user, "compliance.encode"):
             return Response({"detail": "Only the responsible person can submit this requirement."}, status=403)
         if requirement.status not in ("pending", "returned"):
             return Response({"detail": f"A '{requirement.status}' requirement can't be submitted."}, status=400)
@@ -192,7 +189,7 @@ class ComplianceRequirementSubmitView(APIView):
 class ComplianceRequirementReviewView(APIView):
     """RIUH reviews: POST {"status": "compliant" | "returned" | "non_compliant", "review_remarks": ...}."""
 
-    permission_classes = [HasRole(MANAGE_ROLES)]
+    permission_classes = [HasRole("compliance.manage")]
 
     def post(self, request, pk):
         requirement = generics.get_object_or_404(ComplianceRequirement, pk=pk)

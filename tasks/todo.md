@@ -305,6 +305,8 @@ monitoring · P8: forecasting, decision_support, dashboard, risk_indicators, rep
 - [ ] Parity script still 0 differences; the regression GET sweep has no 5xx/400
 - [x] P6 done 2026-09-25: no role-list gates left in its 6 apps; parity 0; role-gate matrix old (c960c3f) vs new identical
   for all 243 route/methods × 12 roles; inline checks match; GET sweep (25 routes × 3 roles) no 5xx/400
+- [x] P7 done 2026-09-25: compliance, document_management, outputs, monitoring (RoleWritesMixin.write_roles → write_permission);
+  parity 0; matrix vs 9e8cb84 identical (243); 5 inline checks match; GET sweep (20 routes × 3 roles) no 5xx/400
 **Scope:** M each
 
 ### P9 (gated): Permission view + scope assignment API

@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 
 from accounts.permissions import HasRole, visible_documents
 from .models import Document
-from .serializers import MANAGE_ROLES, DocumentListSerializer, DocumentSerializer
+from .serializers import DocumentListSerializer, DocumentSerializer
 
 
 class DocumentListCreateView(generics.ListCreateAPIView):
@@ -39,7 +39,7 @@ class DocumentDetailView(generics.RetrieveAPIView):
 
 
 class DocumentArchiveView(APIView):
-    permission_classes = [HasRole(MANAGE_ROLES)]
+    permission_classes = [HasRole("documents.manage")]
 
     def post(self, request, pk):
         document = generics.get_object_or_404(Document, pk=pk)
@@ -53,7 +53,7 @@ class DocumentArchiveView(APIView):
 class DocumentReviewView(APIView):
     """POST {"review_status": "approved" | "returned", "review_remarks": ...}."""
 
-    permission_classes = [HasRole(MANAGE_ROLES)]
+    permission_classes = [HasRole("documents.manage")]
 
     def post(self, request, pk):
         document = generics.get_object_or_404(visible_documents(request.user, Document.objects.all()), pk=pk)

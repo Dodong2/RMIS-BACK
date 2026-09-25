@@ -9,6 +9,7 @@ from .models import (
     EvaluationCriterion, EvaluationScore, ExtensionRequest, MidtermReport, MonthlyProgressReport, ProjectEvaluation, RenewalApplication, TerminalReport,
 )
 
+# Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 REPORT_ROLES = ["system_admin", "riuh", "project_leader", "study_leader", "project_staff"]
 TERMINAL_CERTIFY_ROLES = ["system_admin", "riuh"]
 EVALUATION_PANEL_ROLES = ["system_admin", "vprei", "drd", "crc_chair"]

@@ -4,20 +4,13 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import HasRole
+from accounts.permissions import HasRole, role_can
 from research_projects.models import Project
 
 from .models import (
     EvaluationCriterion, ExtensionRequest, MidtermReport, MonthlyProgressReport, ProjectEvaluation, RenewalApplication, TerminalReport,
 )
 from .serializers import (
-    EVALUATION_PANEL_ROLES,
-    EXTENSION_APPROVE_ROLES,
-    EXTENSION_ENDORSE_ROLES,
-    EXTENSION_REQUEST_ROLES,
-    RENEWAL_DECISION_ROLES,
-    REPORT_ROLES,
-    TERMINAL_CERTIFY_ROLES,
     EvaluationCriterionSerializer,
     EvaluationScoreSerializer,
     ExtensionRequestSerializer,
@@ -32,12 +25,12 @@ from .serializers import (
 
 
 class RoleWritesMixin:
-    write_roles = REPORT_ROLES
+    write_permission = "monitoring.report"
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.IsAuthenticated()]
-        return [HasRole(self.write_roles)]
+        return [HasRole(self.write_permission)]
 
 
 class ProjectScopedMixin:
@@ -77,8 +70,7 @@ class TerminalReportCertifyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
-        user_role = request.user.role.code if request.user.role else None
-        if user_role not in TERMINAL_CERTIFY_ROLES:
+        if not role_can(request.user, "monitoring.certify_terminal"):
             return Response({"detail": "Only RIUH/system_admin may certify a terminal report."}, status=status.HTTP_403_FORBIDDEN)
         report = get_object_or_404(TerminalReport, pk=pk)
         report.is_certified = True
@@ -89,13 +81,13 @@ class TerminalReportCertifyView(APIView):
 
 
 class ProjectEvaluationListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
-    write_roles = EVALUATION_PANEL_ROLES
+    write_permission = "monitoring.evaluate"
     queryset = ProjectEvaluation.objects.all().order_by("-scheduled_date")
     serializer_class = ProjectEvaluationSerializer
 
 
 class ProjectEvaluationDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIView):
-    write_roles = EVALUATION_PANEL_ROLES
+    write_permission = "monitoring.evaluate"
     queryset = ProjectEvaluation.objects.all()
     serializer_class = ProjectEvaluationSerializer
 
@@ -118,8 +110,7 @@ class RenewalApplicationDecideView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
-        user_role = request.user.role.code if request.user.role else None
-        if user_role not in RENEWAL_DECISION_ROLES:
+        if not role_can(request.user, "monitoring.decide_renewal"):
             return Response({"detail": "Only RIUH/DRD/VPREI/system_admin may decide a renewal application."}, status=status.HTTP_403_FORBIDDEN)
         application = get_object_or_404(RenewalApplication, pk=pk)
         status_value = request.data.get("status")
@@ -133,13 +124,13 @@ class RenewalApplicationDecideView(APIView):
 
 
 class EvaluationCriterionListCreateView(RoleWritesMixin, generics.ListCreateAPIView):
-    write_roles = EVALUATION_PANEL_ROLES
+    write_permission = "monitoring.evaluate"
     queryset = EvaluationCriterion.objects.order_by("-is_active", "id")
     serializer_class = EvaluationCriterionSerializer
 
 
 class EvaluationCriterionDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIView):
-    write_roles = EVALUATION_PANEL_ROLES
+    write_permission = "monitoring.evaluate"
     queryset = EvaluationCriterion.objects.all()
     serializer_class = EvaluationCriterionSerializer
 
@@ -147,7 +138,7 @@ class EvaluationCriterionDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIV
 class EvaluationScoreView(RoleWritesMixin, generics.ListCreateAPIView):
     """GET the scores of one evaluation; POST {criterion, score, remarks} creates or replaces that criterion's score."""
 
-    write_roles = EVALUATION_PANEL_ROLES
+    write_permission = "monitoring.evaluate"
     serializer_class = EvaluationScoreSerializer
 
     def get_queryset(self):
@@ -167,7 +158,7 @@ class EvaluationScoreView(RoleWritesMixin, generics.ListCreateAPIView):
 class ExtensionRequestListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
     queryset = ExtensionRequest.objects.select_related("project").order_by("-submitted_at")
     serializer_class = ExtensionRequestSerializer
-    write_roles = EXTENSION_REQUEST_ROLES
+    write_permission = "monitoring.request_extension"
 
     def perform_create(self, serializer):
         project = serializer.validated_data["project"]
@@ -182,11 +173,14 @@ class ExtensionRequestActionView(APIView):
     def post(self, request, pk):
         extension = get_object_or_404(ExtensionRequest.objects.select_related("project"), pk=pk)
         action = request.data.get("action")
-        user_role = request.user.role.code if request.user.role else None
-        allowed = {"endorse": EXTENSION_ENDORSE_ROLES, "approve": EXTENSION_APPROVE_ROLES, "deny": EXTENSION_APPROVE_ROLES}
+        allowed = {
+            "endorse": "monitoring.endorse_extension",
+            "approve": "monitoring.approve_extension",
+            "deny": "monitoring.approve_extension",
+        }
         if action not in allowed:
             return Response({"action": "must be 'endorse', 'approve', or 'deny'."}, status=status.HTTP_400_BAD_REQUEST)
-        if user_role not in allowed[action]:
+        if not role_can(request.user, allowed[action]):
             return Response({"detail": f"You may not {action} extension requests."}, status=status.HTTP_403_FORBIDDEN)
         expected = "pending" if action == "endorse" else "endorsed"
         if extension.status != expected:
