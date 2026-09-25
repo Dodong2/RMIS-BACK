@@ -12,6 +12,8 @@ from .views import (
     AssignRoleView,
     UpdateUserRoleView,
     ToggleUserActiveView,
+    PermissionMatrixView,
+    UserScopeView,
 )
 
 urlpatterns = [
@@ -27,4 +29,6 @@ urlpatterns = [
     path("admin/users/<int:user_id>/toggle-active/", ToggleUserActiveView.as_view()),
     path("admin/users/<int:user_id>/account-status/", UserAccountStatusView.as_view()),
     path("admin/audit-logs/", AuditLogListView.as_view()),
+    path("admin/permissions/", PermissionMatrixView.as_view()),
+    path("admin/users/<int:user_id>/scope/", UserScopeView.as_view()),
 ]

@@ -314,7 +314,8 @@ monitoring · P8: forecasting, decision_support, dashboard, risk_indicators, rep
 
 ### P9 (gated): Permission view + scope assignment API
 `GET admin/permissions/` (matrix: permission × roles, read-only, system_admin); `PATCH admin/users/<id>/scope/` {campus, college}.
-- [ ] Matrix lists every seeded code; scope PATCH validates keys; non-admin 403
+- [x] Matrix lists every seeded code; scope PATCH validates keys; non-admin 403 (2026-09-25: 16/16 checks vs real DB, rolled back;
+  `scope` added to admin user list; `college` is stored but not enforced yet, no college field on Project)
 **Scope:** S
 
 ### P10 (gated): Update CLAUDE.md convention (HasRole now takes a permission code; permission list lives in the DB)

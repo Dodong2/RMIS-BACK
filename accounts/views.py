@@ -8,8 +8,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import AuditLog, User, Role
-from .serializers import AuditLogSerializer, RoleSerializer, PendingUserSerializer, UserListSerializer
+from .models import AuditLog, Permission, Role, RolePermission, User
+from .serializers import AuditLogSerializer, RoleSerializer, PendingUserSerializer, UserListSerializer, UserScopeSerializer
 from .permissions import HasRole
 from .emails import notify_admins_new_registration, send_role_confirmation_email
 
@@ -253,3 +253,40 @@ class AuditLogListView(generics.ListAPIView):
         if method:
             qs = qs.filter(method=method.upper())
         return qs
+
+
+class PermissionMatrixView(APIView):
+    """Read-only role x permission matrix from the seeded tables (client clarification Q2). Editing is future work."""
+
+    permission_classes = [HasRole("accounts.manage_users")]
+
+    def get(self, request):
+        grants = {}
+        for permission_code, role_code in RolePermission.objects.values_list("permission__code", "role__code"):
+            grants.setdefault(permission_code, []).append(role_code)
+        permissions = [
+            {"code": p.code, "module": p.module, "name": p.name, "roles": sorted(grants.get(p.code, []))}
+            for p in Permission.objects.order_by("module", "code")
+        ]
+        return Response({"roles": list(Role.objects.order_by("id").values_list("code", flat=True)), "permissions": permissions})
+
+
+class UserScopeView(APIView):
+    """PATCH {"campus": "...", "college": "..."}. Only campus is enforced today (accounts.permissions.scoped_projects);
+    college is stored for when Project gets a college field."""
+
+    permission_classes = [HasRole("accounts.manage_users")]
+
+    def patch(self, request, user_id):
+        user = get_object_or_404(User, id=user_id, is_pending_role=False)
+        serializer = UserScopeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        scope = dict(user.scope or {})
+        for key, value in serializer.validated_data.items():
+            if value:
+                scope[key] = value
+            else:
+                scope.pop(key, None)
+        user.scope = scope
+        user.save(update_fields=["scope"])
+        return Response({"id": user.id, "scope": user.scope})

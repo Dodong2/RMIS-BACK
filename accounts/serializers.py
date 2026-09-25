@@ -30,7 +30,22 @@ class UserListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "email", "role", "office", "position", "is_active", "account_status", "date_joined"]
+        fields = ["id", "email", "role", "office", "position", "scope", "is_active", "account_status", "date_joined"]
+
+
+class UserScopeSerializer(serializers.Serializer):
+    """Admin-assigned scope (client clarification Q2/Q12). A blank or null value clears that key."""
+
+    campus = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=100)
+    college = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=100)
+
+    def validate(self, attrs):
+        unknown = set(self.initial_data) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError({key: "Unknown scope key." for key in sorted(unknown)})
+        if not attrs:
+            raise serializers.ValidationError("Send at least one of: campus, college.")
+        return attrs
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
