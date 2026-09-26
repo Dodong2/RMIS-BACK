@@ -52,7 +52,26 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
 
 ## Backend status (this repo)
 - Module 1 (Auth/RBAC): done, stable, plus two real gaps found+fixed 2026-09-23 after the client asked where "Workplan/Procurement/Audit Logs/Settings" sidebar items map to (see below for the full mapping): (1) **`AuditLog` model + `accounts/middleware.py::AuditLogMiddleware` added** — the docx/MIT-proposal both explicitly call out "audit logging" as a Module 1 feature but nothing existed for it; the middleware logs every authenticated mutating (`POST`/`PUT`/`PATCH`/`DELETE`) request to `/api/` (actor, method, path, status_code, ip_address, timestamp) — request-level, not per-model field diffing, matching how the MIT proposal frames it ("the business logic layer... enforces authentication, role-based access control, request validation, and audit logging before any request reaches the data layer"). New endpoint `GET /api/admin/audit-logs/` (system_admin-only, filterable by `?actor=`/`?method=`). (2) **`seed_roles.py` had a dead `tier` kwarg** left over from a migration (`0002_role_tier` → `0003_remove_role_tier...`) that removed the `Role.tier` field without updating the seed command — running `python manage.py seed_roles` today would have crashed. Fixed by dropping the third tuple element entirely; confirmed the command runs clean now.
-- Module 2 (research_projects: Program/Project/Study/Milestone): done, stable.
+- Module 2 (research_projects: Program/Project/Study/Milestone): done. **Updated 2026-09-26**: registration now follows the
+  client's Research Proposal Form **LSPU-RDO-SF-018** (sample: `dss/Dataset/BRIDGI_1.PDF`, scanned, no text layer).
+  New `Project` fields: `lead_gender`, `contact_number`, `continuing_year`, `college` (Annex A "College Unit"),
+  `background`/`methodology`/`socio_economic_significance`/`monitoring_evaluation`/`references` (Sections II/IV/VI/VIII/IX),
+  Annex A endorsement names+dates (`endorsed_by_dean(_on)`, `noted_by_rds_director(_on)`,
+  `recommended_by_campus_director(_on)`, `recommended_by_vprde(_on)`, `approved_by_president`; submitted/President dates
+  reuse `proposal_submitted_on`/`proposal_approved_on`) — reference only, no signing workflow (RMIS still starts at NTP).
+  `sector` → **`sectors`** (list; the form allows several ticks; data-migrated in `0006_proposal_form_fields`).
+  New models `ProjectTeamMember` (co_leader/member, free-text name + gender, optional user — the form lists groups like
+  "EIU Coordinators") and `TargetBeneficiary` (Section VII). LIB `LineItem.q1_amount..q4_amount` (Section X; optional,
+  must sum to `amount`). **Excel import** (`research_projects/importer.py`, openpyxl): `GET projects/import-template/`
+  builds the template from code (Project key/value sheet + Project Team, Study Components, Expected Outputs (6Ps),
+  Target Beneficiaries, Budget Requirements, Work Plan sheets); `POST projects/import/` is all-or-nothing through the
+  same serializers as manual entry and returns `{"errors": [{sheet,row,field,message}]}`. Accepts the form's own wording
+  (e.g. "Patent", "Places/Partnerships", "Policy Recommendations"). **`projects.register` widened** (migration
+  `accounts.0009`) to the docx's M2 primary users: crc_chair, drd, riuh, program/project/study leaders (+system_admin);
+  it had been system_admin/crc_chair only since `2fc405f` with no recorded reason. Leaders only register/edit records
+  they belong to (`serializers.ensure_registrant_in_scope`; importer defers the check to the finished project so a
+  study leader's Study Components row counts; program leaders use the template's optional "Program Code").
+  Smoke-tested with the real BRIDGI data + a role matrix (rolled back, no leaks).
 - Module 3 (personnel app): done, stable.
 - Module 4 (budget_lib app): done, migrated, `manage.py check` passes. **Updated 2026-09-24**: the ₱100k institutional-dry-research cap check was REMOVED from `LineItemSerializer.validate()` (and the `INSTITUTIONAL_DRY_RESEARCH_CAP` constant deleted) at Carl's request — real LIB data (e.g. sheet P77, ₱120k) was being rejected with a 400. Note: the cap is a Manual rule, so this is a deliberate deviation. **Later on 2026-09-24 it was re-added as a NON-BLOCKING warning** (`LineItemBudgetSerializer.exceeds_dry_cap`, constant back in `budget_lib/models.py`) after the client docs cited it again. P77 is flagged, not rejected. **Updated 2026-09-23**: `procurement_officer_lib` role — seeded since Module 1 but had zero permissions wired anywhere in `budget_lib` (only used in Module 3's property clearance) — added to `MANAGE_ROLES` in `budget_lib/views.py`, so Procurement can now create/edit `LineItem`s (matches the client's framing: "yung procurement yun na yun logging ng LIB"). Deliberately NOT added to `CERTIFY_ROLES` (stays `system_admin`/`finance_budget` only) — budget certification is specifically the docx's "Budget Officer" job, not Procurement's; kept that separation of duties. Also added `?project=` and `?is_app_flagged=` filters to `LineItemListCreateView` so Procurement can pull an institution-wide APP-flagged (>₱50k) worklist instead of having to page through one budget at a time.
 - Module 5 (financial_monitoring app): done, migrated, core logic verified via shell/view-level smoke tests (rolled back, no data persisted). BOR-tier realignment review is `system_admin`-only (client-confirmed 2026-09-22); major tier still allows `university_admin` too.
@@ -67,6 +86,13 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
 - Module 14 (reports app): done, migrated, `manage.py check` passes. **This is the module that actually renders files** — Module 10's `exports/appendix-e/f/g` return structured JSON only; this module wraps that same JSON (imported directly from `dashboard.services`, no data-gathering duplicated) into real CSV/XLSX/PDF/DOCX bytes via `reports/renderers.py` (`csv` stdlib + new deps `openpyxl`/`reportlab`/`python-docx`, added to `requirements.txt`). `normalize_to_rows()` flattens both shapes the appendix exports come in — a list of dicts (Appendix E, one row per project-year) or a single dict (Appendix F/G, one snapshot) — into a uniform row/fieldname structure so all four renderers share one code path; every value is stringified before rendering to sidestep Decimal/date/datetime type quirks across the four libraries. Added a 5th report type beyond the three appendices: `reports/services.py::project_list_report()` — the docx's "custom filtered report builder," deliberately scoped to a fixed set of `Project` fields + campus/funding_type/status/rei_thrust/year filters rather than a fully generic query/column designer (that would be over-engineering for this capstone). `GeneratedReportLog` is a lightweight audit-trail model (report_type/format/filters/who/when) — logs every generation but does NOT store the file itself (regenerated on-demand each time, not archived; that'd be Module 7's job if ever needed). `logs/` listing is gated to `system_admin`/`riuh`/`drd`/`vprei` (the docx's stated primary users); the four export endpoints themselves are open to any authenticated role, matching Module 10's equivalent JSON endpoints. **Real bug caught and fixed during testing**: the export endpoints originally used a `?format=pdf` query param, which collides with DRF's own reserved `format` query param for content-type negotiation — DRF's `perform_content_negotiation` intercepted it and raised `Http404` before the view's `get()` ever ran, since no registered DRF renderer handles "pdf". Renamed to `?file_format=` everywhere; confirmed fixed via view-level test. Verified via shell smoke test (all 4 formats × all 4 data shapes — Appendix E/F/G plus the project-list report — produced non-empty valid bytes; an unsupported format string correctly raises `ValueError`) and an `APIRequestFactory` view-level test (200 + correct `Content-Type`/`Content-Disposition` + `GeneratedReportLog` row created on success, 400 on a bad `file_format`, 403 for `project_staff` hitting `logs/`, 200 for `system_admin`) — both wrapped in `with transaction.atomic():` from the start, confirmed no leaked data afterward.
 
 ## What the frontend still needs from this module
+- **Module 2 registration (2026-09-26) — BREAKING:** `sector` is gone, replaced by `sectors: string[]` (required, ≥1;
+  `sector_other` required when it contains `"others"`) — `RegisterProjectPage.tsx`, `ProjectDetailPage.tsx`,
+  `lib/researchApi.ts`, `types/research.ts` still use `sector`. Also new: the Project fields listed in the Module 2 status
+  line (`continuing_year` required ≥2 when `is_continuing`), `project-team/` + `target-beneficiaries/` CRUD (`?project=`),
+  LIB `q1_amount..q4_amount`, and the Excel flow: download `projects/import-template/` as a Blob (JWT header), upload
+  multipart `file` to `projects/import/`, render the `errors` list on 400. Registration buttons should now show for
+  crc_chair/drd/riuh/leaders too (403s changed for `projects.register`).
 - Modules 4 (budget_lib) and 5 (financial_monitoring) — frontend pages (BudgetPage,
   DisbursementsPage) are built and call these endpoints, but haven't been
   browser-tested against a live server yet (unlike Modules 6-8, below).
@@ -180,20 +206,21 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-09-25: **Phase 3B (client clarification Q2) — permission table, all committed** (`c960c3f` → `676165a`):
-`Permission`/`RolePermission` seeded with 36 codes (migration `accounts.0008`, frozen from the old `*_ROLES` constants);
-every app now gates with `HasRole("<code>")` / `role_can()`; `GET admin/permissions/` (read-only matrix) and
-`PATCH admin/users/<id>/scope/` {campus, college}. Verified per app group by diffing a role-gate matrix (243 route/methods ×
-12 roles) against the previous commit — identical every time; `scripts/permission_parity.py` = 0 differences.
-`scope.college` is stored but NOT enforced (no `college` field on `Project`) — pending Carl's call.
-Earlier (2026-09-24): the DPMIS alignment round above. NOTE for smoke tests: `APIClient` needs `HTTP_HOST="localhost"`,
-since `ALLOWED_HOSTS` rejects the default `testserver` with a 400 that looks like a pass if you only check for 5xx.
+2026-09-26: **Project registration aligned to LSPU-RDO-SF-018 + Excel import + registration roles per docx M2**,
+committed as `cdbb7d0` on branch `feat/proposal-form-registration` (not yet merged to main). Details in the Module 2
+status line. `scope.college` is now enforced in `scoped_projects` (campus-scoped roles: crc_chair, finance_budget,
+procurement_officer_lib, riuh) — side effect: crc_chair/riuh with a campus/college scope can now only edit projects in it.
+`permission_parity.py` = 0 differences. Earlier: Phase 3B permission table (2026-09-25), DPMIS alignment (2026-09-24).
+NOTE for smoke tests: `APIClient` needs `HTTP_HOST="localhost"` (ALLOWED_HOSTS 400 otherwise), and test users need a
+unique `username` (User has a unique username, blank collides).
 
 ## Next thing to do in this repo
-1. Frontend: wire the new endpoints + the `critical` risk level (see "Frontend impact" above), plus the Phase 3B
-   permission-matrix screen (`admin/permissions/`) and user scope assignment (`admin/users/<id>/scope/`; `scope` is
-   now in `admin/users/`). No 403 behavior changed in Phase 3B.
-2. Decide whether RIUH college scoping (Q12) is needed → `Project.college` + `scoped_projects` update.
-3. When the client/RDO answers the "still to confirm" items, adjust the constants (all named, in the respective
-   services/models) rather than logic.
-4. Optional: the DPMIS traceability HTML (`docs/dpmis_traceability.html`, T21) for the panel.
+1. Merge `feat/proposal-form-registration` into main (`git checkout main && git merge --ff-only feat/proposal-form-registration`).
+2. Frontend: the BREAKING `sector` → `sectors` change and the Excel import UI first (see "What the frontend still
+   needs"), then the older backlog: new DPMIS endpoints, `critical` risk level, permission matrix + user scope screens.
+3. Open from this round, ask Carl/client: Capsule CV (Annex A, leader/co-leader) — asked, not answered, not built;
+   study leaders can attach a Study to any project naming themselves as lead, which then puts that project in their
+   edit scope — confirm that's acceptable; project code isn't on the form but is required (template asks for it);
+   template uses start/target dates for the work plan instead of the form's quarter shading.
+4. When the client/RDO answers the "still to confirm" items, adjust the named constants rather than logic.
+5. Optional: the DPMIS traceability HTML (`docs/dpmis_traceability.html`, T21) for the panel.
