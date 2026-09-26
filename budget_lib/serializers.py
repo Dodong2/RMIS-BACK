@@ -7,6 +7,7 @@ from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, LineItem, LineItemBudget
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
+QUARTER_FIELDS = ["q1_amount", "q2_amount", "q3_amount", "q4_amount"]
 
 
 class LineItemSerializer(serializers.ModelSerializer):
@@ -14,7 +15,7 @@ class LineItemSerializer(serializers.ModelSerializer):
         model = LineItem
         fields = [
             "id", "budget", "category", "description", "amount", "fiscal_year", "funding_source", "is_counterpart",
-            "is_app_flagged", "created_at",
+            "q1_amount", "q2_amount", "q3_amount", "q4_amount", "is_app_flagged", "created_at",
         ]
         read_only_fields = ["is_app_flagged"]
 
@@ -23,6 +24,10 @@ class LineItemSerializer(serializers.ModelSerializer):
         ensure_in_scope(self, budget.project)
         if budget.status == "certified":
             raise serializers.ValidationError("This budget is certified and can no longer be edited.")
+        quarters = [attrs.get(f, getattr(self.instance, f, None)) for f in QUARTER_FIELDS]
+        amount = attrs.get("amount", getattr(self.instance, "amount", None))
+        if any(q is not None for q in quarters) and sum(q or 0 for q in quarters) != amount:
+            raise serializers.ValidationError({"amount": "QTR1-QTR4 amounts must add up to the line item amount."})
         return attrs
 
 

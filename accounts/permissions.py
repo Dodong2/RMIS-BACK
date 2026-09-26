@@ -30,7 +30,7 @@ def role_can(user, permission_code):
 
 # Row-level scope for budget/financial data (client clarification Q12, Q1c).
 # Leaders see only projects they lead (directly, or via a study/program they lead); project_staff see
-# no budget data; campus-level roles are limited to User.scope["campus"] when an admin has set it.
+# no budget data; campus-level roles are limited to User.scope["campus"] and/or ["college"] when an admin has set them.
 # Everyone else (system_admin, vprei, drd, university_admin) is university-wide.
 LEADER_ROLES = ["program_leader", "project_leader", "study_leader"]
 CAMPUS_SCOPED_ROLES = ["crc_chair", "finance_budget", "procurement_officer_lib", "riuh"]
@@ -48,9 +48,14 @@ def scoped_projects(user):
         ).distinct()
     if code == "project_staff" or code is None:
         return Project.objects.none()
-    campus = (user.scope or {}).get("campus")
-    if code in CAMPUS_SCOPED_ROLES and campus:
-        return Project.objects.filter(campus__iexact=campus)
+    scope = user.scope or {}
+    if code in CAMPUS_SCOPED_ROLES and (scope.get("campus") or scope.get("college")):
+        qs = Project.objects.all()
+        if scope.get("campus"):
+            qs = qs.filter(campus__iexact=scope["campus"])
+        if scope.get("college"):
+            qs = qs.filter(college__iexact=scope["college"])
+        return qs
     return None
 
 

@@ -76,17 +76,30 @@ class Project(models.Model):
         ("pure_experimental", "Pure Experimental Research"),
     )
 
+    GENDER_CHOICES = (("male", "Male"), ("female", "Female"))
+
     is_continuing = models.BooleanField(default=False)  # False = New Proposal
+    continuing_year = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Year 2, Year 3, ... when continuing")
     research_type = models.CharField(max_length=10, choices=RESEARCH_TYPE_CHOICES, blank=True)
-    sector = models.CharField(max_length=30, choices=SECTOR_CHOICES, blank=True)
+    sectors = models.JSONField(default=list, blank=True)  # list of SECTOR_CHOICES codes; the form allows several
     sector_other = models.CharField(max_length=150, blank=True)
     research_priority_area = models.CharField(max_length=40, choices=PRIORITY_AREA_CHOICES, blank=True)
     research_typology = models.JSONField(default=list, blank=True)  # list of TYPOLOGY_CHOICES codes
     sdgs = models.JSONField(default=list, blank=True)  # list of SDG numbers, 1-17
     campus = models.CharField(max_length=100, blank=True)
+    college = models.CharField(max_length=100, blank=True, help_text="College Unit (Annex A endorsement page)")
     implementing_unit = models.CharField(max_length=150, blank=True)
     cooperating_agencies = models.TextField(blank=True)
     total_cost = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    lead_gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True)
+    contact_number = models.CharField(max_length=50, blank=True)
+
+    # LSPU-RDO-SF-018 Sections II, IV, VI, VIII, IX (III Objectives is `objectives` below)
+    background = models.TextField(blank=True)
+    methodology = models.TextField(blank=True)
+    socio_economic_significance = models.TextField(blank=True)
+    monitoring_evaluation = models.TextField(blank=True)
+    references = models.TextField(blank=True)
 
     # DPMIS-based spec PM-03 project details
     description = models.TextField(blank=True)
@@ -101,11 +114,52 @@ class Project(models.Model):
     proposal_reviewed_on = models.DateField(null=True, blank=True)
     proposal_approved_on = models.DateField(null=True, blank=True)
     reviewing_body = models.CharField(max_length=150, blank=True, help_text="e.g. ITRC, ETRC, CRC")
+    # Annex A endorsement page, recorded as reference like the dates above (no in-system signing).
+    # proposal_submitted_on = "Submitted by" date, proposal_approved_on = University President's date.
+    endorsed_by_dean = models.CharField(max_length=150, blank=True)
+    endorsed_by_dean_on = models.DateField(null=True, blank=True)
+    noted_by_rds_director = models.CharField(max_length=150, blank=True)
+    noted_by_rds_director_on = models.DateField(null=True, blank=True)
+    recommended_by_campus_director = models.CharField(max_length=150, blank=True)
+    recommended_by_campus_director_on = models.DateField(null=True, blank=True)
+    recommended_by_vprde = models.CharField(max_length=150, blank=True)
+    recommended_by_vprde_on = models.DateField(null=True, blank=True)
+    approved_by_president = models.CharField(max_length=150, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.project_code} - {self.title}"
+
+
+class ProjectTeamMember(models.Model):
+    """Co-Project Leader and Project Team rows of LSPU-RDO-SF-018 Section I. Name is free text because the form
+    lists people who may not have RMIS accounts, or whole groups (e.g. "EIU Coordinators"); user is optional."""
+
+    ROLE_CHOICES = (("co_leader", "Co-Project Leader"), ("member", "Team Member"))
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="team_members")
+    member_role = models.CharField(max_length=10, choices=ROLE_CHOICES, default="member")
+    name = models.CharField(max_length=200)
+    gender = models.CharField(max_length=10, choices=Project.GENDER_CHOICES, blank=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="team_memberships"
+    )
+
+    def __str__(self):
+        return f"{self.project.project_code}: {self.name} ({self.get_member_role_display()})"
+
+
+class TargetBeneficiary(models.Model):
+    """LSPU-RDO-SF-018 Section VII: one row per beneficiary group with its total."""
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="target_beneficiaries")
+    group = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    total = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.project.project_code}: {self.group} ({self.total})"
 
 
 class ProjectStatusHistory(models.Model):

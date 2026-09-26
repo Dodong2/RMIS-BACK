@@ -49,6 +49,11 @@ class LineItem(models.Model):
     fiscal_year = models.PositiveIntegerField(null=True, blank=True)
     funding_source = models.CharField(max_length=150, blank=True, help_text="e.g. LSPU GAA, DOST-PCAARRD, LGU")
     is_counterpart = models.BooleanField(default=False, help_text="Counterpart (institutional share) funding")
+    # LSPU-RDO-SF-018 Section X quarterly breakdown; optional, must add up to amount when given
+    q1_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    q2_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    q3_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    q4_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     is_app_flagged = models.BooleanField(default=False, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

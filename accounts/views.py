@@ -272,8 +272,8 @@ class PermissionMatrixView(APIView):
 
 
 class UserScopeView(APIView):
-    """PATCH {"campus": "...", "college": "..."}. Only campus is enforced today (accounts.permissions.scoped_projects);
-    college is stored for when Project gets a college field."""
+    """PATCH {"campus": "...", "college": "..."}. Both are enforced against Project.campus/college
+    for campus-scoped roles (accounts.permissions.scoped_projects)."""
 
     permission_classes = [HasRole("accounts.manage_users")]
 
