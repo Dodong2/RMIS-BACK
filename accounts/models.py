@@ -87,3 +87,24 @@ class RolePermission(models.Model):
 
     def __str__(self):
         return f"{self.role.code} -> {self.permission.code}"
+
+
+class TemporaryReplacement(models.Model):
+    """Acting replacement for a suspended user (client clarification Q3: suspend keeps assignments and can assign a
+    temporary replacement). While current, the replacement also sees and manages the programs/projects/studies the
+    suspended user leads, via accounts.permissions.scoped_projects. The replacement's own role is unchanged (one role
+    per user), so write permissions still come from that role. Ended, never deleted, so the history stays."""
+
+    suspended_user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="replacements")
+    replacement = models.ForeignKey(User, on_delete=models.PROTECT, related_name="acting_for")
+    designation = models.CharField(max_length=150, blank=True, help_text="e.g. Study Leader (Acting)")
+    coverage = models.TextField(blank=True, help_text="What the replacement covers")
+    start_date = models.DateField()
+    end_date = models.DateField()
+    basis = models.CharField(max_length=200, blank=True, help_text="Office order / memo number")
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="replacements_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True, help_text="Set when ended early or the user is reactivated")
+
+    def __str__(self):
+        return f"{self.replacement} acting for {self.suspended_user} ({self.start_date} to {self.end_date})"

@@ -8,8 +8,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import AuditLog, Permission, Role, RolePermission, User
-from .serializers import AuditLogSerializer, RoleSerializer, PendingUserSerializer, UserListSerializer, UserScopeSerializer
+from .models import AuditLog, Permission, Role, RolePermission, TemporaryReplacement, User
+from .serializers import (
+    AuditLogSerializer, RoleSerializer, PendingUserSerializer, TemporaryReplacementSerializer, UserListSerializer,
+    UserScopeSerializer,
+)
 from .permissions import HasRole
 from .emails import notify_admins_new_registration, send_role_confirmation_email
 
@@ -184,6 +187,8 @@ class ToggleUserActiveView(APIView):
         user.account_status = "suspended" if user.is_active else "active"
         user.is_active = user.account_status == "active"
         user.save(update_fields=["account_status", "is_active"])
+        if user.is_active:
+            end_replacements(user)
         return Response({"detail": "Activated." if user.is_active else "Suspended.", "is_active": user.is_active,
                          "account_status": user.account_status})
 
@@ -201,6 +206,13 @@ def active_responsibilities(user):
         "studies": user.led_studies.filter(status="active").count(),
         "assignments": ProjectAssignment.objects.filter(user=user).filter(Q(end_date__isnull=True) | Q(end_date__gte=today)).count(),
     }
+
+
+def end_replacements(user):
+    """A replacement only covers a suspension, so reactivating or deactivating the user ends it."""
+    from django.utils import timezone
+
+    TemporaryReplacement.objects.filter(suspended_user=user, ended_at__isnull=True).update(ended_at=timezone.now())
 
 
 class UserAccountStatusView(APIView):
@@ -225,6 +237,8 @@ class UserAccountStatusView(APIView):
         user.account_status = {"suspend": "suspended", "reactivate": "active", "deactivate": "deactivated"}[action]
         user.is_active = user.account_status == "active"
         user.save(update_fields=["account_status", "is_active"])
+        if action != "suspend":
+            end_replacements(user)
         return Response({"id": user.id, "account_status": user.account_status, "is_active": user.is_active})
 
 
@@ -290,3 +304,47 @@ class UserScopeView(APIView):
         user.scope = scope
         user.save(update_fields=["scope"])
         return Response({"id": user.id, "scope": user.scope})
+
+
+class TemporaryReplacementListCreateView(generics.ListCreateAPIView):
+    """Temporary replacements for suspended users (client clarification Q3). ?suspended_user=<id>, ?current=true."""
+
+    serializer_class = TemporaryReplacementSerializer
+    permission_classes = [HasRole("accounts.manage_users")]
+
+    def get_queryset(self):
+        from datetime import date
+
+        qs = TemporaryReplacement.objects.select_related("suspended_user", "replacement").order_by("-start_date", "-id")
+        suspended_user = self.request.query_params.get("suspended_user")
+        if suspended_user:
+            qs = qs.filter(suspended_user_id=suspended_user)
+        if self.request.query_params.get("current") == "true":
+            today = date.today()
+            qs = qs.filter(ended_at__isnull=True, start_date__lte=today, end_date__gte=today)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+
+class TemporaryReplacementDetailView(generics.RetrieveUpdateAPIView):
+    queryset = TemporaryReplacement.objects.all()
+    serializer_class = TemporaryReplacementSerializer
+    permission_classes = [HasRole("accounts.manage_users")]
+
+
+class TemporaryReplacementEndView(APIView):
+    """POST: end a replacement early."""
+
+    permission_classes = [HasRole("accounts.manage_users")]
+
+    def post(self, request, pk):
+        from django.utils import timezone
+
+        replacement = get_object_or_404(TemporaryReplacement, pk=pk)
+        if replacement.ended_at:
+            return Response({"detail": "This replacement has already ended."}, status=400)
+        replacement.ended_at = timezone.now()
+        replacement.save(update_fields=["ended_at"])
+        return Response(TemporaryReplacementSerializer(replacement).data)

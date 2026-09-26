@@ -41,6 +41,18 @@ class RiskDashboardView(APIView):
         )
 
 
+class RiskAlertsView(APIView):
+    """GET risk/alerts/ — the requesting user's live risk inbox (Q7 actions); feeds the notification bell."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.utils import timezone
+
+        alerts = services.compute_risk_alerts(request.user)
+        return Response({"as_of": timezone.localdate(), "count": len(alerts), "alerts": alerts})
+
+
 class ProjectRiskListCreateView(RegisterWritesMixin, generics.ListCreateAPIView):
     serializer_class = ProjectRiskSerializer
 

@@ -30,10 +30,21 @@ def role_can(user, permission_code):
 
 # Row-level scope for budget/financial data (client clarification Q12, Q1c).
 # Leaders see only projects they lead (directly, or via a study/program they lead); project_staff see
-# no budget data; campus-level roles are limited to User.scope["campus"] and/or ["college"] when an admin has set them.
+# no budget data (unless acting for a suspended leader); campus-level roles are limited to User.scope["campus"] and/or ["college"] when an admin has set them.
 # Everyone else (system_admin, vprei, drd, university_admin) is university-wide.
 LEADER_ROLES = ["program_leader", "project_leader", "study_leader"]
 CAMPUS_SCOPED_ROLES = ["crc_chair", "finance_budget", "procurement_officer_lib", "riuh"]
+
+
+def acting_for(user):
+    """IDs of the suspended users this user is currently the temporary replacement for (client clarification Q3)."""
+    from datetime import date
+    from accounts.models import TemporaryReplacement
+
+    today = date.today()
+    return list(TemporaryReplacement.objects.filter(
+        replacement=user, ended_at__isnull=True, start_date__lte=today, end_date__gte=today,
+    ).values_list("suspended_user_id", flat=True))
 
 
 def scoped_projects(user):
@@ -42,9 +53,11 @@ def scoped_projects(user):
     from research_projects.models import Project
 
     code = user.role.code if user.role else None
-    if code in LEADER_ROLES:
+    acting = acting_for(user)
+    if code in LEADER_ROLES or (code == "project_staff" and acting):
+        leads = [user.pk, *acting]
         return Project.objects.filter(
-            Q(lead=user) | Q(studies__lead=user) | Q(program__lead=user)
+            Q(lead__in=leads) | Q(studies__lead__in=leads) | Q(program__lead__in=leads)
         ).distinct()
     if code == "project_staff" or code is None:
         return Project.objects.none()
@@ -89,6 +102,14 @@ UNIVERSITY_WIDE_ROLES = ["system_admin", "vprei", "drd", "university_admin"]
 
 
 def visible_documents(user, queryset):
+    """Role/scope/sensitivity visibility (Q8), plus documents shared with this user and not yet expired/revoked."""
+    from datetime import date
+
+    shared = queryset.filter(shares__user=user, shares__revoked_at__isnull=True, shares__expires_on__gte=date.today())
+    return (_visible_by_role(user, queryset) | shared).distinct()
+
+
+def _visible_by_role(user, queryset):
     from django.db.models import Q
     from research_projects.models import Project
 
@@ -102,12 +123,11 @@ def visible_documents(user, queryset):
     if code in ("finance_budget", "procurement_officer_lib"):
         return queryset.filter(sensitivity="financial")
     if code in LEADER_ROLES or code == "project_staff":
+        leads = [user.pk, *acting_for(user)]
         team = Project.objects.filter(
-            Q(lead=user) | Q(studies__lead=user) | Q(program__lead=user)
+            Q(lead__in=leads) | Q(studies__lead__in=leads) | Q(program__lead__in=leads)
             | Q(assignments__user=user) | Q(studies__assignments__user=user)
         )
-        led = Project.objects.filter(Q(lead=user) | Q(program__lead=user))
-        return queryset.filter(
-            Q(sensitivity="project_team", project__in=team) | Q(sensitivity="financial", project__in=led)
-        ).distinct()
+        led = Project.objects.filter(Q(lead__in=leads) | Q(program__lead__in=leads))
+        return queryset.filter(Q(sensitivity="project_team", project__in=team) | Q(sensitivity="financial", project__in=led))
     return queryset.none()

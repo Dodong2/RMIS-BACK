@@ -160,3 +160,53 @@ def compute_risk_dashboard(campus=None, funding_type=None):
         "by_risk_level": by_level,
         "flagged_projects": flagged_projects,
     }
+
+
+# Q7 actions as a live inbox (no push/Celery): which risk levels each role is alerted about. Leaders get the
+# "reminder" band and up on their own projects, RIUH/CRC the "notice" band and up in their scope, VP/DRD only
+# escalations. system_admin sees everything from medium up for testing. Other roles get no alerts.
+ALERT_LEVELS_BY_ROLE = {
+    "program_leader": ("medium", "high", "critical"),
+    "project_leader": ("medium", "high", "critical"),
+    "study_leader": ("medium", "high", "critical"),
+    "riuh": ("high", "critical"),
+    "crc_chair": ("high", "critical"),
+    "vprei": ("critical",),
+    "drd": ("critical",),
+    "system_admin": ("medium", "high", "critical"),
+}
+
+
+def compute_risk_alerts(user):
+    """Active projects in the user's scope whose risk level is in the user's alert band, worst first."""
+    from accounts.permissions import scoped_projects
+
+    levels = ALERT_LEVELS_BY_ROLE.get(user.role.code if user.role else None, ())
+    if not levels:
+        return []
+    projects = Project.objects.filter(status="active")
+    scope = scoped_projects(user)
+    if scope is not None:
+        projects = projects.filter(pk__in=scope)
+
+    alerts = []
+    for project in projects:
+        risk = compute_project_risk(project)
+        if risk["risk_level"] not in levels:
+            continue
+        triggers = [name for name, flag in risk["flags"].items() if flag["flagged"] and flag["score"] == risk["risk_score"]]
+        trigger = triggers[0].replace("_", " ") if triggers else "risk register entry"
+        alerts.append({
+            "project": project.id,
+            "project_code": project.project_code,
+            "title": project.title,
+            "risk_level": risk["risk_level"],
+            "risk_score": risk["risk_score"],
+            "top_trigger": trigger,
+            "recommended_action": risk["recommended_action"],
+            "type": "warning" if risk["risk_level"] == "medium" else "danger",
+            "text": f"{project.project_code}: {risk['risk_level'].title()} risk ({risk['risk_score']}) from {trigger}. "
+                    f"{risk['recommended_action']}.",
+        })
+    alerts.sort(key=lambda a: a["risk_score"], reverse=True)
+    return alerts

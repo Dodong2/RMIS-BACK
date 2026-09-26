@@ -1,8 +1,9 @@
 import re
 
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Document
+from .models import Document, DocumentShare
 from .storage import get_signed_url, upload_document
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
@@ -81,3 +82,31 @@ class DocumentSerializer(serializers.ModelSerializer):
             content_type=file_obj.content_type or "",
             **validated_data,
         )
+
+
+class DocumentShareSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    user_role = serializers.CharField(source="user.role.name", read_only=True, default=None)
+    granted_by_email = serializers.EmailField(source="granted_by.email", read_only=True)
+    is_active = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DocumentShare
+        fields = [
+            "id", "document", "user", "user_email", "user_role", "reason", "expires_on",
+            "granted_by", "granted_by_email", "granted_at", "revoked_by", "revoked_at", "is_active",
+        ]
+        read_only_fields = ["document", "granted_by", "revoked_by", "revoked_at"]
+
+    def get_is_active(self, obj):
+        return obj.revoked_at is None and obj.expires_on >= timezone.localdate()
+
+    def validate_expires_on(self, value):
+        if value < timezone.localdate():
+            raise serializers.ValidationError("Expiry date can't be in the past.")
+        return value
+
+    def validate_user(self, user):
+        if user.account_status != "active" or user.is_pending_role:
+            raise serializers.ValidationError("Share only with an active, confirmed account.")
+        return user

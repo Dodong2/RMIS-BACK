@@ -80,3 +80,23 @@ class Document(models.Model):
 
     def __str__(self):
         return f"{self.get_document_type_display()} v{self.version_number} - {self.project}"
+
+
+class DocumentShare(models.Model):
+    """Limited per-document sharing with expiry (client clarification Q8). Lets one RMIS user outside the role/scope
+    rules see one document until expires_on. Granted by the project's (or program's) leader, or a documents.manage
+    holder; revoked, never deleted, so every grant stays on record."""
+
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="shares")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="document_shares")
+    reason = models.CharField(max_length=300, blank=True, help_text="e.g. External evaluation by DOST-PCAARRD")
+    expires_on = models.DateField()
+    granted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="document_shares_granted")
+    granted_at = models.DateTimeField(auto_now_add=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="document_shares_revoked"
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.document} shared with {self.user} until {self.expires_on}"

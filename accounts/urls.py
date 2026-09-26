@@ -14,6 +14,9 @@ from .views import (
     ToggleUserActiveView,
     PermissionMatrixView,
     UserScopeView,
+    TemporaryReplacementListCreateView,
+    TemporaryReplacementDetailView,
+    TemporaryReplacementEndView,
 )
 
 urlpatterns = [
@@ -28,6 +31,9 @@ urlpatterns = [
     path("admin/users/<int:user_id>/update-role/", UpdateUserRoleView.as_view()),
     path("admin/users/<int:user_id>/toggle-active/", ToggleUserActiveView.as_view()),
     path("admin/users/<int:user_id>/account-status/", UserAccountStatusView.as_view()),
+    path("admin/temporary-replacements/", TemporaryReplacementListCreateView.as_view()),
+    path("admin/temporary-replacements/<int:pk>/", TemporaryReplacementDetailView.as_view()),
+    path("admin/temporary-replacements/<int:pk>/end/", TemporaryReplacementEndView.as_view()),
     path("admin/audit-logs/", AuditLogListView.as_view()),
     path("admin/permissions/", PermissionMatrixView.as_view()),
     path("admin/users/<int:user_id>/scope/", UserScopeView.as_view()),
