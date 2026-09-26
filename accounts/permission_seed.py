@@ -45,3 +45,28 @@ PERMISSIONS = {
 SYSTEM_ADMIN_ONLY = ["system_admin"]
 USERS_BY_ROLE = ["system_admin", "crc_chair", "drd", "riuh", "program_leader", "project_leader", "study_leader"]
 LEADER_LOAD = ["system_admin", "crc_chair", "drd", "riuh", "program_leader", "project_leader"]
+
+
+def sync_role_permissions():
+    """Create every Permission and grant it to the roles in its source constant. Additive only (never revokes).
+    seed_roles calls this: on a fresh database the roles are created after migrate, so the seed migrations
+    had no roles to grant to. Bulk queries, since each round-trip to the hosted DB is slow."""
+    import importlib
+
+    from accounts.models import Permission, Role, RolePermission
+
+    existing = set(Permission.objects.values_list("code", flat=True))
+    Permission.objects.bulk_create([
+        Permission(code=code, module=module, name=name)
+        for code, (module, name, _) in PERMISSIONS.items() if code not in existing
+    ])
+    permissions = {p.code: p for p in Permission.objects.filter(code__in=PERMISSIONS)}
+    roles = {role.code: role for role in Role.objects.all()}
+    granted = set(RolePermission.objects.values_list("role__code", "permission__code"))
+    missing = []
+    for code, (_, _, source) in PERMISSIONS.items():
+        module_path, constant = source.split(":")
+        for role_code in getattr(importlib.import_module(module_path), constant):
+            if role_code in roles and (role_code, code) not in granted:
+                missing.append(RolePermission(role=roles[role_code], permission=permissions[code]))
+    RolePermission.objects.bulk_create(missing)

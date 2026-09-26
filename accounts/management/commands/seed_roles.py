@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 from accounts.models import Role
+from accounts.permission_seed import sync_role_permissions
 
 ROLES = [
     ("system_admin", "System Admin"),
@@ -21,4 +22,5 @@ class Command(BaseCommand):
     def handle(self, *args, **kwargs):
         for code, name in ROLES:
             Role.objects.update_or_create(code=code, defaults={"name": name})
-        self.stdout.write(self.style.SUCCESS(f"Seeded {len(ROLES)} roles."))
+        sync_role_permissions()
+        self.stdout.write(self.style.SUCCESS(f"Seeded {len(ROLES)} roles and their permissions."))

@@ -65,8 +65,6 @@ class GoogleRequestView(APIView):
             f"{settings.SUPABASE_URL}/auth/v1/user",
             headers={"Authorization": f"Bearer {token}", "apikey": settings.SUPABASE_PUBLISHABLE_KEY},
         )
-        print("SUPABASE STATUS:", resp.status_code)
-        print("SUPABASE BODY:", resp.text)
         if resp.status_code != 200:
             return Response({"detail": "Invalid Supabase token."}, status=401)
 

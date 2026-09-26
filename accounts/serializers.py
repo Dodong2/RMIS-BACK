@@ -1,6 +1,6 @@
 from datetime import date
 
-from dj_rest_auth.serializers import UserDetailsSerializer
+from dj_rest_auth.serializers import LoginSerializer, UserDetailsSerializer
 from rest_framework import serializers
 from .models import AuditLog, Role, TemporaryReplacement, User
 
@@ -17,6 +17,15 @@ class CustomUserDetailsSerializer(UserDetailsSerializer):
 
     class Meta(UserDetailsSerializer.Meta):
         fields = UserDetailsSerializer.Meta.fields + ("role", "is_pending_role", "is_active", "office", "position")
+
+
+class EmailLoginSerializer(LoginSerializer):
+    """Registration stores e-mails lowercased, but login matched them exactly, so "Leader@lspu.edu.ph" (phones
+    auto-capitalize) failed as a wrong password. Swap in the stored spelling before authenticating."""
+
+    def validate_email(self, value):
+        user = User.objects.filter(email__iexact=value.strip()).only("email").first() if value else None
+        return user.email if user else value
 
 
 class PendingUserSerializer(serializers.ModelSerializer):
