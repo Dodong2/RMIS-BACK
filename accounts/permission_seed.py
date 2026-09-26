@@ -43,5 +43,5 @@ PERMISSIONS = {
 
 # Gates that were inline HasRole([...]) lists rather than named constants.
 SYSTEM_ADMIN_ONLY = ["system_admin"]
-USERS_BY_ROLE = ["system_admin", "crc_chair"]
+USERS_BY_ROLE = ["system_admin", "crc_chair", "drd", "riuh", "program_leader", "project_leader", "study_leader"]
 LEADER_LOAD = ["system_admin", "crc_chair", "drd", "riuh", "program_leader", "project_leader"]
