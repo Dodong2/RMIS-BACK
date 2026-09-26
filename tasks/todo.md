@@ -337,17 +337,20 @@ P12c: dashboards, risk dashboard/status, reports, forecasting list.
 
 ### P13: Temporary replacement while a leader is suspended (Q3)
 `Project.acting_lead` (+ `acting_until`), set via the `account-status` suspend action or project PATCH; `scoped_projects` includes acting leads.
-- [ ] Suspend lead with acting_lead → acting lead sees/manages the project; reactivation clears it
+- [x] Suspend lead with acting_lead → acting lead sees/manages the project; reactivation clears it
+  (2026-09-26: built as a per-user `accounts.TemporaryReplacement` to match the frontend mock `users.ts`, not `Project.acting_lead`; covers every project the suspended user leads)
 **Scope:** S
 
 ### P14: Limited per-document sharing (Q8)
 `DocumentShare(document, user, granted_by, expires_at)`; project leader grants; `visible_documents` includes unexpired shares.
-- [ ] Shared user sees doc until expiry; non-leader grant → 403
+- [x] Shared user sees doc until expiry; non-leader grant → 403
+  (2026-09-26: `document_management.DocumentShare` with `expires_on`, revoke instead of delete; granters = project/program leader or `documents.manage`, and only for docs they can see)
 **Scope:** S
 
 ### P15: Risk alerts inbox (Q7 actions)
 `GET risk/alerts/`: leaders get medium+ on own projects, RIUH/CRC get high+ in scope, VP/DRD get critical. Live, no push.
-- [ ] Each role gets the right band set for a constructed high + critical project
+- [x] Each role gets the right band set for a constructed high + critical project
+  (2026-09-26: `risk_indicators.services.ALERT_LEVELS_BY_ROLE`; system_admin gets medium+ for testing)
 **Scope:** S
 
 ### Checkpoint 3C

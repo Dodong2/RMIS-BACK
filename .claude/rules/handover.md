@@ -14,7 +14,8 @@ answers to 12 questions). Full plan, decisions, and per-task results: `tasks/pla
 
 **Carl's decisions:** 12 role codes are final (the DPMIS 7 roles are only mapped, see plan.md). Auth/login is unchanged.
 RBAC: a *minimal subset* only (suspend state, budget row-level scope, document sensitivity, compliance
-leader-encode + RIUH-verify). NO multi-role or per-doc sharing (future work). (DB permission tables were later approved as Q2 on 2026-09-25 and built in Phase 3B — see "Last thing done".) The ₱100k dry cap
+leader-encode + RIUH-verify). NO multi-role (future work). Per-doc sharing was also "future work" here, REVERSED
+2026-09-26: Carl asked for P14 (client Q8) after the frontend mock audit, now built. (DB permission tables were later approved as Q2 on 2026-09-25 and built in Phase 3B — see "Last thing done".) The ₱100k dry cap
 is back as a **non-blocking warning** (`exceeds_dry_cap`). Budget Office sync = XLSX import + reconcile.
 Cross-department = `department` on assignments.
 
@@ -86,6 +87,18 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
 - Module 14 (reports app): done, migrated, `manage.py check` passes. **This is the module that actually renders files** — Module 10's `exports/appendix-e/f/g` return structured JSON only; this module wraps that same JSON (imported directly from `dashboard.services`, no data-gathering duplicated) into real CSV/XLSX/PDF/DOCX bytes via `reports/renderers.py` (`csv` stdlib + new deps `openpyxl`/`reportlab`/`python-docx`, added to `requirements.txt`). `normalize_to_rows()` flattens both shapes the appendix exports come in — a list of dicts (Appendix E, one row per project-year) or a single dict (Appendix F/G, one snapshot) — into a uniform row/fieldname structure so all four renderers share one code path; every value is stringified before rendering to sidestep Decimal/date/datetime type quirks across the four libraries. Added a 5th report type beyond the three appendices: `reports/services.py::project_list_report()` — the docx's "custom filtered report builder," deliberately scoped to a fixed set of `Project` fields + campus/funding_type/status/rei_thrust/year filters rather than a fully generic query/column designer (that would be over-engineering for this capstone). `GeneratedReportLog` is a lightweight audit-trail model (report_type/format/filters/who/when) — logs every generation but does NOT store the file itself (regenerated on-demand each time, not archived; that'd be Module 7's job if ever needed). `logs/` listing is gated to `system_admin`/`riuh`/`drd`/`vprei` (the docx's stated primary users); the four export endpoints themselves are open to any authenticated role, matching Module 10's equivalent JSON endpoints. **Real bug caught and fixed during testing**: the export endpoints originally used a `?format=pdf` query param, which collides with DRF's own reserved `format` query param for content-type negotiation — DRF's `perform_content_negotiation` intercepted it and raised `Http404` before the view's `get()` ever ran, since no registered DRF renderer handles "pdf". Renamed to `?file_format=` everywhere; confirmed fixed via view-level test. Verified via shell smoke test (all 4 formats × all 4 data shapes — Appendix E/F/G plus the project-list report — produced non-empty valid bytes; an unsupported format string correctly raises `ValueError`) and an `APIRequestFactory` view-level test (200 + correct `Content-Type`/`Content-Disposition` + `GeneratedReportLog` row created on success, 400 on a bad `file_format`, 403 for `project_staff` hitting `logs/`, 200 for `system_admin`) — both wrapped in `with transaction.atomic():` from the start, confirmed no leaked data afterward.
 
 ## What the frontend still needs from this module
+- **Phase 3C P13–P15 (2026-09-26) — replaces 3 of the 6 frontend mocks:**
+  - `mocks/users.ts` Temporary Replacement → `admin/temporary-replacements/` (GET `?suspended_user=`/`?current=true`,
+    POST {suspended_user, replacement, designation, coverage, start_date, end_date, basis}), `<id>/` PATCH,
+    `<id>/end/` POST. Only for a *suspended* user; reactivate/deactivate ends it automatically. system_admin only.
+  - `mocks/documents.ts` shares → `documents/documents/<id>/shares/` GET/POST {user, expires_on, reason} (403 unless
+    project/program leader or RIUH/admin who can see the doc), `documents/documents/shares/<id>/revoke/` POST. Rows carry
+    `user_email`, `user_role`, `granted_by_email`, `is_active`. Shares go to RMIS users only (no external emails).
+  - `mocks/notifications.ts` bell → `risk/alerts/` GET: `{as_of, count, alerts: [{project, project_code, title,
+    risk_level, risk_score, top_trigger, recommended_action, type: warning|danger, text}]}`. Live-computed, so no
+    per-item time/read state.
+  - Still mock-only, in NO plan: Work Plan version history, Reports scheduled reports (needs a scheduler = the
+    Celery discussion), System Settings info.
 - **Module 2 registration (2026-09-26) — BREAKING:** `sector` is gone, replaced by `sectors: string[]` (required, ≥1;
   `sector_other` required when it contains `"others"`) — `RegisterProjectPage.tsx`, `ProjectDetailPage.tsx`,
   `lib/researchApi.ts`, `types/research.ts` still use `sector`. Also new: the Project fields listed in the Module 2 status
@@ -206,18 +219,22 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-09-26: **Project registration aligned to LSPU-RDO-SF-018 + Excel import + registration roles per docx M2**,
-committed as `cdbb7d0` on branch `feat/proposal-form-registration` (not yet merged to main). Details in the Module 2
-status line. `scope.college` is now enforced in `scoped_projects` (campus-scoped roles: crc_chair, finance_budget,
-procurement_officer_lib, riuh) — side effect: crc_chair/riuh with a campus/college scope can now only edit projects in it.
-`permission_parity.py` = 0 differences. Earlier: Phase 3B permission table (2026-09-25), DPMIS alignment (2026-09-24).
-NOTE for smoke tests: `APIClient` needs `HTTP_HOST="localhost"` (ALLOWED_HOSTS 400 otherwise), and test users need a
-unique `username` (User has a unique username, blank collides).
+2026-09-26 (second round): **Phase 3C P13/P14/P15** on branch `feat/proposal-form-registration`, after a frontend audit
+found 6 mocks with no backend. P13 `accounts.TemporaryReplacement` (migration `accounts.0011`; acting users get the
+suspended user's leader scope via `accounts.permissions.acting_for` in `scoped_projects`/`visible_documents`; own role
+permissions unchanged, a project_staff replacement gets read scope). P14 `document_management.DocumentShare`
+(migration `0004`; `visible_documents` = role rules ∪ active shares). P15 `GET risk/alerts/`. No new permission codes;
+parity 0 differences; all smoke tests (these + the registration ones) pass and roll back clean.
+Earlier the same day: LSPU-RDO-SF-018 registration + Excel import (`cdbb7d0`), and `d3de4be` (another session:
+`accounts.view_users_by_role` widened to every projects.register role, migration `0010`, so leader pickers work).
+NOTE for smoke tests: `APIClient` needs `HTTP_HOST="localhost"`, test users need a unique `username`, and document
+routes are under `/api/documents/documents/...`.
 
 ## Next thing to do in this repo
 1. Merge `feat/proposal-form-registration` into main (`git checkout main && git merge --ff-only feat/proposal-form-registration`).
-2. Frontend: the BREAKING `sector` → `sectors` change and the Excel import UI first (see "What the frontend still
-   needs"), then the older backlog: new DPMIS endpoints, `critical` risk level, permission matrix + user scope screens.
+   Phase 3C Checkpoint (todo.md) regression sweep is the smoke tests above; tick it when merged.
+2. Frontend: the BREAKING `sector` → `sectors` change and the Excel import UI first, then swap the 3 P13–P15 mocks
+   for the real endpoints (see "What the frontend still needs"), then the older backlog: new DPMIS endpoints, `critical` risk level, permission matrix + user scope screens.
 3. Open from this round, ask Carl/client: Capsule CV (Annex A, leader/co-leader) — asked, not answered, not built;
    study leaders can attach a Study to any project naming themselves as lead, which then puts that project in their
    edit scope — confirm that's acceptable; project code isn't on the form but is required (template asks for it);
