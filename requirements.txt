@@ -10,6 +10,7 @@ djangorestframework==3.18.1
 djangorestframework_simplejwt==5.5.1
 et_xmlfile==2.0.0
 formulaic==1.2.2
+gunicorn==26.2.0
 idna==3.19
 interface_meta==2.0.1
 lxml==6.1.3
