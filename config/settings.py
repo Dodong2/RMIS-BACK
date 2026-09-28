@@ -4,11 +4,22 @@ import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 env = environ.Env()
-environ.Env.read_env(BASE_DIR / ".env")
+
+# Local dev reads .env; inside Docker there is no .env file —
+# values come from the Dokploy Environment tab instead.
+if (BASE_DIR / ".env").exists():
+    environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env.bool("DEBUG", default=False)
-ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
+
+# e.g. ALLOWED_HOSTS=127.0.0.1,localhost,.trycloudflare.com
+# The leading dot on .trycloudflare.com accepts ANY random quick-tunnel subdomain,
+# so the backend never needs changing when the tunnel URL changes.
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["127.0.0.1", "localhost"])
+
+# e.g. CSRF_TRUSTED_ORIGINS=https://*.trycloudflare.com
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -50,6 +61,7 @@ SITE_ID = 1
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",   # must be near the top
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",   # serves /static/ (admin, DRF pages) without nginx
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -90,6 +102,9 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD"),
         "HOST": env("DB_HOST"),
         "PORT": env("DB_PORT"),
+        "CONN_MAX_AGE": 60,                 # reuse DB connections instead of reconnecting per request
+        "CONN_HEALTH_CHECKS": True,         # drop dead connections (e.g. after network change)
+        "OPTIONS": {"sslmode": "require"},  # Supabase requires SSL
     }
 }
 
@@ -106,7 +121,20 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Cloudflare Tunnel terminates HTTPS and forwards plain HTTP to the container.
+# This header tells Django the original request was HTTPS.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -124,7 +152,7 @@ FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
 
 REST_AUTH = {
     "USE_JWT": True,
-    "JWT_AUTH_HTTPONLY": False,   # simplest for polyrepo/cross-domain; see note below
+    "JWT_AUTH_HTTPONLY": False,   # simplest for polyrepo/cross-domain
     "USER_DETAILS_SERIALIZER": "accounts.serializers.CustomUserDetailsSerializer",
     "LOGIN_SERIALIZER": "accounts.serializers.EmailLoginSerializer",
 }
@@ -135,6 +163,8 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
 }
 
+# Exact-string match incl. scheme, no trailing slash:
+# CORS_ALLOWED_ORIGINS=http://localhost:5173,https://rmis.netlify.app
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 
 SUPABASE_URL = env("SUPABASE_URL")
@@ -142,6 +172,6 @@ SUPABASE_PUBLISHABLE_KEY = env("SUPABASE_PUBLISHABLE_KEY")
 SUPABASE_SERVICE_ROLE_KEY = env("SUPABASE_SERVICE_ROLE_KEY", default="")
 SUPABASE_STORAGE_BUCKET = env("SUPABASE_STORAGE_BUCKET", default="research-documents")
 
-ACCOUNT_EMAIL_VERIFICATION = "none" 
-ACCOUNT_LOGIN_METHODS = {"email"}     
+ACCOUNT_EMAIL_VERIFICATION = "none"
+ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]

@@ -3,9 +3,14 @@ from dj_rest_auth.views import LoginView, LogoutView, PasswordChangeView, UserDe
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenVerifyView
+from django.http import JsonResponse
 
 # dj-rest-auth's routes minus password reset: its reset flow crashed (NoReverseMatch) and sends through Django SMTP,
 # which RMIS doesn't use (e-mail goes through Brevo). No frontend screen uses it.
+
+def health(request):
+    return JsonResponse({"status": "ok"})
+
 auth_urlpatterns = [
     path("login/", LoginView.as_view(), name="rest_login"),
     path("logout/", LogoutView.as_view(), name="rest_logout"),
@@ -16,6 +21,7 @@ auth_urlpatterns = [
 ]
 
 urlpatterns = [
+    path("health/", health),
     path("admin/", admin.site.urls),
     path("api/auth/", include(auth_urlpatterns)),
     path("api/", include("accounts.urls")),
