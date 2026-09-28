@@ -61,8 +61,8 @@ The client calls these FINAL. Checked against the code:
 
 ## Overview
 The 15 spec modules were checked against the actual backend API (every `urls.py`, plus models and
-serializers). Most requirements already exist under LSPU names. The docx's "Module 15" is our Reports
-app (Module 14) renumbered, so it's not a new module. The real work: (1) map the 7 spec roles to the 12
+serializers). Most requirements already exist under LSPU names. This spec docx's own "Module 15" is our Reports
+app (Module 14) renumbered. Our real Module 15 (Budget Office Sync) comes from the Alignment doc instead. The real work: (1) map the 7 spec roles to the 12
 codes and enforce the docx's Role-to-Module Access Matrix, including read restrictions (today all reads
 are open to any authenticated user); (2) fill the functional gaps below. All changes are additive. App
 names and URLs stay the same.

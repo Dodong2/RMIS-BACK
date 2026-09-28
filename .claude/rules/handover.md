@@ -5,6 +5,14 @@ All 15 modules of the client's revised structure are built. **Module 15 = Budget
 `budget_sync`), defined 2026-09-24 in `RMIS chap1/RMIS_Module_Objective_Alignment.docx`. That supersedes the
 old "Module 15 pending" note below. The latest round was the DPMIS-spec alignment (see the next section).
 
+**Module numbering — two client docs number modules differently. Use the Alignment doc's numbering everywhere:**
+- **Official (`RMIS_Module_Objective_Alignment.docx`):** Modules 1–14 = the original structure (Module 14 = Reports and
+  Data Export, `reports` app) + **Module 15 = Budget Office Data Synchronization** (`budget_sync`). This is what the
+  frontend sidebar, the thesis objectives, and this handover use.
+- **Reference only (`DPMIS-Based_RMIS_...Specification.docx`):** its own 15-module list, where *spec* Module 15 = Reports
+  (= our Module 14, renumbered). It is used only for requirement IDs in `tasks/plan.md` ("M1…M15"), not as our numbering.
+  So "spec Module 15" in `tasks/plan.md` means Reports, NOT Budget Sync.
+
 ## DPMIS alignment round (2026-09-24) — READ THIS FIRST
 Source docs (client, all in `RMIS chap1/` except the first, which is at the repo root):
 `DPMIS-Based_RMIS_Functional_Requirements_and_Module_Specification.docx` (15-module DPMIS reference spec),

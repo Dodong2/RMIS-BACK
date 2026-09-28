@@ -236,9 +236,10 @@ Every task: check + makemigrations --check + rolled-back smoke test.
 
 ## Checkpoint 2 / T21: Traceability + handover
 - [ ] `docs/dpmis_traceability.html` (plain HTML, no CSS): every requirement ID → endpoint, all ✅
-- [ ] `.claude/rules/handover.md`: new module numbering, role mapping, new endpoints, and a note
-      that the "Module 15 pending" entry is superseded (Reports = spec Module 15)
-- [ ] memory `module15-pending-and-thesis-objectives` updated
+- [x] `.claude/rules/handover.md`: new module numbering, role mapping, new endpoints, and a note
+      that the "Module 15 pending" entry is superseded (our Module 15 = Budget Office Sync per the Alignment doc;
+      the DPMIS spec's own "Module 15" = Reports = our Module 14)
+- [x] memory `module15-pending-and-thesis-objectives` updated
 
 
 ---
