@@ -22,9 +22,9 @@ def leader_owns(user, project=None, leads=()):
 
 
 def ensure_registrant_in_scope(serializer, project=None, leads=()):
-    """projects.register includes the leaders (Module Structure M2), but they may only register/edit records
-    they are part of. Other roles fall back to ensure_in_scope for existing projects. The Excel importer sets
-    context["defer_scope"] and checks the finished project instead, since its studies are saved after it."""
+    """projects.edit includes the leaders, but they may only edit records they are part of. Other roles fall back
+    to ensure_in_scope for existing projects. The Excel importer sets context["defer_scope"] and checks the
+    finished project instead, since its studies are saved after it."""
     request = serializer.context.get("request")
     if request is None or serializer.context.get("defer_scope"):
         return
@@ -35,6 +35,18 @@ def ensure_registrant_in_scope(serializer, project=None, leads=()):
         return
     if not leader_owns(user, project, leads):
         raise serializers.ValidationError("Leaders can only register or edit records they lead or belong to.")
+
+
+def ensure_leader_keeps(serializer, attrs, fields):
+    """Client decision 2026-09-29 (Option A): the CRC Chair (or DRD/RIUH) sets the official code, the leader and the
+    hierarchy placement (Clarification Answers Q4 + summary table); leaders edit the rest of their own records.
+    Unchanged values are fine, so the frontend can still PATCH the whole form."""
+    request = serializer.context.get("request")
+    if request is None or serializer.instance is None or not (request.user.role and request.user.role.code in LEADER_ROLES):
+        return
+    changed = [f for f in fields if f in attrs and attrs[f] != getattr(serializer.instance, f)]
+    if changed:
+        raise serializers.ValidationError({f: "Only the CRC Chair, DRD or RIUH can change this." for f in changed})
 
 
 def validate_lead_concurrency(user, funding_type, queryset, exclude_pk, default_cap):
@@ -63,6 +75,7 @@ class ProgramSerializer(serializers.ModelSerializer):
         lead = attrs.get("lead", getattr(self.instance, "lead", None))
         funding_type = attrs.get("funding_type", getattr(self.instance, "funding_type", None))
         validate_lead_role(lead, "program_leader")
+        ensure_leader_keeps(self, attrs, ["code", "lead"])
         ensure_registrant_in_scope(self, leads=[lead, getattr(self.instance, "lead", None)])
         validate_lead_concurrency(
             lead, funding_type, Program.objects.all(),
@@ -127,6 +140,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         if is_continuing and (continuing_year or 0) < 2:
             raise serializers.ValidationError({"continuing_year": "A continuing proposal needs its year (2 or later)."})
         validate_lead_role(lead, "project_leader")
+        ensure_leader_keeps(self, attrs, ["project_code", "lead", "program"])
         program = attrs.get("program", getattr(self.instance, "program", None))
         ensure_registrant_in_scope(self, self.instance, leads=[lead, program.lead if program else None])
         validate_lead_concurrency(
@@ -167,6 +181,7 @@ class StudySerializer(serializers.ModelSerializer):
         lead = attrs.get("lead", getattr(self.instance, "lead", None))
         project = attrs.get("project", getattr(self.instance, "project", None))
         validate_lead_role(lead, "study_leader")
+        ensure_leader_keeps(self, attrs, ["project", "lead"])
         program_lead = project.program.lead if project.program else None
         ensure_registrant_in_scope(self, project, leads=[lead, project.lead, program_lead])
         return attrs

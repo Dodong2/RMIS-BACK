@@ -57,6 +57,9 @@ class AuditLog(models.Model):
     path = models.CharField(max_length=500)
     status_code = models.PositiveSmallIntegerField()
     ip_address = models.GenericIPAddressField(null=True, blank=True)
+    # For 4xx/5xx only: the start of the response body (e.g. the 400's validation message), so a failed
+    # action during client testing can be explained from the audit screen without server logs.
+    error_detail = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

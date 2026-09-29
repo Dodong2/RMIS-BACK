@@ -25,7 +25,7 @@ class RMISTestCase(TestCase):
     def setUp(self):
         self.brevo_post = self._patch("accounts.emails.requests.post")
         self.supabase_get = self._patch("accounts.views.http.get")
-        self._patch("document_management.serializers.upload_document")
+        self.upload_document = self._patch("document_management.serializers.upload_document")
         self._patch("document_management.serializers.get_signed_url", return_value="https://signed.example/file")
 
     def _patch(self, target, **kwargs):

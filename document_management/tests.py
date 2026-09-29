@@ -1,5 +1,8 @@
 from datetime import date, timedelta
 
+import requests
+from django.core.files.uploadedfile import SimpleUploadedFile
+
 from accounts.testing import RMISTestCase
 from document_management.models import Document, DocumentShare
 from research_projects.models import Project
@@ -53,3 +56,56 @@ class DocumentSharingTests(RMISTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(self.riuh_can_open())
         self.assertIsNotNone(DocumentShare.objects.get().revoked_at)
+
+
+class DocumentUploadTests(RMISTestCase):
+    """The research-documents bucket only accepts the MIME types set in the Supabase dashboard; a rejected upload
+    used to surface as a 500 and demote the current version with nothing replacing it."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.make_user("system_admin")
+        self.project = Project.objects.create(
+            title="P", project_code="P-1", funding_type="core_funded", lead=self.make_user("project_leader"),
+        )
+        self.current = Document.objects.create(
+            project=self.project, document_type="other", version_number=1, storage_path="P-1/other/v1_a.pdf",
+            file_name="a.pdf", file_size=1, uploaded_by=self.admin,
+        )
+
+    def upload(self, name):
+        return self.client_for(self.admin).post("/api/documents/documents/", {
+            "project": self.project.id, "document_type": "other", "stage": "inception",
+            "file": SimpleUploadedFile(name, b"data", content_type="application/octet-stream"),
+        }, format="multipart")
+
+    def test_an_allowed_file_becomes_the_new_current_version(self):
+        response = self.upload("LIB.xlsx")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["version_number"], 2)
+        self.assertEqual(
+            response.data["content_type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.current.refresh_from_db()
+        self.assertFalse(self.current.is_current)
+
+    def test_an_unsupported_file_type_is_a_400_and_never_reaches_storage(self):
+        response = self.upload("tool.exe")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("file", response.data)
+        self.upload_document.assert_not_called()
+
+    def test_a_storage_rejection_is_a_400_and_the_previous_version_stays_current(self):
+        rejected = requests.Response()
+        rejected.status_code, rejected._content = 400, b'{"message":"mime type image/png is not supported"}'
+        self.upload_document.side_effect = requests.HTTPError(response=rejected)
+
+        response = self.upload("scan.pdf")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("not supported", str(response.data["file"]))
+        self.current.refresh_from_db()
+        self.assertTrue(self.current.is_current)
+        self.assertEqual(Document.objects.count(), 1)

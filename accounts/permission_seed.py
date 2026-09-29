@@ -5,7 +5,8 @@ The seed migration froze the role lists at the time; `scripts/permission_parity.
 PERMISSIONS = {
     "accounts.manage_users": ("accounts", "Approve users, assign roles/scope, activate/suspend, view audit logs", "accounts.permission_seed:SYSTEM_ADMIN_ONLY"),
     "accounts.view_users_by_role": ("accounts", "List active users by role (for leader/staff pickers)", "accounts.permission_seed:USERS_BY_ROLE"),
-    "projects.register": ("research_projects", "Register/edit programs, projects, studies", "research_projects.views:REGISTRATION_ROLES"),
+    "projects.register": ("research_projects", "Register programs, projects, studies (incl. Excel import)", "research_projects.views:REGISTRATION_ROLES"),
+    "projects.edit": ("research_projects", "Edit programs, projects, studies (leaders: own records only)", "research_projects.views:EDIT_ROLES"),
     "projects.manage_milestones": ("research_projects", "Create/edit work-plan milestones", "research_projects.views:MILESTONE_ROLES"),
     "personnel.manage": ("personnel", "Manage staff profiles, assignments, personnel changes", "personnel.serializers:MANAGE_ROLES"),
     "personnel.view_leader_load": ("personnel", "View leader concurrency load", "accounts.permission_seed:LEADER_LOAD"),

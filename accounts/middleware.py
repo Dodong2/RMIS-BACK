@@ -1,6 +1,17 @@
 from .models import AuditLog
 
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+ERROR_DETAIL_MAX_CHARS = 1000
+
+
+def _error_detail(response):
+    """First part of a JSON error body. 5xx bodies are skipped: with DEBUG off they're just a generic HTML page
+    (the traceback goes to the container logs instead)."""
+    if not 400 <= response.status_code < 500 or response.streaming:
+        return ""
+    if "json" not in response.get("Content-Type", ""):
+        return ""
+    return response.content.decode("utf-8", errors="replace")[:ERROR_DETAIL_MAX_CHARS]
 
 
 class AuditLogMiddleware:
@@ -27,6 +38,7 @@ class AuditLogMiddleware:
                         path=request.path[:500],
                         status_code=response.status_code,
                         ip_address=request.META.get("REMOTE_ADDR"),
+                        error_detail=_error_detail(response),
                     )
                 except Exception:
                     pass  # audit logging must never break the actual request

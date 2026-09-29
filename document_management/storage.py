@@ -14,11 +14,12 @@ def _headers(content_type=None):
     return headers
 
 
-def upload_document(file_obj, path):
-    """Upload a file to the private Supabase Storage bucket. Returns the storage path."""
+def upload_document(file_obj, path, content_type):
+    """Upload a file to the private Supabase Storage bucket. Returns the storage path. The bucket has its own
+    allowed-MIME list, so content_type must be one it accepts (see serializers.ALLOWED_FILE_TYPES)."""
     resp = requests.post(
         f"{settings.SUPABASE_URL}/storage/v1/object/{settings.SUPABASE_STORAGE_BUCKET}/{path}",
-        headers=_headers(file_obj.content_type or "application/octet-stream"),
+        headers=_headers(content_type),
         data=file_obj.read(),
     )
     resp.raise_for_status()

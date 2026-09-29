@@ -1,14 +1,31 @@
+import logging
+import os
 import re
 
+import requests
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Document, DocumentShare
 from .storage import get_signed_url, upload_document
 
+logger = logging.getLogger(__name__)
+
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 MANAGE_ROLES = ["system_admin", "riuh"]
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB
+
+# Checked by extension (browsers send inconsistent MIME types, e.g. CSV as application/vnd.ms-excel on Windows),
+# and the mapped type is what gets sent to Supabase. Keep in sync with the research-documents bucket's
+# "Allowed MIME types" setting in the Supabase dashboard, or the upload is rejected there.
+ALLOWED_FILE_TYPES = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
 
 def _safe_filename(name):
@@ -47,7 +64,13 @@ class DocumentSerializer(serializers.ModelSerializer):
         ]
 
     def get_download_url(self, obj):
-        return get_signed_url(obj.storage_path)
+        # A failed signing shouldn't turn an already-saved upload into a 500 (the user would retry and create a
+        # duplicate version); the list/detail endpoints can sign it again later.
+        try:
+            return get_signed_url(obj.storage_path)
+        except requests.RequestException:
+            logger.exception("Could not sign a download URL for document %s", obj.pk)
+            return None
 
     def validate(self, attrs):
         project = attrs.get("project", getattr(self.instance, "project", None))
@@ -57,6 +80,10 @@ class DocumentSerializer(serializers.ModelSerializer):
         file_obj = attrs.get("file")
         if file_obj and file_obj.size > MAX_UPLOAD_BYTES:
             raise serializers.ValidationError({"file": f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit."})
+        if file_obj and os.path.splitext(file_obj.name)[1].lower() not in ALLOWED_FILE_TYPES:
+            raise serializers.ValidationError(
+                {"file": f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_FILE_TYPES))}."}
+            )
         return attrs
 
     def create(self, validated_data):
@@ -66,22 +93,31 @@ class DocumentSerializer(serializers.ModelSerializer):
         project = validated_data["project"]
         document_type = validated_data["document_type"]
         study = validated_data.get("study")
+        content_type = ALLOWED_FILE_TYPES[os.path.splitext(file_obj.name)[1].lower()]
 
         siblings = Document.objects.filter(project=project, document_type=document_type, study=study)
         last_version = siblings.order_by("-version_number").first()
         validated_data["version_number"] = (last_version.version_number + 1) if last_version else 1
-        siblings.filter(is_current=True).update(is_current=False)
 
+        # Upload first: if storage rejects the file, nothing in the DB has changed yet (the previous version
+        # stays current) and the user gets a 400 instead of a 500.
         path = f"{project.project_code}/{document_type}/v{validated_data['version_number']}_{_safe_filename(file_obj.name)}"
-        upload_document(file_obj, path)
+        try:
+            upload_document(file_obj, path, content_type)
+        except requests.RequestException as exc:
+            logger.exception("Document upload to storage failed for %s", path)
+            detail = getattr(exc.response, "text", "") if exc.response is not None else str(exc)
+            raise serializers.ValidationError({"file": f"The file storage rejected the upload: {detail[:200]}"})
 
-        return Document.objects.create(
-            storage_path=path,
-            file_name=file_obj.name,
-            file_size=file_obj.size,
-            content_type=file_obj.content_type or "",
-            **validated_data,
-        )
+        with transaction.atomic():
+            siblings.filter(is_current=True).update(is_current=False)
+            return Document.objects.create(
+                storage_path=path,
+                file_name=file_obj.name,
+                file_size=file_obj.size,
+                content_type=content_type,
+                **validated_data,
+            )
 
 
 class DocumentShareSerializer(serializers.ModelSerializer):

@@ -17,11 +17,12 @@ from .serializers import (
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-# Module Structure M2 primary users: CRC/CRD, DRD, RIUH, Program/Project/Study Leaders. Leaders are limited to
-# records they are part of (serializers.ensure_registrant_in_scope); manual entry and Excel import share this code.
-REGISTRATION_ROLES = [
-    "system_admin", "crc_chair", "drd", "riuh", "program_leader", "project_leader", "study_leader",
-]
+# Client decision 2026-09-29 (Option A, per Clarification Answers Q4 + summary table): only CRC Chair, DRD and RIUH
+# register programs/projects/studies (manual entry and Excel import); leaders only edit their own records.
+REGISTRATION_ROLES = ["system_admin", "crc_chair", "drd", "riuh"]
+# Leaders are limited to records they are part of, and can't change the CRC-owned fields
+# (serializers.ensure_registrant_in_scope / ensure_leader_keeps).
+EDIT_ROLES = REGISTRATION_ROLES + ["program_leader", "project_leader", "study_leader"]
 # Leaders capture their own work plan (Module Structure M2); ensure_in_scope limits them to their projects.
 MILESTONE_ROLES = ["system_admin", "crc_chair", "program_leader", "project_leader", "study_leader"]
 
@@ -42,7 +43,7 @@ class ProgramDetailView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
-            return [HasRole("projects.register")]
+            return [HasRole("projects.edit")]
         return [permissions.IsAuthenticated()]
 
 
@@ -62,7 +63,7 @@ class ProjectDetailView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
-            return [HasRole("projects.register")]
+            return [HasRole("projects.edit")]
         return [permissions.IsAuthenticated()]
 
     def perform_update(self, serializer):
@@ -106,7 +107,7 @@ class ProjectImportView(APIView):
 
 
 class ProjectChildListCreateView(generics.ListCreateAPIView):
-    """List (?project=) and create rows of a project's form table; writes need projects.register."""
+    """List (?project=) and create rows of a project's form table; writes need projects.edit."""
 
     def get_queryset(self):
         qs = self.serializer_class.Meta.model.objects.order_by("id")
@@ -115,7 +116,7 @@ class ProjectChildListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [HasRole("projects.register")]
+            return [HasRole("projects.edit")]
         return [permissions.IsAuthenticated()]
 
 
@@ -129,7 +130,7 @@ class ProjectChildDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH", "DELETE"):
-            return [HasRole("projects.register")]
+            return [HasRole("projects.edit")]
         return [permissions.IsAuthenticated()]
 
 
@@ -179,7 +180,7 @@ class StudyDetailView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
-            return [HasRole("projects.register")]
+            return [HasRole("projects.edit")]
         return [permissions.IsAuthenticated()]
 
 

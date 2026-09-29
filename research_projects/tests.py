@@ -5,7 +5,7 @@ import openpyxl
 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem
-from research_projects.models import Program, Project
+from research_projects.models import Project
 
 
 def project_payload(lead, **overrides):
@@ -51,13 +51,38 @@ class ManualRegistrationTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_project_leader_cannot_register_a_project_for_someone_else(self):
-        leader, other = self.make_user("project_leader"), self.make_user("project_leader")
+    def test_crc_chair_can_register_a_project(self):
+        leader = self.make_user("project_leader")
 
-        response = self.client_for(leader).post("/api/projects/", project_payload(other), format="json")
+        response = self.client_for(self.make_user("crc_chair")).post("/api/projects/", project_payload(leader), format="json")
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_leaders_cannot_register_even_their_own_project(self):
+        """Client decision 2026-09-29 (Option A): only CRC Chair / DRD / RIUH register."""
+        leader = self.make_user("project_leader")
+        program_leader = self.make_user("program_leader")
+
+        for user in (leader, program_leader):
+            response = self.client_for(user).post("/api/projects/", project_payload(leader), format="json")
+            self.assertEqual(response.status_code, 403)
         self.assertFalse(Project.objects.exists())
+
+    def test_leader_can_edit_their_own_project_but_not_the_crc_owned_fields(self):
+        leader = self.make_user("project_leader")
+        project = Project.objects.create(
+            title="P", project_code="P-1", funding_type="core_funded", lead=leader, sdgs=[4], sectors=["education"],
+        )
+        client = self.client_for(leader)
+
+        edited = client.patch(f"/api/projects/{project.id}/", {"title": "Better title", "project_code": "P-1"}, format="json")
+        recoded = client.patch(f"/api/projects/{project.id}/", {"project_code": "P-2"}, format="json")
+
+        self.assertEqual(edited.status_code, 200, edited.data)
+        self.assertEqual(recoded.status_code, 400)
+        self.assertIn("project_code", recoded.data)
+        project.refresh_from_db()
+        self.assertEqual((project.title, project.project_code), ("Better title", "P-1"))
 
     def test_project_leader_cannot_edit_another_leaders_project(self):
         leader, other = self.make_user("project_leader"), self.make_user("project_leader")
@@ -153,28 +178,10 @@ class ExcelImportTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 400)
 
-    def test_leader_can_upload_their_own_project(self):
+    def test_leaders_cannot_use_the_excel_import(self):
+        """Client decision 2026-09-29 (Option A): registration, including the Excel import, is CRC Chair / DRD / RIUH."""
         self.fill_project()
 
-        response = self.upload(self.leader)
-
-        self.assertEqual(response.status_code, 201, response.data)
-
-    def test_leader_cannot_upload_a_project_led_by_someone_else(self):
-        self.make_user("project_leader", email="other@lspu.test")
-        self.fill_project(**{"Project Leader E-mail Address": "other@lspu.test"})
-
-        response = self.upload(self.leader)
-
-        self.assertEqual(response.status_code, 400)
+        for user in (self.leader, self.make_user("program_leader")):
+            self.assertEqual(self.upload(user).status_code, 403)
         self.assertFalse(Project.objects.exists())
-
-    def test_program_leader_can_upload_under_their_own_program(self):
-        program_leader = self.make_user("program_leader")
-        Program.objects.create(code="PROG-1", title="Program", funding_type="core_funded", lead=program_leader)
-        self.make_user("project_leader", email="other@lspu.test")
-        self.fill_project(**{"Project Leader E-mail Address": "other@lspu.test", "Program Code (if under a Program)": "prog-1"})
-
-        response = self.upload(program_leader)
-
-        self.assertEqual(response.status_code, 201, response.data)

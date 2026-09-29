@@ -305,7 +305,16 @@ class AuditLogTests(RMISTestCase):
         self.client_for(admin).patch(f"/api/admin/users/{leader.id}/scope/", {"campus": "Siniloan"}, format="json")
 
         log = AuditLog.objects.get()
-        self.assertEqual((log.actor, log.method, log.status_code), (admin, "PATCH", 200))
+        self.assertEqual((log.actor, log.method, log.status_code, log.error_detail), (admin, "PATCH", 200, ""))
+
+    def test_a_rejected_write_keeps_the_validation_message(self):
+        crc_chair = self.make_user("crc_chair")
+
+        self.client_for(crc_chair).post("/api/projects/", {"title": "No code"}, format="json")
+
+        log = AuditLog.objects.get()
+        self.assertEqual(log.status_code, 400)
+        self.assertIn("project_code", log.error_detail)
 
     def test_reads_are_not_audit_logged(self):
         admin = self.make_user("system_admin")

@@ -64,7 +64,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AuditLog
-        fields = ["id", "actor", "actor_email", "method", "path", "status_code", "ip_address", "created_at"]
+        fields = ["id", "actor", "actor_email", "method", "path", "status_code", "ip_address", "error_detail", "created_at"]
 
 class TemporaryReplacementSerializer(serializers.ModelSerializer):
     suspended_user_email = serializers.EmailField(source="suspended_user.email", read_only=True)
