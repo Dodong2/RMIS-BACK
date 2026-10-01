@@ -93,12 +93,12 @@ No account had a first/last name, so pickers and the Annex A auto-fill would sho
 - Note: L-sized across both repos; split BE and FE commits
 
 ### T8 (BE+FE) LIB step in registration — #11 · M
-- [ ] BE: `POST projects/<id>/lib/` (projects.register, own-scope for leaders) creates the draft LIB v1 + line items
+- [x] BE: `POST projects/<id>/lib/` (projects.register, own-scope for leaders) creates the draft LIB v1 + line items
       with q1–q4, sharing the importer's budget code; 400 if the project already has a budget
-- [ ] FE: new wizard step "Budget Requirements (LIB)" before Endorsement: PS/MOOE/CO rows, QTR1–4, row and grand
+- [x] FE: new wizard step "Budget Requirements (LIB)" before Endorsement: PS/MOOE/CO rows, QTR1–4, row and grand
       totals; posted after the project is created
-- [ ] BudgetPage shows that draft for the project (no duplicate "Create Budget")
-- Verify: BE test as crc_chair and as project_leader; FE register BRIDGI's budget (grand total ₱144,000)
+- [x] BudgetPage shows that draft for the project (no duplicate "Create Budget")
+- Verify: BE test as crc_chair and as project_leader; FE register BRIDGI's budget (grand total ₱163,500, the PDF's handwritten correction; the printed ₱144,000 under-adds MOOE)
 - Files: BE `research_projects/views.py`, `urls.py`, `importer.py`, `tests.py`; FE `src/pages/RegisterProjectPage.tsx`,
   `src/lib/researchApi.ts`
 - Deps: T4

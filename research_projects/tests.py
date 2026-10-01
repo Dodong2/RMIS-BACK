@@ -4,7 +4,7 @@ import io
 import openpyxl
 
 from accounts.testing import RMISTestCase
-from budget_lib.models import LineItem
+from budget_lib.models import LineItem, LineItemBudget
 from research_projects.models import Project, ProjectEndorser
 
 
@@ -166,6 +166,41 @@ class ManualRegistrationTests(RMISTestCase):
         self.assertEqual(mismatched.status_code, 400)
         self.assertEqual(outsider.status_code, 400)
         self.assertEqual(ProjectEndorser.objects.filter(project=project).count(), 2)
+
+    def test_registration_lib_step_creates_draft_lib_v1(self):
+        """Client meeting 2026-10-01 (#11): the LIB is part of registration, for every registration role."""
+        leader = self.make_user("project_leader")
+        crc_project = Project.objects.create(title="A", project_code="A-1", funding_type="core_funded", lead=leader)
+        own_project = Project.objects.create(title="B", project_code="B-1", funding_type="core_funded", lead=leader)
+        rows = [
+            {"category": "mooe", "description": "Travel Expenses", "fiscal_year": 2026, "q1_amount": "5000", "q2_amount": "2500", "q3_amount": "2500"},
+            {"category": "co", "description": "Voice Recorder", "fiscal_year": 2026, "q1_amount": "7500"},
+        ]
+
+        by_crc = self.client_for(self.make_user("crc_chair")).post(f"/api/projects/{crc_project.id}/lib/", {"line_items": rows}, format="json")
+        by_leader = self.client_for(leader).post(f"/api/projects/{own_project.id}/lib/", {"line_items": rows}, format="json")
+        again = self.client_for(leader).post(f"/api/projects/{own_project.id}/lib/", {"line_items": rows}, format="json")
+        finance = self.client_for(self.make_user("finance_budget")).post(f"/api/projects/{own_project.id}/lib/", {"line_items": rows}, format="json")
+
+        self.assertEqual(by_crc.status_code, 201, by_crc.data)
+        self.assertEqual(by_leader.status_code, 201, by_leader.data)
+        self.assertEqual((by_leader.data["version_number"], by_leader.data["status"]), (1, "draft"))
+        self.assertEqual(float(by_leader.data["total_amount"]), 17500)
+        self.assertEqual(again.status_code, 400)
+        self.assertEqual(finance.status_code, 403)
+
+    def test_registration_lib_step_is_all_or_nothing_and_scoped(self):
+        leader, other = self.make_user("project_leader"), self.make_user("project_leader")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
+        rows = [{"category": "mooe", "description": "Travel", "q1_amount": "100"}, {"category": "nope", "description": "Bad"}]
+
+        bad_row = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": rows}, format="json")
+        outsider = self.client_for(other).post(f"/api/projects/{project.id}/lib/", {"line_items": rows[:1]}, format="json")
+
+        self.assertEqual(bad_row.status_code, 400)
+        self.assertEqual(bad_row.data["errors"][0]["row"], 2)
+        self.assertEqual(outsider.status_code, 400)
+        self.assertFalse(LineItemBudget.objects.exists())
 
     def test_line_item_quarters_must_add_up_to_the_amount(self):
         admin, leader = self.make_user("system_admin"), self.make_user("project_leader")

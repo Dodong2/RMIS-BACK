@@ -207,6 +207,13 @@ def _allowed(kind, choices):
     return ", ".join(label for _, label in choices) if choices and kind in ("choice", "multi") else ""
 
 
+def fill_line_item_amount(data):
+    """SF-018 Section X gives QTR1-QTR4; the line item amount is their total unless given."""
+    if data.get("amount") in (None, ""):
+        data["amount"] = str(sum(Decimal(str(data.get(f) or 0)) for f in ("q1_amount", "q2_amount", "q3_amount", "q4_amount")))
+    return data
+
+
 def build_template():
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -329,8 +336,7 @@ def import_workbook(file_obj, request):
         for row_number, data in rows:
             data["project"] = project.pk
             if name == "Budget Requirements":
-                if "amount" not in data:
-                    data["amount"] = str(sum(Decimal(data.get(f, 0)) for f in ("q1_amount", "q2_amount", "q3_amount", "q4_amount")))
+                fill_line_item_amount(data)
                 if budget is None:
                     budget = LineItemBudgetSerializer(data={"project": project.pk}, context=context)
                     budget.is_valid(raise_exception=True)

@@ -7,6 +7,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.permissions import HasRole, ensure_in_scope
+from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from . import importer
 from .models import (
     Program, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
@@ -91,6 +92,41 @@ class ProjectCodeAvailableView(APIView):
         if not code:
             return Response({"code": "Pass the project code as ?code=."}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"code": code, "available": not Project.objects.filter(project_code=code).exists()})
+
+
+class ProjectLibView(APIView):
+    """POST {"line_items": [{category, description, fiscal_year?, q1_amount..q4_amount, amount?}]}: the registration
+    wizard's Budget Requirements step (client meeting 2026-10-01, #11) as draft LIB v1. Gated by projects.register,
+    not budget.manage, because CRC Chair/DRD/RIUH register projects but don't encode budgets otherwise.
+    All-or-nothing; a project that already has a LIB is refused."""
+
+    permission_classes = [HasRole("projects.register")]
+
+    def post(self, request, pk):
+        project = generics.get_object_or_404(Project, pk=pk)
+        rows = request.data.get("line_items")
+        if not isinstance(rows, list) or not rows:
+            return Response({"line_items": "Send at least one line item."}, status=status.HTTP_400_BAD_REQUEST)
+        if project.budgets.exists():
+            return Response({"detail": "This project already has a LIB. Edit it under Budget Management."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        context = {"request": request}
+        with transaction.atomic():
+            budget = LineItemBudgetSerializer(data={"project": project.pk}, context=context)
+            budget.is_valid(raise_exception=True)
+            budget = budget.save()
+            errors = []
+            for index, row in enumerate(rows, start=1):
+                data = importer.fill_line_item_amount({**row, "budget": budget.pk})
+                item = LineItemSerializer(data=data, context=context)
+                if item.is_valid():
+                    item.save()
+                else:
+                    errors.append({"row": index, "errors": item.errors})
+            if errors:
+                transaction.set_rollback(True)
+                return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(LineItemBudgetSerializer(budget).data, status=status.HTTP_201_CREATED)
 
 
 class ProjectImportTemplateView(APIView):
