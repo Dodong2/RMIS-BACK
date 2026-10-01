@@ -80,11 +80,11 @@ No account had a first/last name, so pickers and the Annex A auto-fill would sho
 - Deps: T4
 
 ### T7 (BE+FE) Annex A endorsers — #8 · M
-- [ ] BE: `ProjectEndorser` model + `project-endorsers/` list/create/detail (projects.register / projects.edit, same
+- [x] BE: `ProjectEndorser` model + `project-endorsers/` list/create/detail (projects.register / projects.edit, same
       as team rows); importer turns the Annex A sheet into endorser rows
-- [ ] FE: "Add Endorser" row: role select (the 12 roles) → user select of that role (auto-filled when only one;
+- [x] FE: "Add Endorser" row: role select (the 12 roles) → user select of that role (auto-filled when only one;
       pick when several) → designation (prefilled from user.position) + date; add more rows
-- [ ] Project page Registration tab lists endorser rows (old fixed fields shown when there are none)
+- [x] Project page Registration tab lists endorser rows (old fixed fields shown when there are none)
 - Verify: BE test create/list + import; FE register with 2 endorsers of the same role
 - Files: BE `research_projects/models.py`, `migrations/`, `serializers.py`, `views.py`, `urls.py`, `importer.py`;
   FE `src/pages/RegisterProjectPage.tsx`, `src/pages/ProjectDetailPage.tsx`, `src/lib/researchApi.ts`,

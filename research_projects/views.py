@@ -8,9 +8,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.permissions import HasRole, ensure_in_scope
 from . import importer
-from .models import Program, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone
+from .models import (
+    Program, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
+)
 from .serializers import (
-    ProgramSerializer, ProjectSerializer, ProjectStatusHistorySerializer, ProjectTeamMemberSerializer, StudySerializer,
+    ProgramSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
+    ProjectTeamMemberSerializer, StudySerializer,
     TargetBeneficiarySerializer, WorkPlanMilestoneSerializer, ensure_registrant_in_scope,
 )
 
@@ -154,6 +157,14 @@ class TeamMemberListCreateView(ProjectChildListCreateView):
 
 class TeamMemberDetailView(ProjectChildDetailView):
     serializer_class = ProjectTeamMemberSerializer
+
+
+class EndorserListCreateView(ProjectChildListCreateView):
+    serializer_class = ProjectEndorserSerializer
+
+
+class EndorserDetailView(ProjectChildDetailView):
+    serializer_class = ProjectEndorserSerializer
 
 
 class BeneficiaryListCreateView(ProjectChildListCreateView):

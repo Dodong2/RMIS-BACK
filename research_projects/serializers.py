@@ -1,7 +1,9 @@
 from rest_framework import serializers
-from accounts.models import User
+from accounts.models import Role, User
 from accounts.permissions import LEADER_ROLES, ensure_in_scope, scoped_projects
-from .models import Program, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone
+from .models import (
+    Program, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
+)
 
 
 class LeadSerializer(serializers.ModelSerializer):
@@ -169,6 +171,22 @@ class ProjectTeamMemberSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         ensure_registrant_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
+        return attrs
+
+
+class ProjectEndorserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectEndorser
+        fields = ["id", "project", "role_code", "user", "name", "designation", "signed_on"]
+
+    def validate(self, attrs):
+        ensure_registrant_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
+        role_code = attrs.get("role_code", getattr(self.instance, "role_code", ""))
+        user = attrs.get("user", getattr(self.instance, "user", None))
+        if role_code and not Role.objects.filter(code=role_code).exists():
+            raise serializers.ValidationError({"role_code": f"Unknown role '{role_code}'."})
+        if user and role_code and (not user.role or user.role.code != role_code):
+            raise serializers.ValidationError({"user": f"{user.email} does not have the {role_code} role."})
         return attrs
 
 

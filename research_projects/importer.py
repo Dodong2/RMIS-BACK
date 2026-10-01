@@ -20,7 +20,7 @@ from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from outputs.models import SIX_PS
 from outputs.serializers import ExpectedOutputSerializer
 
-from .models import Program, Project, ProjectTeamMember
+from .models import Program, Project, ProjectEndorser, ProjectTeamMember
 from .serializers import (
     ProjectSerializer, ProjectTeamMemberSerializer, StudySerializer, TargetBeneficiarySerializer,
     WorkPlanMilestoneSerializer, leader_owns,
@@ -81,6 +81,16 @@ CATEGORIES = LineItem.CATEGORY_CHOICES + (("mooe", "MOOE"), ("co", "Equipment Ou
 SIX_P_CHOICES = SIX_PS + (
     ("patents", "Patent"), ("places_partnerships", "Places/Partnerships"), ("policies", "Policy Recommendations"),
 )
+# Annex A on the Project sheet becomes endorser rows too, so Excel and manual registrations read the same
+# (client meeting 2026-10-01, #8). Only the VPRDE maps to a system role.
+ANNEX_A_SIGNATORIES = [
+    ("endorsed_by_dean", "endorsed_by_dean_on", "Dean/Associate Dean", ""),
+    ("noted_by_rds_director", "noted_by_rds_director_on", "RDS Director/Chairperson", ""),
+    ("recommended_by_campus_director", "recommended_by_campus_director_on", "Campus Director", ""),
+    ("recommended_by_vprde", "recommended_by_vprde_on", "Vice President for Research, Development and Extension", "vprei"),
+    ("approved_by_president", "proposal_approved_on", "University President", ""),
+]
+
 TABLE_SHEETS = {
     "Project Team": [
         ("Role", "member_role", "choice", TEAM_ROLES),
@@ -305,6 +315,13 @@ def import_workbook(file_obj, request):
         labels = {field: label for label, field, *_ in PROJECT_FIELDS}
         return None, _serializer_errors("Project", None, serializer.errors, labels)
     project = serializer.save()
+    for name_field, date_field, designation, role_code in ANNEX_A_SIGNATORIES:
+        name = getattr(project, name_field)
+        if name:
+            ProjectEndorser.objects.create(
+                project=project, name=name, designation=designation, role_code=role_code,
+                signed_on=getattr(project, date_field),
+            )
 
     budget = None
     for name, rows in tables.items():

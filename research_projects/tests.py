@@ -5,7 +5,7 @@ import openpyxl
 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem
-from research_projects.models import Project
+from research_projects.models import Project, ProjectEndorser
 
 
 def project_payload(lead, **overrides):
@@ -141,6 +141,32 @@ class ManualRegistrationTests(RMISTestCase):
         self.assertEqual(with_lead.status_code, 201, with_lead.data)
         self.assertEqual(wrong_role.status_code, 400)
 
+    def test_endorser_rows_pick_a_role_and_an_account_of_that_role(self):
+        """Client meeting 2026-10-01 (#8): Annex A is role -> account rows; text-only rows cover non-accounts."""
+        leader, vp = self.make_user("project_leader"), self.make_user("vprei", first_name="Robert", last_name="Agatep")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
+        client = self.client_for(leader)
+
+        picked = client.post("/api/project-endorsers/", {
+            "project": project.id, "role_code": "vprei", "user": vp.id, "name": "Robert Agatep",
+            "designation": "VPRDE", "signed_on": "2025-02-21",
+        }, format="json")
+        typed = client.post("/api/project-endorsers/", {
+            "project": project.id, "name": "Adriel G. Roman", "designation": "Dean/Associate Dean",
+        }, format="json")
+        mismatched = client.post("/api/project-endorsers/", {
+            "project": project.id, "role_code": "drd", "user": vp.id, "name": "Robert Agatep",
+        }, format="json")
+        outsider = self.client_for(self.make_user("project_leader")).post("/api/project-endorsers/", {
+            "project": project.id, "name": "Someone",
+        }, format="json")
+
+        self.assertEqual(picked.status_code, 201, picked.data)
+        self.assertEqual(typed.status_code, 201, typed.data)
+        self.assertEqual(mismatched.status_code, 400)
+        self.assertEqual(outsider.status_code, 400)
+        self.assertEqual(ProjectEndorser.objects.filter(project=project).count(), 2)
+
     def test_line_item_quarters_must_add_up_to_the_amount(self):
         admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
@@ -206,6 +232,18 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(project.target_beneficiaries.get().total, 2000)
         self.assertEqual(LineItem.objects.get(budget__project=project).amount, 10000)
         self.assertEqual(project.milestones.count(), 1)
+
+    def test_annex_a_on_the_project_sheet_becomes_endorser_rows(self):
+        self.fill_project(**{"Endorsed By (Dean/Associate Dean)": "Adriel G. Roman", "Recommending Approval (VPRDE)": "Robert C. Agatep"})
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        rows = list(ProjectEndorser.objects.order_by("id").values_list("name", "designation", "role_code"))
+        self.assertEqual(rows, [
+            ("Adriel G. Roman", "Dean/Associate Dean", ""),
+            ("Robert C. Agatep", "Vice President for Research, Development and Extension", "vprei"),
+        ])
 
     def test_any_bad_row_rolls_back_the_whole_import_and_lists_the_error(self):
         self.fill_project()

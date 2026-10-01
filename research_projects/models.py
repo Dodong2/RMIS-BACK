@@ -162,6 +162,24 @@ class TargetBeneficiary(models.Model):
         return f"{self.project.project_code}: {self.group} ({self.total})"
 
 
+class ProjectEndorser(models.Model):
+    """One signatory row of the SF-018 Annex A endorsement page (client meeting 2026-10-01, #8). Picked as role ->
+    account in the wizard; name and designation are kept as text so the page still reads right if the account
+    changes, and so signatories without an account (e.g. the Dean) can be typed in. Listed in id order."""
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="endorsers")
+    role_code = models.CharField(max_length=50, blank=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="endorsements"
+    )
+    name = models.CharField(max_length=200)
+    designation = models.CharField(max_length=200, blank=True)
+    signed_on = models.DateField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.project.project_code}: {self.name} ({self.designation})"
+
+
 class ProjectStatusHistory(models.Model):
     """One row per Project.status change (DPMIS-based spec PM-09), written by ProjectDetailView."""
 
