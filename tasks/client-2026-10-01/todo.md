@@ -24,8 +24,8 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 - Deps: T1
 
 ### T3 (FE) Remove Program from the UI — #2 · S
-- [ ] No Register Program button, programs table/tab, `/programs/new` route, or Parent Program field anywhere
-- [ ] Project detail still shows an existing program read-only (old data), nothing writes it
+- [x] No Register Program button, programs table/tab, `/programs/new` route, or Parent Program field anywhere
+- [x] Project detail still shows an existing program read-only (old data), nothing writes it
 - Verify: grep `RegisterProgramPage|getPrograms` has no live UI use; build clean
 - Files: `src/App.tsx`, `src/pages/ProjectsPage.tsx`, `src/pages/RegisterProjectPage.tsx`,
   `src/pages/RegisterProgramPage.tsx` (delete), `src/pages/ProjectDetailPage.tsx`
