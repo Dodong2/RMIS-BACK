@@ -70,10 +70,10 @@ No account had a first/last name, so pickers and the Annex A auto-fill would sho
   `src/pages/admin/UsersListPage.tsx`, `src/lib/authApi.ts`, `src/types/auth.ts`
 
 ### T6 (BE+FE) Study components — #7 · M
-- [ ] BE: `Study.lead` nullable (migration); lead role check only when a lead is given; importer accepts a blank lead
-- [ ] FE: Classification step has "Study Component Titles" rows (Study 1, Study 2, Add Study); saved as studies after
+- [x] BE: `Study.lead` nullable (migration); lead role check only when a lead is given; importer accepts a blank lead
+- [x] FE: Classification step has "Study Component Titles" rows (Study 1, Study 2, Add Study); saved as studies after
       the project is created
-- [ ] Existing Add Study on the project page still works with a lead
+- [x] Existing Add Study on the project page still works with a lead
 - Verify: BE test (study with and without lead); FE register with 2 studies → shown on project page
 - Files: BE `research_projects/models.py`, `migrations/`, `serializers.py`, `importer.py`, `tests.py`;
   FE `src/pages/RegisterProjectPage.tsx`, `src/types/research.ts`

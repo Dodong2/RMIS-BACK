@@ -181,7 +181,10 @@ class Study(models.Model):
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="studies")
     title = models.CharField(max_length=300)
-    lead = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="led_studies")
+    # Optional since the client meeting 2026-10-01: SF-018 lists study component titles only (Study 1, Study 2).
+    lead = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="led_studies"
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     created_at = models.DateTimeField(auto_now_add=True)
 

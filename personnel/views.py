@@ -270,7 +270,7 @@ class CollaborationView(APIView):
             projects = projects.filter(pk=request.query_params["project"])
         rows = []
         for project in projects:
-            members = [project.lead.office] + [study.lead.office for study in project.studies.all()]
+            members = [project.lead.office] + [study.lead.office for study in project.studies.all() if study.lead]
             assignments = list(project.assignments.all()) + [a for st in project.studies.all() for a in st.assignments.all()]
             members += [a.department for a in assignments if a.end_date is None]
             departments = sorted({d.strip() for d in members if d and d.strip()})

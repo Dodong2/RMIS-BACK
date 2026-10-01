@@ -124,6 +124,23 @@ class ManualRegistrationTests(RMISTestCase):
         self.assertEqual((free.status_code, free.data["available"]), (200, True))
         self.assertEqual(staff.status_code, 403)
 
+    def test_study_components_need_only_a_title(self):
+        """Client meeting 2026-10-01 (#7): SF-018 lists Study 1, Study 2 by title; a study leader is optional."""
+        leader, study_leader = self.make_user("project_leader"), self.make_user("study_leader")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
+        client = self.client_for(leader)
+
+        untitled_lead = client.post("/api/studies/", {"project": project.id, "title": "Study 1"}, format="json")
+        with_lead = client.post(
+            "/api/studies/", {"project": project.id, "title": "Study 2", "lead": study_leader.id}, format="json"
+        )
+        wrong_role = client.post("/api/studies/", {"project": project.id, "title": "Study 3", "lead": leader.id}, format="json")
+
+        self.assertEqual(untitled_lead.status_code, 201, untitled_lead.data)
+        self.assertIsNone(untitled_lead.data["lead"])
+        self.assertEqual(with_lead.status_code, 201, with_lead.data)
+        self.assertEqual(wrong_role.status_code, 400)
+
     def test_line_item_quarters_must_add_up_to_the_amount(self):
         admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
