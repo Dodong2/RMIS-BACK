@@ -113,10 +113,10 @@ Found during T8: GET projects/ was IsAuthenticated-only, so a new project leader
 - Files: `accounts/permissions.py`, `research_projects/views.py`, `research_projects/tests.py`
 
 ### T9 (FE) SF-018 preview, manual mode — #9 · M
-- [ ] `ProposalPreview` modal mirrors BRIDGI_1's layout: I. details table (leader, co-leader, team, dates, cost,
+- [x] `ProposalPreview` modal mirrors BRIDGI_1's layout: I. details table (leader, co-leader, team, dates, cost,
       unit, campus, sector, classification, study components), II–IX sections, V. 6Ps, VII. beneficiaries,
       X. budget table, Annex A endorsement page
-- [ ] "View" button on Validate & Register opens it from the current form state (nothing saved)
+- [x] "View" button on Validate & Register opens it from the current form state (nothing saved)
 - Verify: fill BRIDGI's data, compare side by side with the PDF
 - Files: `src/components/registration/ProposalPreview.tsx` (new), `src/pages/RegisterProjectPage.tsx`
 - Deps: T5–T8
