@@ -58,13 +58,29 @@ class ManualRegistrationTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
 
-    def test_leaders_cannot_register_even_their_own_project(self):
-        """Client decision 2026-09-29 (Option A): only CRC Chair / DRD / RIUH register."""
+    def test_project_leader_can_register_a_project_they_lead(self):
+        """Client meeting 2026-10-01: the Project Leader registers their own approved project."""
         leader = self.make_user("project_leader")
-        program_leader = self.make_user("program_leader")
 
-        for user in (leader, program_leader):
-            response = self.client_for(user).post("/api/projects/", project_payload(leader), format="json")
+        response = self.client_for(leader).post("/api/projects/", project_payload(leader), format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Project.objects.get().lead, leader)
+
+    def test_project_leader_cannot_register_a_project_for_another_leader(self):
+        leader, other = self.make_user("project_leader"), self.make_user("project_leader")
+
+        response = self.client_for(leader).post("/api/projects/", project_payload(other), format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("lead", response.data)
+        self.assertFalse(Project.objects.exists())
+
+    def test_program_and_study_leaders_still_cannot_register(self):
+        leader = self.make_user("project_leader")
+
+        for code in ("program_leader", "study_leader"):
+            response = self.client_for(self.make_user(code)).post("/api/projects/", project_payload(leader), format="json")
             self.assertEqual(response.status_code, 403)
         self.assertFalse(Project.objects.exists())
 
@@ -178,10 +194,27 @@ class ExcelImportTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 400)
 
-    def test_leaders_cannot_use_the_excel_import(self):
-        """Client decision 2026-09-29 (Option A): registration, including the Excel import, is CRC Chair / DRD / RIUH."""
+    def test_project_leader_can_import_a_project_they_lead(self):
+        """Client meeting 2026-10-01: the Excel import follows the same rule as manual entry."""
         self.fill_project()
 
-        for user in (self.leader, self.make_user("program_leader")):
-            self.assertEqual(self.upload(user).status_code, 403)
+        response = self.upload(self.leader)
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Project.objects.get().lead, self.leader)
+
+    def test_project_leader_cannot_import_another_leaders_project(self):
+        self.fill_project()
+        other = self.make_user("project_leader")
+
+        response = self.upload(other)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Project.objects.exists())
+
+    def test_program_and_study_leaders_cannot_use_the_excel_import(self):
+        self.fill_project()
+
+        for code in ("program_leader", "study_leader"):
+            self.assertEqual(self.upload(self.make_user(code)).status_code, 403)
         self.assertFalse(Project.objects.exists())

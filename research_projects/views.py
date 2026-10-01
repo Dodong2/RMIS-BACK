@@ -17,12 +17,13 @@ from .serializers import (
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-# Client decision 2026-09-29 (Option A, per Clarification Answers Q4 + summary table): only CRC Chair, DRD and RIUH
-# register programs/projects/studies (manual entry and Excel import); leaders only edit their own records.
-REGISTRATION_ROLES = ["system_admin", "crc_chair", "drd", "riuh"]
+# Client decision 2026-09-29 (Option A, per Clarification Answers Q4 + summary table): CRC Chair, DRD and RIUH
+# register programs/projects/studies (manual entry and Excel import). Client meeting 2026-10-01 added the Project
+# Leader back, for projects they lead only (serializers.ensure_project_leader_registers_self).
+REGISTRATION_ROLES = ["system_admin", "crc_chair", "drd", "riuh", "project_leader"]
 # Leaders are limited to records they are part of, and can't change the CRC-owned fields
 # (serializers.ensure_registrant_in_scope / ensure_leader_keeps).
-EDIT_ROLES = REGISTRATION_ROLES + ["program_leader", "project_leader", "study_leader"]
+EDIT_ROLES = REGISTRATION_ROLES + ["program_leader", "study_leader"]
 # Leaders capture their own work plan (Module Structure M2); ensure_in_scope limits them to their projects.
 MILESTONE_ROLES = ["system_admin", "crc_chair", "program_leader", "project_leader", "study_leader"]
 

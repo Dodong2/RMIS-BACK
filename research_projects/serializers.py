@@ -49,6 +49,17 @@ def ensure_leader_keeps(serializer, attrs, fields):
         raise serializers.ValidationError({f: "Only the CRC Chair, DRD or RIUH can change this." for f in changed})
 
 
+def ensure_project_leader_registers_self(serializer, lead):
+    """Client meeting 2026-10-01: a Project Leader may register a project (manual or Excel) only with themselves as
+    its leader. Edits are covered by ensure_leader_keeps."""
+    request = serializer.context.get("request")
+    if request is None or serializer.instance is not None:
+        return
+    user = request.user
+    if user.role and user.role.code == "project_leader" and lead != user:
+        raise serializers.ValidationError({"lead": "Project Leaders can only register projects they lead."})
+
+
 def validate_lead_concurrency(user, funding_type, queryset, exclude_pk, default_cap):
     qs = queryset.filter(lead=user, status="active")
     if exclude_pk:
@@ -140,6 +151,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         if is_continuing and (continuing_year or 0) < 2:
             raise serializers.ValidationError({"continuing_year": "A continuing proposal needs its year (2 or later)."})
         validate_lead_role(lead, "project_leader")
+        ensure_project_leader_registers_self(self, lead)
         ensure_leader_keeps(self, attrs, ["project_code", "lead", "program"])
         program = attrs.get("program", getattr(self.instance, "program", None))
         ensure_registrant_in_scope(self, self.instance, leads=[lead, program.lead if program else None])
