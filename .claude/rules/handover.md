@@ -60,7 +60,7 @@ all new endpoints above have no UI yet.
 defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personnel-change/slippage/procurement trigger scores.
 
 ## Backend status (this repo)
-- Module 1 (Auth/RBAC): done, stable, plus two real gaps found+fixed 2026-09-23 after the client asked where "Workplan/Procurement/Audit Logs/Settings" sidebar items map to (see below for the full mapping): (1) **`AuditLog` model + `accounts/middleware.py::AuditLogMiddleware` added** — the docx/MIT-proposal both explicitly call out "audit logging" as a Module 1 feature but nothing existed for it; the middleware logs every authenticated mutating (`POST`/`PUT`/`PATCH`/`DELETE`) request to `/api/` (actor, method, path, status_code, ip_address, timestamp) — request-level, not per-model field diffing, matching how the MIT proposal frames it ("the business logic layer... enforces authentication, role-based access control, request validation, and audit logging before any request reaches the data layer"). New endpoint `GET /api/admin/audit-logs/` (system_admin-only, filterable by `?actor=`/`?method=`). (2) **`seed_roles.py` had a dead `tier` kwarg** left over from a migration (`0002_role_tier` → `0003_remove_role_tier...`) that removed the `Role.tier` field without updating the seed command — running `python manage.py seed_roles` today would have crashed. Fixed by dropping the third tuple element entirely; confirmed the command runs clean now.
+- Module 1 (Auth/RBAC): done, stable, plus two real gaps found+fixed 2026-09-23 after the client asked where "Workplan/Procurement/Audit Logs/Settings" sidebar items map to (see below for the full mapping): (1) **`AuditLog` model + `accounts/middleware.py::AuditLogMiddleware` added** — the docx/MIT-proposal both explicitly call out "audit logging" as a Module 1 feature but nothing existed for it; the middleware logs every authenticated mutating (`POST`/`PUT`/`PATCH`/`DELETE`) request to `/api/` (actor, method, path, status_code, ip_address, timestamp) — request-level, not per-model field diffing, matching how the MIT proposal frames it ("the business logic layer... enforces authentication, role-based access control, request validation, and audit logging before any request reaches the data layer"). New endpoint `GET /api/admin/audit-logs/` (system_admin-only, filterable by `?actor=`/`?method=`). Since 2026-09-29 (`accounts.0012`) rows also carry `error_detail` (first 1000 chars of a 4xx JSON body). (2) **`seed_roles.py` had a dead `tier` kwarg** left over from a migration (`0002_role_tier` → `0003_remove_role_tier...`) that removed the `Role.tier` field without updating the seed command — running `python manage.py seed_roles` today would have crashed. Fixed by dropping the third tuple element entirely; confirmed the command runs clean now.
 - Module 2 (research_projects: Program/Project/Study/Milestone): done. **Updated 2026-09-26**: registration now follows the
   client's Research Proposal Form **LSPU-RDO-SF-018** (sample: `dss/Dataset/BRIDGI_1.PDF`, scanned, no text layer).
   New `Project` fields: `lead_gender`, `contact_number`, `continuing_year`, `college` (Annex A "College Unit"),
@@ -75,17 +75,19 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   builds the template from code (Project key/value sheet + Project Team, Study Components, Expected Outputs (6Ps),
   Target Beneficiaries, Budget Requirements, Work Plan sheets); `POST projects/import/` is all-or-nothing through the
   same serializers as manual entry and returns `{"errors": [{sheet,row,field,message}]}`. Accepts the form's own wording
-  (e.g. "Patent", "Places/Partnerships", "Policy Recommendations"). **`projects.register` widened** (migration
-  `accounts.0009`) to the docx's M2 primary users: crc_chair, drd, riuh, program/project/study leaders (+system_admin);
-  it had been system_admin/crc_chair only since `2fc405f` with no recorded reason. Leaders only register/edit records
-  they belong to (`serializers.ensure_registrant_in_scope`; importer defers the check to the finished project so a
-  study leader's Study Components row counts; program leaders use the template's optional "Program Code").
-  Smoke-tested with the real BRIDGI data + a role matrix (rolled back, no leaks).
+  (e.g. "Patent", "Places/Partnerships", "Policy Recommendations"). Smoke-tested with the real BRIDGI data.
+  **Registration vs edit split (2026-09-29, client chose "Option A", per Clarification Answers Q4 + summary table):**
+  `projects.register` (POST program/project/study, Excel template + import) = system_admin, crc_chair, drd, riuh only;
+  new `projects.edit` (PUT/PATCH program/project/study, team-member/beneficiary writes) = those + the three leader
+  roles, leaders still limited to their own records (`ensure_registrant_in_scope`) and blocked from changing the
+  CRC-owned fields — code, lead, program/project placement (`serializers.ensure_leader_keeps`, unchanged values OK).
+  Migration `accounts.0013` reverts 0009's leader grants. (0009 had widened register to leaders from the Module
+  Structure M2 user list; that contradicted the Clarification Answers, which win.)
 - Module 3 (personnel app): done, stable.
 - Module 4 (budget_lib app): done, migrated, `manage.py check` passes. **Updated 2026-09-24**: the ₱100k institutional-dry-research cap check was REMOVED from `LineItemSerializer.validate()` (and the `INSTITUTIONAL_DRY_RESEARCH_CAP` constant deleted) at Carl's request — real LIB data (e.g. sheet P77, ₱120k) was being rejected with a 400. Note: the cap is a Manual rule, so this is a deliberate deviation. **Later on 2026-09-24 it was re-added as a NON-BLOCKING warning** (`LineItemBudgetSerializer.exceeds_dry_cap`, constant back in `budget_lib/models.py`) after the client docs cited it again. P77 is flagged, not rejected. **Updated 2026-09-23**: `procurement_officer_lib` role — seeded since Module 1 but had zero permissions wired anywhere in `budget_lib` (only used in Module 3's property clearance) — added to `MANAGE_ROLES` in `budget_lib/views.py`, so Procurement can now create/edit `LineItem`s (matches the client's framing: "yung procurement yun na yun logging ng LIB"). Deliberately NOT added to `CERTIFY_ROLES` (stays `system_admin`/`finance_budget` only) — budget certification is specifically the docx's "Budget Officer" job, not Procurement's; kept that separation of duties. Also added `?project=` and `?is_app_flagged=` filters to `LineItemListCreateView` so Procurement can pull an institution-wide APP-flagged (>₱50k) worklist instead of having to page through one budget at a time.
 - Module 5 (financial_monitoring app): done, migrated, core logic verified via shell/view-level smoke tests (rolled back, no data persisted). BOR-tier realignment review is `system_admin`-only (client-confirmed 2026-09-22); major tier still allows `university_admin` too.
 - Module 6 (compliance app): done, migrated, verified via shell smoke test AND live frontend testing (CompliancePage). One real bug found+fixed there (`AIUseDeclarationSerializer.declared_by` missing from `read_only_fields`) — commit `27ed3d6`.
-- Module 7 (document_management app): done, migrated, **confirmed working end-to-end against real Supabase Storage** 2026-09-22 (upload → signed URL → download → content match → cleanup, all passed). Bucket is named `research-documents` (not `documents` — user created it with that name; `.env` and `settings.py`'s default both updated to match). Two real setup issues found+fixed during this test: (1) `storage.py` was only sending an `Authorization` header — Supabase's gateway also requires `apikey`, otherwise it 403s with "Invalid Compact JWS"; (2) the bucket has MIME-type restrictions configured (rejected `text/plain`, accepted `application/pdf`) — user should check/expand the allowed MIME types in the Supabase dashboard if Module 7 needs to accept non-PDF document types (.docx, .csv, .zip for datasets, etc.), otherwise valid uploads may get rejected server-side by Supabase.
+- Module 7 (document_management app): done, migrated, **confirmed working end-to-end against real Supabase Storage** 2026-09-22 (upload → signed URL → download → content match → cleanup, all passed). Bucket is named `research-documents` (not `documents` — user created it with that name; `.env` and `settings.py`'s default both updated to match). Two real setup issues found+fixed during this test: (1) `storage.py` was only sending an `Authorization` header — Supabase's gateway also requires `apikey`, otherwise it 403s with "Invalid Compact JWS"; (2) the bucket has MIME-type restrictions configured — as of 2026-09-29 pdf/doc/docx/xls/xlsx, mirrored by `ALLOWED_FILE_TYPES` in `serializers.py` (bad type or storage rejection = 400, not 500; see "Last thing done").
 - Module 8 (outputs app): done, migrated, `manage.py check` passes, incentive-computation logic verified via shell smoke test against the Manual's actual peso figures (rolled back, no data persisted). Reused the pre-existing empty `outputs/` placeholder dir (same hand-written-files approach as `compliance/`, since `startapp` refuses when the directory already exists).
 - Module 9 (monitoring app): done, migrated, `manage.py check` passes. Verified two ways: (1) shell smoke test of the computed helpers (`compute_escalation_status`, `compute_budget_used_pct`, `compute_deliverables_pct`, `compute_renewal_eligible`) against constructed project/budget/disbursement/milestone data — all thresholds (3mo/6mo escalation, 70% budget-OR-70%-deliverables-with-justification renewal rule) matched expected output; (2) `APIRequestFactory`+`force_authenticate` view-level test confirming URL wiring, role-gated 403s (riuh correctly blocked from the evaluation-panel-only endpoint), and the certify/decide action endpoints — all rolled back, no data persisted. First app in this repo built fresh with `startapp` (no pre-existing empty placeholder dir like `outputs`/`compliance` had) — deleted the auto-generated `tests.py` to match the other apps' convention of not having one.
 - Module 10 (dashboard app): done, migrated, `manage.py check` passes. Almost entirely read-only aggregation over Modules 2/4/5/6/8/9's existing data (`dashboard/services.py` has the compute functions) — only one new persisted model, `PlanningTarget`, since Planning Office targets have to be entered somewhere to compare against. Verified via shell smoke test (all 8 compute functions against constructed project/budget/disbursement/publication/IP/ethics/monthly-report data — including a 100%-of-target planning comparison) and `APIRequestFactory`+`force_authenticate` view-level test (dashboards open to any authenticated role, `PlanningTarget` POST correctly 403s a `project_staff`) — both rolled back, no data persisted. Same fresh-`startapp` + deleted-`tests.py` pattern as Module 9.
@@ -107,13 +109,16 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
     per-item time/read state.
   - Still mock-only, in NO plan: Work Plan version history, Reports scheduled reports (needs a scheduler = the
     Celery discussion), System Settings info.
-- **Module 2 registration (2026-09-26) — BREAKING:** `sector` is gone, replaced by `sectors: string[]` (required, ≥1;
-  `sector_other` required when it contains `"others"`) — `RegisterProjectPage.tsx`, `ProjectDetailPage.tsx`,
-  `lib/researchApi.ts`, `types/research.ts` still use `sector`. Also new: the Project fields listed in the Module 2 status
+- **Module 2 registration (2026-09-26):** `sector` → `sectors: string[]` (required, ≥1; `sector_other` required when it
+  contains `"others"`) — frontend already switched (verified 2026-09-29 in `RegisterProjectPage.tsx`/`types/research.ts`). Also new: the Project fields listed in the Module 2 status
   line (`continuing_year` required ≥2 when `is_continuing`), `project-team/` + `target-beneficiaries/` CRUD (`?project=`),
   LIB `q1_amount..q4_amount`, and the Excel flow: download `projects/import-template/` as a Blob (JWT header), upload
-  multipart `file` to `projects/import/`, render the `errors` list on 400. Registration buttons should now show for
-  crc_chair/drd/riuh/leaders too (403s changed for `projects.register`).
+  multipart `file` to `projects/import/`, render the `errors` list on 400.
+- **2026-09-29 — DONE in rmis-frontend `1e158a2`:** registration UI (Register Program/Project, `/projects/new`,
+  `/programs/new`, Add Study) gated to `REGISTRATION_ROLE_CODES` (admin/CRC/DRD/RIUH) in `src/lib/roles.ts`; project
+  status panel keeps leaders (`PROJECT_EDIT_ROLE_CODES`); document inputs `accept=".pdf,.doc,.docx,.xls,.xlsx"`.
+  Still unused by the UI: `error_detail` on `GET admin/audit-logs/` rows (show it on the Audit Logs page for 4xx rows);
+  document upload now returns 400 `{"file": ...}` for a bad type/storage rejection (was 500).
 - Modules 4 (budget_lib) and 5 (financial_monitoring) — frontend pages (BudgetPage,
   DisbursementsPage) are built and call these endpoints, but haven't been
   browser-tested against a live server yet (unlike Modules 6-8, below).
@@ -160,7 +165,8 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   reserved query param, see the bug note above). Default format if omitted is `csv`.
 
 ## Known open questions / decisions pending
-- Module 7's `research-documents` Supabase bucket may need its allowed MIME types expanded beyond PDF (see above) — user to check in the dashboard when frontend upload of non-PDF document types starts failing.
+- Module 7 bucket MIME list (set by Carl 2026-09-29): pdf, doc, docx, xls, xlsx. `document_management/serializers.py::ALLOWED_FILE_TYPES` must match it (images/csv/zip are rejected); change both together.
+- Project status (incl. completed/terminated) can still be changed by the project's own leaders, but the Clarification Answers summary table gives "closure at archiving" to the CRC Chair. Not part of Option A, so left as-is — ask Carl. If CRC-only: add `status` to `ensure_leader_keeps` on Project and move the frontend panel to `canRegister`.
 - Module 8 simplifications (reasonable defaults from the Manual's Article V R&D Incentive System, not explicitly confirmed with client):
   - `estimated_incentive` on `PublicationRecord` and `incentive_eligible` on `IPRecord` are computed live (SerializerMethodField, not stored) — always reflects current data, never stale, but also means nothing prevents someone from editing a record after the incentive was actually disbursed elsewhere. `IPRecord.incentive_claimed` is a manual RIUH-set flag to prevent double-counting the "once per patent/UM" rule, but there's no equivalent flag on `PublicationRecord` yet — if that turns out to matter (e.g. someone re-submits the same paper), add one.
   - IP incentive is eligibility-only (bool), not a peso amount — the Manual explicitly defers "schedule of incentive/royalty" to a separate IP Policy document not available to check against.
@@ -227,25 +233,27 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-09-26 (second round): **Phase 3C P13/P14/P15** on branch `feat/proposal-form-registration`, after a frontend audit
-found 6 mocks with no backend. P13 `accounts.TemporaryReplacement` (migration `accounts.0011`; acting users get the
-suspended user's leader scope via `accounts.permissions.acting_for` in `scoped_projects`/`visible_documents`; own role
-permissions unchanged, a project_staff replacement gets read scope). P14 `document_management.DocumentShare`
-(migration `0004`; `visible_documents` = role rules ∪ active shares). P15 `GET risk/alerts/`. No new permission codes;
-parity 0 differences; all smoke tests (these + the registration ones) pass and roll back clean.
-Earlier the same day: LSPU-RDO-SF-018 registration + Excel import (`cdbb7d0`), and `d3de4be` (another session:
-`accounts.view_users_by_role` widened to every projects.register role, migration `0010`, so leader pickers work).
-NOTE for smoke tests: `APIClient` needs `HTTP_HOST="localhost"`, test users need a unique `username`, and document
-routes are under `/api/documents/documents/...`.
+2026-09-29: fixed what client testing (2026-09-28, self-hosted Dokploy deploy) hit, backend `0ac301f` + frontend
+`1e158a2`, both pushed to `main`. Migrations `accounts.0012` + `0013` applied to the Supabase DB (shared by local
+`.env` AND the prod container; Carl OK'd migrating with no testers on). Parity 0 differences; 62 tests pass.
+- `POST documents/documents/` 500 = the bucket rejected a non-PDF/Word MIME and `raise_for_status()` went uncaught.
+  Now: extension whitelist (400), upload before any DB change, version demote + create in `transaction.atomic()`,
+  storage rejection → 400, failed download-URL signing → `null`.
+- `POST projects/` 400 ×8 = `ebsdm.user@gmail.com` is a **program_leader** (not project_leader) registering a standalone
+  project; the rules rejected it as designed. Led to the Option A register/edit split (see Module 2 line).
+- Visibility: `LOGGING` sends 500 tracebacks to stdout (DEBUG=False printed nothing before); `AuditLog.error_detail`
+  keeps the first 1000 chars of a 4xx JSON body.
+NOTE for tests: `python manage.py test --keepdb` — dropping `test_postgres` failed with "being accessed by other
+users" (possibly `CONN_MAX_AGE=60`, not verified). The container restarts wipe `docker logs`.
 
 ## Next thing to do in this repo
-1. Merge `feat/proposal-form-registration` into main (`git checkout main && git merge --ff-only feat/proposal-form-registration`).
-   Phase 3C Checkpoint (todo.md) regression sweep is the smoke tests above; tick it when merged.
-2. Frontend: the BREAKING `sector` → `sectors` change and the Excel import UI first, then swap the 3 P13–P15 mocks
-   for the real endpoints (see "What the frontend still needs"), then the older backlog: new DPMIS endpoints, `critical` risk level, permission matrix + user scope screens.
-3. Open from this round, ask Carl/client: Capsule CV (Annex A, leader/co-leader) — asked, not answered, not built;
-   study leaders can attach a Study to any project naming themselves as lead, which then puts that project in their
-   edit scope — confirm that's acceptable; project code isn't on the form but is required (template asks for it);
-   template uses start/target dates for the work plan instead of the form's quarter shading.
-4. When the client/RDO answers the "still to confirm" items, adjust the named constants rather than logic.
-5. Optional: the DPMIS traceability HTML (`docs/dpmis_traceability.html`, T21) for the panel.
+1. Carl: **redeploy the backend in Dokploy** (prod container still runs pre-`0ac301f` code against the migrated DB:
+   leaders can't edit projects and audit inserts may silently fail until then). Confirm Netlify picked up `1e158a2`.
+2. Ask Carl/client: project status/closure — leaders or CRC only (see open questions).
+3. Frontend: show `error_detail` on the Audit Logs page; then the older backlog: new DPMIS endpoints, `critical`
+   risk level, permission matrix + user scope screens (re-verify against `rmis-frontend/src` first, this list lags).
+4. Still open from 2026-09-26: Capsule CV (Annex A) not built; template uses start/target dates for the work plan
+   instead of the form's quarter shading. (The "study leader attaches a Study to any project" question is moot now:
+   Study creation is register-only.)
+5. When the client/RDO answers the "still to confirm" items, adjust the named constants rather than logic.
+6. Optional: the DPMIS traceability HTML (`docs/dpmis_traceability.html`, T21) for the panel.
