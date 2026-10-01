@@ -52,10 +52,10 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 - Deps: T2
 
 ### T5 (BE+FE) Team picker: accounts + free text — #6 · M
-- [ ] BE: `UserListSerializer` gains `full_name` (first + last, fallback email)
-- [ ] FE: reusable searchable `UserPicker` (search name/email, all active users from `users/by-role/`), with
+- [x] BE: `UserListSerializer` gains `full_name` (first + last, fallback email)
+- [x] FE: reusable searchable `UserPicker` (search name/email, all active users from `users/by-role/`), with
       "use typed name" fallback for non-accounts (e.g. "EIU Coordinators")
-- [ ] Picking an account saves `user` + `name` on the team row; free text saves `name` only
+- [x] Picking an account saves `user` + `name` on the team row; free text saves `name` only
 - Verify: register with 1 account member + 1 free-text group; both appear on the project page
 - Files: BE `accounts/serializers.py`; FE `src/components/common/UserPicker.tsx` (new), `src/types/auth.ts`,
   `src/pages/RegisterProjectPage.tsx`

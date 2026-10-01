@@ -358,3 +358,18 @@ class TemporaryReplacementTests(RMISTestCase):
 
         self.assertIsNotNone(TemporaryReplacement.objects.get().ended_at)
         self.assertFalse(scoped_projects(self.acting).filter(pk=self.project.pk).exists())
+
+
+class UserPickerTests(RMISTestCase):
+    def test_people_picker_lists_every_active_account_with_a_display_name(self):
+        """Client meeting 2026-10-01 (#6): the team picker offers any registered account, not only leaders."""
+        leader = self.make_user("project_leader")
+        named = self.make_user("project_staff", first_name="Dan Azriel", last_name="San Agustin")
+        unnamed = self.make_user("finance_budget")
+
+        response = self.client_for(leader).get("/api/users/by-role/")
+
+        self.assertEqual(response.status_code, 200)
+        names = {u["id"]: u["full_name"] for u in response.data}
+        self.assertEqual(names[named.id], "Dan Azriel San Agustin")
+        self.assertEqual(names[unnamed.id], unnamed.email)
