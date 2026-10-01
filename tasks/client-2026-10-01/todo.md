@@ -16,9 +16,9 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 - Deps: none
 
 ### T2 (FE) Register button + lead locked for leader — #1, #4 · S
-- [ ] `project_leader` added to `REGISTRATION_ROLE_CODES`; "Register Approved Project" button and `/projects/new` work
-- [ ] As project_leader, the Project Leader field shows only their own account (preselected, disabled)
-- [ ] As admin/CRC, the field lists all project leaders
+- [x] `project_leader` added to `REGISTRATION_ROLE_CODES`; "Register Approved Project" button and `/projects/new` work
+- [x] As project_leader, the Project Leader field shows only their own account (preselected, disabled)
+- [x] As admin/CRC, the field lists all project leaders
 - Verify: log in as fresh project_leader, register → lands on project page
 - Files: `src/lib/roles.ts`, `src/App.tsx`, `src/pages/RegisterProjectPage.tsx`
 - Deps: T1
