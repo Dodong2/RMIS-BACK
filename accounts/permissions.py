@@ -72,6 +72,38 @@ def scoped_projects(user):
     return None
 
 
+def visible_projects(user):
+    """Project queryset this user may read project records for (list/detail, studies, work plan), or None for no
+    restriction. Strict RBAC from the client meeting 2026-10-01: leaders and staff see only projects they lead or
+    belong to (team row with their account, or an assignment); other roles follow scoped_projects."""
+    from django.db.models import Q
+    from research_projects.models import Project
+
+    code = user.role.code if user.role else None
+    if code in LEADER_ROLES or code == "project_staff":
+        leads = [user.pk, *acting_for(user)]
+        return Project.objects.filter(
+            Q(lead__in=leads) | Q(studies__lead__in=leads) | Q(program__lead__in=leads)
+            | Q(team_members__user=user) | Q(assignments__user=user) | Q(studies__assignments__user=user)
+        ).distinct()
+    return scoped_projects(user)
+
+
+class ProjectVisibleMixin:
+    """Like BudgetScopedMixin, but for reading project records (visible_projects). project_lookup is the path from
+    the model to Project; "" means the model is Project itself."""
+
+    project_lookup = "project"
+
+    def filter_queryset(self, queryset):
+        qs = super().filter_queryset(queryset)
+        projects = visible_projects(self.request.user)
+        if projects is None:
+            return qs
+        field = f"{self.project_lookup}__in" if self.project_lookup else "pk__in"
+        return qs.filter(**{field: projects.values("pk")})
+
+
 def ensure_in_scope(serializer, project):
     """Serializer-side guard for writes: the request user must have the project in scope."""
     from rest_framework.exceptions import ValidationError

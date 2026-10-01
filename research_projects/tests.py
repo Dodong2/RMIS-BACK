@@ -106,7 +106,8 @@ class ManualRegistrationTests(RMISTestCase):
 
         response = self.client_for(leader).patch(f"/api/projects/{project.id}/", {"title": "Hijacked"}, format="json")
 
-        self.assertEqual(response.status_code, 400)
+        # 404 since strict read scope (client meeting 2026-10-01): another leader's project isn't visible at all.
+        self.assertEqual(response.status_code, 404)
         project.refresh_from_db()
         self.assertEqual(project.title, "P")
 
@@ -322,3 +323,43 @@ class ExcelImportTests(RMISTestCase):
         for code in ("program_leader", "study_leader"):
             self.assertEqual(self.upload(self.make_user(code)).status_code, 403)
         self.assertFalse(Project.objects.exists())
+
+
+class ProjectReadScopeTests(RMISTestCase):
+    """Strict RBAC (client meeting 2026-10-01): leaders and staff read only projects they lead or belong to."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader, self.other = self.make_user("project_leader"), self.make_user("project_leader")
+        self.mine = Project.objects.create(title="Mine", project_code="M-1", funding_type="core_funded", lead=self.leader)
+        self.theirs = Project.objects.create(title="Theirs", project_code="T-1", funding_type="core_funded", lead=self.other)
+
+    def codes(self, user, path="/api/projects/"):
+        response = self.client_for(user).get(path)
+        self.assertEqual(response.status_code, 200, response.data)
+        return sorted(row.get("project_code") or row.get("title") for row in response.data)
+
+    def test_leader_lists_and_opens_only_their_projects(self):
+        self.assertEqual(self.codes(self.leader), ["M-1"])
+        self.assertEqual(self.client_for(self.leader).get(f"/api/projects/{self.theirs.id}/").status_code, 404)
+        self.assertEqual(self.client_for(self.leader).get(f"/api/projects/{self.mine.id}/").status_code, 200)
+
+    def test_team_members_and_assigned_staff_see_the_project(self):
+        member, staff = self.make_user("project_leader"), self.make_user("project_staff")
+        self.theirs.team_members.create(name="Member", user=member)
+        from personnel.models import ProjectAssignment
+        ProjectAssignment.objects.create(user=staff, project=self.theirs, start_date="2026-01-01")
+
+        self.assertEqual(self.codes(member), ["T-1"])
+        self.assertEqual(self.codes(staff), ["T-1"])
+        self.assertEqual(self.codes(self.make_user("project_staff")), [])
+
+    def test_university_wide_roles_still_see_everything(self):
+        self.assertEqual(self.codes(self.make_user("drd")), ["M-1", "T-1"])
+        self.assertEqual(self.codes(self.make_user("system_admin")), ["M-1", "T-1"])
+
+    def test_studies_and_milestones_follow_the_project_scope(self):
+        self.theirs.studies.create(title="Their study")
+        self.mine.studies.create(title="My study")
+
+        self.assertEqual(self.codes(self.leader, "/api/studies/"), ["My study"])

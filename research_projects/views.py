@@ -6,7 +6,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from accounts.permissions import HasRole, ensure_in_scope
+from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from . import importer
 from .models import (
@@ -52,7 +52,8 @@ class ProgramDetailView(generics.RetrieveUpdateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class ProjectListCreateView(generics.ListCreateAPIView):
+class ProjectListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
+    project_lookup = ""
     queryset = Project.objects.all().order_by("-created_at")
     serializer_class = ProjectSerializer
 
@@ -62,7 +63,8 @@ class ProjectListCreateView(generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class ProjectDetailView(generics.RetrieveUpdateAPIView):
+class ProjectDetailView(ProjectVisibleMixin, generics.RetrieveUpdateAPIView):
+    project_lookup = ""
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
 
@@ -159,7 +161,7 @@ class ProjectImportView(APIView):
         return Response(ProjectSerializer(project).data, status=status.HTTP_201_CREATED)
 
 
-class ProjectChildListCreateView(generics.ListCreateAPIView):
+class ProjectChildListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
     """List (?project=) and create rows of a project's form table; writes need projects.edit."""
 
     def get_queryset(self):
@@ -173,7 +175,7 @@ class ProjectChildListCreateView(generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class ProjectChildDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ProjectChildDetailView(ProjectVisibleMixin, generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         return self.serializer_class.Meta.model.objects.all()
 
@@ -211,7 +213,7 @@ class BeneficiaryDetailView(ProjectChildDetailView):
     serializer_class = TargetBeneficiarySerializer
 
 
-class ProjectStatusHistoryView(generics.ListAPIView):
+class ProjectStatusHistoryView(ProjectVisibleMixin, generics.ListAPIView):
     serializer_class = ProjectStatusHistorySerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -219,7 +221,7 @@ class ProjectStatusHistoryView(generics.ListAPIView):
         return ProjectStatusHistory.objects.filter(project_id=self.kwargs["pk"]).select_related("changed_by").order_by("-changed_at", "-id")
 
 
-class StudyListCreateView(generics.ListCreateAPIView):
+class StudyListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
     serializer_class = StudySerializer
 
     def get_queryset(self):
@@ -235,7 +237,7 @@ class StudyListCreateView(generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class StudyDetailView(generics.RetrieveUpdateAPIView):
+class StudyDetailView(ProjectVisibleMixin, generics.RetrieveUpdateAPIView):
     queryset = Study.objects.all()
     serializer_class = StudySerializer
 
@@ -245,7 +247,7 @@ class StudyDetailView(generics.RetrieveUpdateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class MilestoneListCreateView(generics.ListCreateAPIView):
+class MilestoneListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
     serializer_class = WorkPlanMilestoneSerializer
 
     def get_queryset(self):
@@ -263,7 +265,7 @@ class MilestoneListCreateView(generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class MilestoneDetailView(generics.RetrieveUpdateDestroyAPIView):
+class MilestoneDetailView(ProjectVisibleMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = WorkPlanMilestone.objects.all()
     serializer_class = WorkPlanMilestoneSerializer
 
