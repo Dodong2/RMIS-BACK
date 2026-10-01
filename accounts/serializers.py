@@ -43,12 +43,21 @@ class UserListSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            "id", "email", "full_name", "role", "office", "position", "scope", "is_active", "account_status", "date_joined",
+            "id", "email", "full_name", "first_name", "last_name", "role", "office", "position", "scope", "is_active",
+            "account_status", "date_joined",
         ]
 
     def get_full_name(self, obj):
         """For the people pickers (client meeting 2026-10-01). Most accounts have no name yet, so fall back to e-mail."""
         return obj.get_full_name() or obj.email
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    """Admin edit of the name/office/position shown in people pickers and Annex A (client meeting 2026-10-01)."""
+
+    class Meta:
+        model = User
+        fields = ["first_name", "last_name", "office", "position"]
 
 
 class UserScopeSerializer(serializers.Serializer):

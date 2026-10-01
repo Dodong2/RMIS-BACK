@@ -35,7 +35,10 @@ class SeedRolesTests(TestCase):
 
 class RegistrationTests(RMISTestCase):
     def register(self, **overrides):
-        data = {"email": "New.Researcher@lspu.test", "password": PASSWORD, "password2": PASSWORD}
+        data = {
+            "email": "New.Researcher@lspu.test", "password": PASSWORD, "password2": PASSWORD,
+            "first_name": "Aimee Concepcion", "last_name": "Chavez",
+        }
         data.update(overrides)
         return APIClient().post("/api/auth/register/", data, format="json")
 
@@ -50,7 +53,14 @@ class RegistrationTests(RMISTestCase):
         self.assertFalse(user.is_active)
         self.assertTrue(user.is_pending_role)
         self.assertEqual(user.requested_role, role)
+        self.assertEqual(user.get_full_name(), "Aimee Concepcion Chavez")
         self.assertTrue(self.brevo_post.called)
+
+    def test_register_needs_a_first_and_last_name(self):
+        response = self.register(last_name="  ")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(User.objects.filter(email="new.researcher@lspu.test").exists())
 
     def test_register_rejects_mismatched_passwords(self):
         response = self.register(password2="something-else")
@@ -361,6 +371,21 @@ class TemporaryReplacementTests(RMISTestCase):
 
 
 class UserPickerTests(RMISTestCase):
+    def test_admin_fills_in_an_accounts_name_office_and_position(self):
+        user = self.make_user("project_staff")
+
+        response = self.client_for(self.make_user("system_admin")).patch(
+            f"/api/admin/users/{user.id}/profile/",
+            {"first_name": "Grace", "last_name": "Esmade", "position": "Instructor I"}, format="json",
+        )
+        denied = self.client_for(self.make_user("crc_chair")).patch(
+            f"/api/admin/users/{user.id}/profile/", {"first_name": "X"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual((response.data["full_name"], response.data["position"]), ("Grace Esmade", "Instructor I"))
+        self.assertEqual(denied.status_code, 403)
+
     def test_people_picker_lists_every_active_account_with_a_display_name(self):
         """Client meeting 2026-10-01 (#6): the team picker offers any registered account, not only leaders."""
         leader = self.make_user("project_leader")

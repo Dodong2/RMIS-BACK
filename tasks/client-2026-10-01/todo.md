@@ -61,6 +61,14 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
   `src/pages/RegisterProjectPage.tsx`
 - Deps: T4
 
+### T5b (BE+FE) Account names for the pickers — added 2026-10-01 · S
+No account had a first/last name, so pickers and the Annex A auto-fill would show e-mails (Carl chose option 1).
+- [x] Sign-up asks for first and last name (required); `auth/register/` saves them
+- [x] `PATCH admin/users/<id>/profile/` (accounts.manage_users) edits name, office, position; admin user detail has
+      "Edit Name, Office, and Position"
+- Files: BE `accounts/views.py`, `serializers.py`, `urls.py`, `tests.py`; FE `src/pages/RegisterPage.tsx`,
+  `src/pages/admin/UsersListPage.tsx`, `src/lib/authApi.ts`, `src/types/auth.ts`
+
 ### T6 (BE+FE) Study components — #7 · M
 - [ ] BE: `Study.lead` nullable (migration); lead role check only when a lead is given; importer accepts a blank lead
 - [ ] FE: Classification step has "Study Component Titles" rows (Study 1, Study 2, Add Study); saved as studies after

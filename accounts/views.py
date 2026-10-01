@@ -11,7 +11,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import AuditLog, Permission, Role, RolePermission, TemporaryReplacement, User
 from .serializers import (
     AuditLogSerializer, RoleSerializer, PendingUserSerializer, TemporaryReplacementSerializer, UserListSerializer,
-    UserScopeSerializer,
+    UserProfileSerializer, UserScopeSerializer,
 )
 from .permissions import HasRole
 from .emails import notify_admins_new_registration, send_role_confirmation_email
@@ -22,12 +22,16 @@ class RegisterView(APIView):
 
     def post(self, request):
         email = request.data.get("email", "").strip().lower()
+        first_name = request.data.get("first_name", "").strip()
+        last_name = request.data.get("last_name", "").strip()
         password = request.data.get("password")
         password2 = request.data.get("password2")
         requested_role_id = request.data.get("requested_role")
 
         if not email or not password or not password2:
             return Response({"detail": "Email and password are required."}, status=400)
+        if not first_name or not last_name:
+            return Response({"detail": "First and last name are required."}, status=400)
         if password != password2:
             return Response({"detail": "Passwords do not match."}, status=400)
         if User.objects.filter(email=email).exists():
@@ -40,6 +44,8 @@ class RegisterView(APIView):
             username=username,
             email=email,
             password=password,
+            first_name=first_name[:150],
+            last_name=last_name[:150],
             is_active=False,
             is_pending_role=True,
             registration_method="email",
@@ -281,6 +287,20 @@ class PermissionMatrixView(APIView):
             for p in Permission.objects.order_by("module", "code")
         ]
         return Response({"roles": list(Role.objects.order_by("id").values_list("code", flat=True)), "permissions": permissions})
+
+
+class UserProfileView(APIView):
+    """PATCH {first_name, last_name, office, position}: the admin fills in who an account is, for the people pickers
+    and the Annex A endorser auto-fill (client meeting 2026-10-01)."""
+
+    permission_classes = [HasRole("accounts.manage_users")]
+
+    def patch(self, request, user_id):
+        user = get_object_or_404(User, id=user_id)
+        serializer = UserProfileSerializer(user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(UserListSerializer(user).data)
 
 
 class UserScopeView(APIView):
