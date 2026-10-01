@@ -110,6 +110,20 @@ class ManualRegistrationTests(RMISTestCase):
         project.refresh_from_db()
         self.assertEqual(project.title, "P")
 
+    def test_code_available_sees_codes_outside_the_leaders_scope(self):
+        """Client meeting 2026-10-01 (#3): a leader can't list other leaders' projects, so the wizard asks this."""
+        leader, other = self.make_user("project_leader"), self.make_user("project_leader")
+        Project.objects.create(title="P", project_code="LSPU-1", funding_type="core_funded", lead=other)
+        client = self.client_for(leader)
+
+        taken = client.get("/api/projects/code-available/", {"code": " LSPU-1 "})
+        free = client.get("/api/projects/code-available/", {"code": "LSPU-2"})
+        staff = self.client_for(self.make_user("project_staff")).get("/api/projects/code-available/", {"code": "LSPU-2"})
+
+        self.assertEqual((taken.status_code, taken.data["available"]), (200, False))
+        self.assertEqual((free.status_code, free.data["available"]), (200, True))
+        self.assertEqual(staff.status_code, 403)
+
     def test_line_item_quarters_must_add_up_to_the_amount(self):
         admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)

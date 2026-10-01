@@ -77,6 +77,19 @@ class ProjectDetailView(generics.RetrieveUpdateAPIView):
             )
 
 
+class ProjectCodeAvailableView(APIView):
+    """GET ?code=: whether an official project code is still free (client meeting 2026-10-01, #3). A leader's project
+    list only shows their own projects, so the wizard can't check this from the list."""
+
+    permission_classes = [HasRole("projects.register")]
+
+    def get(self, request):
+        code = request.query_params.get("code", "").strip()
+        if not code:
+            return Response({"code": "Pass the project code as ?code=."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"code": code, "available": not Project.objects.filter(project_code=code).exists()})
+
+
 class ProjectImportTemplateView(APIView):
     """Blank LSPU-RDO-SF-018 Excel template for ProjectImportView."""
 

@@ -39,13 +39,13 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 ## Phase 2: Registration wizard
 
 ### T4 (BE+FE) Step gates, duplicate code, campus input — #10, #3, #5 · M
-- [ ] BE: `GET projects/code-available/?code=` → `{available: bool}` (projects.register)
-- [ ] FE: `STEP_REQUIRED` constant (one place): Details = project code; Team = campus; Classification = sector;
+- [x] BE: `GET projects/code-available/?code=` → `{available: bool}` (projects.register)
+- [x] FE: `STEP_REQUIRED` constant (one place): Details = project code; Team = campus; Classification = sector;
       Proposal = ≥1 objective; Beneficiaries = every added row complete; Endorsement = NTP No.; Validate = none
-- [ ] Next is blocked with inline "Required" until the step's fields are filled; Previous and clicking a done step
+- [x] Next is blocked with inline "Required" until the step's fields are filled; Previous and clicking a done step
       always work; the step header can't jump forward past an incomplete step
-- [ ] Leaving step 1 with a taken code → toast "Project code already exists"; a 400 on submit shows the same toast
-- [ ] Campus free-text input removed; highlighted card is the only value
+- [x] Leaving step 1 with a taken code → toast "Project code already exists"; a 400 on submit shows the same toast
+- [x] Campus free-text input removed; highlighted card is the only value
 - Verify: BE test for code-available; FE manual walk-through hitting every gate
 - Files: BE `research_projects/views.py`, `urls.py`, `tests.py`; FE `src/lib/researchApi.ts`,
   `src/pages/RegisterProjectPage.tsx`
