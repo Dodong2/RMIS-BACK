@@ -111,7 +111,7 @@ class TaskListCreateView(generics.ListCreateAPIView):
         qs = Task.objects.all().order_by("due_date", "-created_at")
         if user.role and user.role.code == "project_staff":
             qs = qs.filter(assignee=user)
-        for param in ("project", "study", "assignee", "status", "priority"):
+        for param in ("project", "study", "milestone", "assignee", "status", "priority"):
             value = self.request.query_params.get(param)
             if value:
                 qs = qs.filter(**{param if param in ("status", "priority") else f"{param}_id": value})

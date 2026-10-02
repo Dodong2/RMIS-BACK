@@ -112,7 +112,7 @@ class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
         fields = ["id", "project", "study", "title", "description", "due_date", "status", "priority",
-                  "estimated_hours", "logged_hours", "progress_pct", "tags", "deliverables", "assignee", "assignee_detail", "assigned_by",
+                  "estimated_hours", "logged_hours", "progress_pct", "milestone", "tags", "deliverables", "assignee", "assignee_detail", "assigned_by",
                   "started_at", "completed_at", "created_at"]
         read_only_fields = ["assigned_by"]
 
@@ -136,6 +136,9 @@ class TaskSerializer(serializers.ModelSerializer):
         project = attrs.get("project", getattr(self.instance, "project", None))
         if study and study.project_id != project.id:
             raise serializers.ValidationError({"study": "Study does not belong to this project."})
+        milestone = attrs.get("milestone", getattr(self.instance, "milestone", None))
+        if milestone and milestone.project_id != project.id:
+            raise serializers.ValidationError({"milestone": "Milestone does not belong to this project."})
         return attrs
 
 

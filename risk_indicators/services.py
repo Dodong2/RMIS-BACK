@@ -178,7 +178,42 @@ ALERT_LEVELS_BY_ROLE = {
 
 
 def compute_risk_alerts(user):
-    """Active projects in the user's scope whose risk level is in the user's alert band, worst first."""
+    """Active projects in the user's scope whose risk level is in the user's alert band, worst first, then the
+    overdue work plan milestones the user leads (overdue_milestone_alerts)."""
+    return _risk_level_alerts(user) + overdue_milestone_alerts(user)
+
+
+def overdue_milestone_alerts(user):
+    """Client meeting 2026-10-01 (#14): a not-done milestone past its target date alerts the project's leader (and
+    system_admin, who sees every project). Most overdue first; the bell opens that project's work plan."""
+    from accounts.permissions import acting_for
+    from research_projects.models import WorkPlanMilestone
+
+    code = user.role.code if user.role else None
+    milestones = WorkPlanMilestone.objects.filter(
+        project__status="active", target_date__lt=timezone.localdate()
+    ).exclude(status="done").select_related("project")
+    if code != "system_admin":
+        milestones = milestones.filter(project__lead__in=[user.pk, *acting_for(user)])
+    today = timezone.localdate()
+    return [
+        {
+            "kind": "milestone",
+            "project": m.project_id,
+            "project_code": m.project.project_code,
+            "title": m.project.title,
+            "milestone": m.pk,
+            "days_overdue": (today - m.target_date).days,
+            "link": f"/work-plan?project={m.project_id}",
+            "type": "danger",
+            "text": f"{m.project.project_code}: milestone “{m.title}” was due {m.target_date:%b %d, %Y} "
+                    f"({(today - m.target_date).days} day(s) overdue) and is not done.",
+        }
+        for m in milestones.order_by("target_date", "id")
+    ]
+
+
+def _risk_level_alerts(user):
     from accounts.permissions import scoped_projects
 
     levels = ALERT_LEVELS_BY_ROLE.get(user.role.code if user.role else None, ())
@@ -197,6 +232,8 @@ def compute_risk_alerts(user):
         triggers = [name for name, flag in risk["flags"].items() if flag["flagged"] and flag["score"] == risk["risk_score"]]
         trigger = triggers[0].replace("_", " ") if triggers else "risk register entry"
         alerts.append({
+            "kind": "risk",
+            "link": f"/projects/{project.id}",
             "project": project.id,
             "project_code": project.project_code,
             "title": project.title,

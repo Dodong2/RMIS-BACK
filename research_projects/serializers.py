@@ -219,17 +219,41 @@ class StudySerializer(serializers.ModelSerializer):
 
 
 class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
+    """Client meeting 2026-10-01 (#14): personnel tasks are the activities under a milestone; its progress is the share
+    of done tasks, and it can't be marked done while any of them is open. Milestones without tasks work as before."""
+
     responsible_detail = LeadSerializer(source="responsible", read_only=True)
+    tasks_total = serializers.SerializerMethodField()
+    tasks_done = serializers.SerializerMethodField()
+    progress_pct = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkPlanMilestone
         fields = [
             "id", "project", "title", "start_date", "target_date", "status", "objective", "deliverable",
-            "responsible", "responsible_detail", "remarks", "created_at",
+            "responsible", "responsible_detail", "remarks", "tasks_total", "tasks_done", "progress_pct", "created_at",
         ]
+
+    def get_tasks_total(self, obj):
+        return obj.tasks.count()
+
+    def get_tasks_done(self, obj):
+        return obj.tasks.filter(status="done").count()
+
+    def get_progress_pct(self, obj):
+        total = self.get_tasks_total(obj)
+        if not total:
+            return 100 if obj.status == "done" else 0
+        return round(self.get_tasks_done(obj) * 100 / total)
 
     def validate(self, attrs):
         ensure_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
+        if attrs.get("status") == "done" and self.instance:
+            still_open = self.instance.tasks.exclude(status="done").count()
+            if still_open:
+                raise serializers.ValidationError(
+                    {"status": f"{still_open} task(s) under this milestone are not done yet."}
+                )
         start = attrs.get("start_date", getattr(self.instance, "start_date", None))
         target = attrs.get("target_date", getattr(self.instance, "target_date", None))
         if start and target and start > target:

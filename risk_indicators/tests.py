@@ -54,3 +54,34 @@ class RiskAlertTests(RMISTestCase):
         self.assertEqual([a["project_code"] for a in alerts], ["CRIT", "HIGH", "MED"])
         self.assertEqual(alerts[0]["type"], "danger")
         self.assertEqual(alerts[-1]["type"], "warning")
+
+
+class OverdueMilestoneAlertTests(RMISTestCase):
+    """Client meeting 2026-10-01 (#14): an overdue, not-done milestone shows in the leader's (and admin's) bell."""
+
+    def test_overdue_milestone_alerts_the_leader_and_admin_only(self):
+        import datetime
+
+        from django.utils import timezone
+
+        from research_projects.models import WorkPlanMilestone
+
+        leader = self.make_user("project_leader")
+        other_leader = self.make_user("project_leader")
+        admin = self.make_user("system_admin")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="institutional", lead=leader)
+        today = timezone.localdate()
+        WorkPlanMilestone.objects.create(project=project, title="Data gathering", target_date=today - datetime.timedelta(days=5))
+        WorkPlanMilestone.objects.create(project=project, title="Done one", target_date=today - datetime.timedelta(days=5), status="done")
+        WorkPlanMilestone.objects.create(project=project, title="Future", target_date=today + datetime.timedelta(days=5))
+
+        def milestone_alerts(user):
+            alerts = self.client_for(user).get("/api/risk/alerts/").data["alerts"]
+            return [a for a in alerts if a["kind"] == "milestone"]
+
+        [alert] = milestone_alerts(leader)
+        self.assertIn("Data gathering", alert["text"])
+        self.assertEqual(alert["days_overdue"], 5)
+        self.assertEqual(alert["link"], f"/work-plan?project={project.pk}")
+        self.assertEqual(len(milestone_alerts(admin)), 1)
+        self.assertEqual(milestone_alerts(other_leader), [])

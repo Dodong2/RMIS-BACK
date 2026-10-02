@@ -134,3 +134,65 @@ class StaffNotificationTests(RMISTestCase):
         self.assertEqual(self.client_for(other_staff).get("/api/reports/accomplishment/", params).status_code, 404)
         self.assertNotIn("Data collection", self.client_for(other_leader).get("/api/reports/accomplishment/", params).content.decode())
         self.assertIn("Data collection", self.client_for(self.leader).get("/api/reports/accomplishment/", params).content.decode())
+
+
+class MilestoneTaskTests(RMISTestCase):
+    """Client meeting 2026-10-01 (#14): milestone = parent, tasks = its activities, done only when all tasks are."""
+
+    def setUp(self):
+        super().setUp()
+        from research_projects.models import WorkPlanMilestone
+
+        self.leader = self.make_user("project_leader")
+        self.staff = self.make_user("project_staff")
+        self.project = Project.objects.create(title="P", project_code="P-1", funding_type="institutional", lead=self.leader)
+        self.milestone = WorkPlanMilestone.objects.create(project=self.project, title="Data gathering", target_date=datetime.date(2026, 6, 30))
+        self.client = self.client_for(self.leader)
+
+    def add_task(self, title, **fields):
+        response = self.client.post("/api/personnel/tasks/", {
+            "project": self.project.pk, "title": title, "assignee": self.staff.pk, "milestone": self.milestone.pk, **fields,
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        return response.data["id"]
+
+    def milestone_data(self):
+        return self.client.get(f"/api/milestones/{self.milestone.pk}/").data
+
+    def test_progress_and_done_gate(self):
+        first, second = self.add_task("Survey"), self.add_task("Interviews")
+        Task.objects.filter(pk=first).update(status="done")
+
+        data = self.milestone_data()
+        blocked = self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
+        Task.objects.filter(pk=second).update(status="done")
+        allowed = self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
+
+        self.assertEqual((data["tasks_total"], data["tasks_done"], data["progress_pct"]), (2, 1, 50))
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("not done", str(blocked.data))
+        self.assertEqual(allowed.status_code, 200)
+
+    def test_milestone_without_tasks_works_as_before(self):
+        response = self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["progress_pct"], 100)
+
+    def test_milestone_must_be_in_the_same_project(self):
+        other = Project.objects.create(title="O", project_code="O-1", funding_type="institutional", lead=self.leader)
+
+        response = self.client.post("/api/personnel/tasks/", {
+            "project": other.pk, "title": "x", "assignee": self.staff.pk, "milestone": self.milestone.pk,
+        }, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("milestone", response.data)
+
+    def test_tasks_filter_by_milestone(self):
+        self.add_task("Survey")
+        self.client.post("/api/personnel/tasks/", {"project": self.project.pk, "title": "Loose", "assignee": self.staff.pk}, format="json")
+
+        titles = [t["title"] for t in self.client.get("/api/personnel/tasks/", {"milestone": self.milestone.pk}).data]
+
+        self.assertEqual(titles, ["Survey"])

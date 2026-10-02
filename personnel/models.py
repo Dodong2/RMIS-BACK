@@ -56,6 +56,10 @@ class Task(models.Model):
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="tasks")
     study = models.ForeignKey(Study, on_delete=models.SET_NULL, null=True, blank=True, related_name="tasks")
+    # Client meeting 2026-10-01 (#14): the work plan milestone is the parent; its tasks are the activities under it.
+    milestone = models.ForeignKey(
+        "research_projects.WorkPlanMilestone", on_delete=models.SET_NULL, null=True, blank=True, related_name="tasks"
+    )
     title = models.CharField(max_length=300)
     description = models.TextField(blank=True)
     due_date = models.DateField(null=True, blank=True)
