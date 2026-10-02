@@ -107,11 +107,12 @@ class TaskSerializer(serializers.ModelSerializer):
     assignee_detail = LeadSerializer(source="assignee", read_only=True)
     deliverables = TaskDeliverableSerializer(many=True, read_only=True)
     logged_hours = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
+    progress_pct = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Task
         fields = ["id", "project", "study", "title", "description", "due_date", "status", "priority",
-                  "estimated_hours", "logged_hours", "tags", "deliverables", "assignee", "assignee_detail", "assigned_by",
+                  "estimated_hours", "logged_hours", "progress_pct", "tags", "deliverables", "assignee", "assignee_detail", "assigned_by",
                   "started_at", "completed_at", "created_at"]
         read_only_fields = ["assigned_by"]
 
@@ -143,7 +144,7 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TaskUpdate
-        fields = ["id", "task", "author", "author_email", "note", "kind", "hours", "new_status", "created_at"]
+        fields = ["id", "task", "author", "author_email", "note", "kind", "hours", "progress_pct", "new_status", "created_at"]
         read_only_fields = ["task", "author"]
 
     def validate(self, attrs):

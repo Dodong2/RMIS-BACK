@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 
 from django.db.models import Count, Q, Sum
@@ -10,6 +11,7 @@ from rest_framework.views import APIView
 from accounts.models import User
 from accounts.permissions import HasRole, role_can
 from research_projects.models import Project
+from . import notifications
 from .models import PersonnelChange, ProjectAssignment, StaffProfile, Task, TaskDeliverable, TaskUpdate
 from .serializers import (
     LeaderAssignmentSerializer,
@@ -22,6 +24,8 @@ from .serializers import (
     TaskUpdateSerializer,
     complete_change,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ManageWritesMixin:
@@ -118,7 +122,15 @@ class TaskListCreateView(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(assigned_by=self.request.user)
+        notify_assignee(serializer.save(assigned_by=self.request.user))
+
+
+def notify_assignee(task):
+    """Brevo e-mail to the assignee (client follow-up 2026-10-02). A mail failure must not undo the assignment."""
+    try:
+        notifications.task_assigned(task)
+    except Exception:
+        logger.exception("Could not e-mail task %s to %s", task.pk, task.assignee.email)
 
 
 class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -136,6 +148,12 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
         if user.role and user.role.code == "project_staff":
             qs = qs.filter(assignee=user)
         return qs
+
+    def perform_update(self, serializer):
+        previous = serializer.instance.assignee_id
+        task = serializer.save()
+        if task.assignee_id != previous:
+            notify_assignee(task)
 
 
 class TaskUpdateListCreateView(generics.ListCreateAPIView):

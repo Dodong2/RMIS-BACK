@@ -10,6 +10,7 @@ REPORT_TYPE_CHOICES = (
     ("compliance", "Compliance Report"),
     ("personnel", "Personnel and Task Report"),
     ("outputs", "Research Outputs (6Ps) Report"),
+    ("accomplishment", "Monthly Accomplishment Report (Project Staff)"),
 )
 FORMAT_CHOICES = (("csv", "CSV"), ("xlsx", "XLSX"), ("pdf", "PDF"), ("docx", "DOCX"))
 

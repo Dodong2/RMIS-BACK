@@ -1,9 +1,12 @@
+import datetime
+
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import User
 from accounts.permissions import HasRole, visible_projects
 from dashboard import services as dashboard_services
 
@@ -75,6 +78,37 @@ class AppendixFReportView(FormReportView):
     report_type = "appendix_f"
     build_form = staticmethod(forms.appendix_f_form)
     missing = "No terminal report submitted for this project."
+
+
+class AccomplishmentReportView(APIView):
+    """GET reports/accomplishment/?user=&month=YYYY-MM&file_format=: a project staff's Monthly Accomplishment Report,
+    pulled from their tasks (client follow-up 2026-10-02). Staff get only their own (user defaults to them);
+    leaders only for tasks on projects they can see."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user_id = request.query_params.get("user") or request.user.pk
+        staff = User.objects.filter(pk=user_id).select_related("role").first() if str(user_id).isdigit() else None
+        is_staff = request.user.role and request.user.role.code == "project_staff"
+        if staff is None or (is_staff and staff.pk != request.user.pk):
+            return Response({"detail": "Not found."}, status=404)
+        try:
+            month = datetime.datetime.strptime(request.query_params.get("month") or f"{timezone.localdate():%Y-%m}", "%Y-%m").date()
+        except ValueError:
+            return Response({"detail": "month must be YYYY-MM."}, status=400)
+        fmt = request.query_params.get("file_format", "pdf")
+        if fmt not in forms.FORM_RENDERERS:
+            return Response({"detail": f"Unsupported format: {fmt}. Choose one of {list(forms.FORM_RENDERERS)}."}, status=400)
+        projects = None if is_staff else visible_projects(request.user)
+        form = forms.accomplishment_form(staff, month, projects)
+        GeneratedReportLog.objects.create(
+            report_type="accomplishment", format=fmt, filters={"user": staff.pk, "month": f"{month:%Y-%m}"},
+            generated_by=request.user,
+        )
+        response = HttpResponse(forms.FORM_RENDERERS[fmt](form), content_type=CONTENT_TYPES[fmt])
+        response["Content-Disposition"] = f'attachment; filename="accomplishment_{month:%Y%m}_{staff.pk}.{fmt}"'
+        return response
 
 
 class AppendixGReportView(APIView):

@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -79,6 +80,21 @@ class Task(models.Model):
     def logged_hours(self):
         return self.updates.aggregate(total=models.Sum("hours"))["total"] or 0
 
+    def progress_as_of(self, moment=None):
+        """% completed: the latest progress the assignee reported (up to `moment`), 100 once done (client
+        follow-up 2026-10-02: the monthly accomplishment report pulls this instead of staff recalling it)."""
+        if self.status == "done" and (moment is None or (self.completed_at and self.completed_at <= moment)):
+            return 100
+        updates = self.updates.exclude(progress_pct=None)
+        if moment is not None:
+            updates = updates.filter(created_at__lte=moment)
+        latest = updates.order_by("-created_at", "-id").first()
+        return latest.progress_pct if latest else 0
+
+    @property
+    def progress_pct(self):
+        return self.progress_as_of()
+
     def __str__(self):
         return self.title
 
@@ -109,6 +125,9 @@ class TaskUpdate(models.Model):
     note = models.TextField()
     kind = models.CharField(max_length=20, choices=KIND_CHOICES, default="update")
     hours = models.DecimalField(max_digits=6, decimal_places=2, default=0, help_text="Hours worked since the last update")
+    progress_pct = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MaxValueValidator(100)], help_text="% of the task completed as of this update"
+    )
     new_status = models.CharField(max_length=20, choices=Task.STATUS_CHOICES, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

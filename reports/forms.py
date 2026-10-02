@@ -16,6 +16,7 @@ Block kinds:
   {"kind": "page_break"}
 """
 import csv
+import datetime
 import io
 import re
 from xml.sax.saxutils import escape
@@ -166,6 +167,73 @@ def appendix_f_form(project_id):
         *({"kind": "section", "heading": h, "body": body or "", "level": level + 1} for h, body, level in main_text),
     ]
     return {"title": "Appendix F - Terminal Report", "landscape": False, "blocks": blocks}
+
+
+# ---- Project staff Monthly Accomplishment Report -------------------------------------------------------------------
+
+def month_bounds(month):
+    """[start, end) datetimes of the month containing the date `month`."""
+    from django.utils import timezone
+
+    start = timezone.make_aware(datetime.datetime(month.year, month.month, 1))
+    nxt = datetime.date(month.year + month.month // 12, month.month % 12 + 1, 1)
+    return start, timezone.make_aware(datetime.datetime(nxt.year, nxt.month, 1))
+
+
+def accomplishment_form(user, month, projects=None):
+    """Client follow-up 2026-10-02: instead of the staff recalling what they did, the report is pulled from their
+    tasks: % completed (latest progress update by month end), hours logged that month and what they noted. Covers
+    tasks with an update that month or still open at month end. `projects` limits it to the requester's scope."""
+    from django.db.models import Q, Sum
+
+    from personnel.models import Task
+
+    start, end = month_bounds(month)
+    tasks = (
+        Task.objects.filter(assignee=user, created_at__lt=end)
+        .filter(Q(updates__created_at__gte=start, updates__created_at__lt=end) | ~Q(status="done")
+                | Q(completed_at__gte=start, completed_at__lt=end))
+        .select_related("project__lead").distinct().order_by("project__project_code", "due_date", "id")
+    )
+    if projects is not None:
+        tasks = tasks.filter(project__in=projects)
+    rows, total_hours, leaders = [], 0, []
+    for i, task in enumerate(tasks, start=1):
+        month_updates = task.updates.filter(created_at__gte=start, created_at__lt=end).order_by("created_at", "id")
+        hours = month_updates.filter(author=user).aggregate(total=Sum("hours"))["total"] or 0
+        total_hours += hours
+        notes = "; ".join(u.note for u in month_updates if u.note)
+        rows.append([
+            str(i), task.project.project_code, task.title, f"{task.progress_as_of(end):g}%", f"{hours:g}",
+            f"{task.due_date:%b %d, %Y}" if task.due_date else "", task.get_status_display(), notes,
+        ])
+        if task.project.lead not in leaders:
+            leaders.append(task.project.lead)
+    if rows:
+        rows.append(["", "", "TOTAL HOURS", "", f"{total_hours:g}", "", "", ""])
+    position = " · ".join(filter(None, [getattr(user, "position", ""), user.role.name if user.role else ""]))
+    return {
+        "title": f"Monthly Accomplishment Report - {month:%B %Y}",
+        "landscape": True,
+        "blocks": [
+            {"kind": "header", "lines": UNIVERSITY, "title": "MONTHLY ACCOMPLISHMENT REPORT"},
+            {"kind": "line", "text": f"Name: {_name(user)}" + (f" ({position})" if position else "")},
+            {"kind": "line", "text": f"Period Covered: {month:%B %Y}"},
+            {
+                "kind": "table",
+                "header": [["", "Project", "Task / Activity", "% Completed", "Hours (this month)", "Deadline", "Status",
+                            "Accomplishments / Remarks"]],
+                "rows": rows or [["", "", "No task activity this month.", "", "", "", "", ""]],
+                "widths": [4, 12, 26, 9, 9, 11, 9, 30],
+            },
+            {"kind": "line", "text": "Pulled from the RMIS task updates; % completed is the latest progress reported by the end "
+                                     "of the month.", "italic": True},
+            {"kind": "signatures", "items": [
+                ("Submitted by:", _name(user), "Project Staff"),
+                ("Noted by:", "; ".join(_name(lead) for lead in leaders), "Project Leader"),
+            ]},
+        ],
+    }
 
 
 # ---- Renderers -----------------------------------------------------------------------------------------------------

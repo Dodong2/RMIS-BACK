@@ -8,6 +8,8 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
   `feat/client-changes-2026-10-01` in both repos, **not pushed**, not merged to main.
 - Dev/Supabase DB already has migrations `accounts.0014`, `research_projects.0007`, `0008` and `monitoring.0004` applied.
 - 2026-10-02: client follow-up F1–F3 done (peso inputs, SF-017 Appendix E, SF-16 Appendix F).
+- 2026-10-02: N1–N5 done (task e-mails, % completed, calendar, accomplishment report, reminders command);
+  migrations `personnel.0007` + `reports.0003` need applying.
 - Next: **Checkpoint B** (Carl reviews the whole
   registration flow, manual + Excel, as project_leader and crc_chair).
 - Working rules: commit per task once verified; ask before migrating the shared DB or pushing. Local check servers:
@@ -164,6 +166,40 @@ and leaves the other sections blank; all four export formats follow the same for
       Background; Objectives; Significance; Research Methodology; Literature Cited = References; other sections blank
 - [x] Appendix E/F exports 404 for projects outside `visible_projects` (T8b scope)
 - Files: `reports/forms.py`, `reports/views.py`, `reports/tests.py`
+
+## Client follow-up 2026-10-02 (2): staff notifications and accomplishment report
+Decisions: email via Brevo; calendar view in RMIS + Google Calendar link; monthly email to project staff (tasks +
+accomplishments); quarterly email to leaders (SF-017 % reminder) and RIUH (summary); sent by a management command
+Carl runs from cron; the accomplishment report has no official form, so it is a simple LSPU-headed table.
+
+### N1 (BE) Task assignment email · S
+- [x] On task create or assignee change, the assignee gets the task details, a link to the RMIS calendar
+      (`/tasks?view=calendar&task=<id>`) and an "Add to Google Calendar" link for the due date
+- Files: `personnel/notifications.py` (new), `personnel/views.py`, `personnel/tests.py` (new)
+
+### N2 (BE+FE) % completed on task updates · S
+- [x] `TaskUpdate.progress_pct` (0–100, optional), migration `personnel`; `Task.progress_pct` = latest given value
+      (100 when done); shown on the task card/detail; the update form has a % input
+- Files: BE `personnel/models.py`, `serializers.py`; FE `src/pages/TasksPage.tsx`, `src/types/personnel.ts`
+
+### N3 (FE) Calendar view on the Tasks page · M
+- [x] "Calendar" button on the Tasks page (all of the user's tasks, not per project): month grid by due date,
+      prev/next month; `?view=calendar&task=<id>` opens that month with the task outlined; a click opens the task
+- Files: `src/pages/TasksPage.tsx`
+
+### N4 (BE+FE) Monthly Accomplishment Report · M
+- [x] `GET reports/accomplishment/?user=&month=YYYY-MM&file_format=`: per task with activity that month or still
+      open: project, task, % completed (latest by month end), hours that month, due date, status; totals; staff and
+      leader signatures. Staff see only their own; leaders only staff on their projects
+- [x] FE: "Accomplishment Report" (month + format) on the Tasks page for staff. Leaders can call the endpoint with
+      `?user=` but have no UI for it yet (not in the report catalog)
+- Files: BE `reports/forms.py`, `views.py`, `urls.py`, `tests.py`; FE `TasksPage.tsx`, `src/lib/reportCatalog.ts`
+
+### N5 (BE) Monthly/quarterly reminders · S
+- [x] `manage.py send_report_reminders --monthly`: each active project_staff gets open tasks + last month's
+      accomplishments; `--quarterly`: project/study leaders get a reminder to update SF-017 % per objective; RIUH gets a
+      summary of active projects. Cron lines documented in the command's docstring
+- Files: `personnel/management/commands/send_report_reminders.py`, `personnel/tests.py`
 
 ### Checkpoint B
 - [ ] Register BRIDGI end-to-end as project_leader, manual and Excel, preview matches the PDF
