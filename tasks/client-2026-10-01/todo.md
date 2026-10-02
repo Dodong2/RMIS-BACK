@@ -10,6 +10,8 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 - 2026-10-02: client follow-up F1–F3 done (peso inputs, SF-017 Appendix E, SF-16 Appendix F).
 - 2026-10-02: N1–N5 done (task e-mails, % completed, calendar, accomplishment report, reminders command);
   migrations `personnel.0007` + `reports.0003` applied.
+- 2026-10-02: Phase 3 (T11–T13) and Phase 4 (T14–T17) done; migration `personnel.0008` (Task.milestone) needs applying.
+  Carl tests Checkpoints B, C and D together with the updated testing guide.
 - Next: **Checkpoint B** (Carl reviews the whole
   registration flow, manual + Excel, as project_leader and crc_chair).
 - Working rules: commit per task once verified; ask before migrating the shared DB or pushing. Local check servers:
@@ -238,31 +240,31 @@ Carl runs from cron; the accomplishment report has no official form, so it is a 
 ## Phase 4: Work plan and tasks
 
 ### T14 (BE) Task.milestone, progress, done-gate — #14 · M
-- [ ] `Task.milestone` FK (nullable, must be the same project)
-- [ ] Milestone serializer: `tasks_total`, `tasks_done`, `progress_pct`; `?milestone=` filter on tasks
-- [ ] Milestone → `done` with open tasks → 400; milestones without tasks unaffected
+- [x] `Task.milestone` FK (nullable, must be the same project)
+- [x] Milestone serializer: `tasks_total`, `tasks_done`, `progress_pct`; `?milestone=` filter on tasks
+- [x] Milestone → `done` with open tasks → 400; milestones without tasks unaffected
 - Verify: `python manage.py test personnel research_projects --keepdb`
 - Files: `personnel/models.py`, `migrations/`, `serializers.py`, `views.py`; `research_projects/serializers.py`, tests
 - Deps: none
 
 ### T15 (FE) Work plan: expandable milestones + responsible picker — #14, #13 · M
-- [ ] Activities tab lists milestones; each expands to its tasks with a progress bar from `progress_pct`
-- [ ] "Add task" under a milestone; Done button disabled with a reason while tasks are open
-- [ ] Responsible Personnel lists project lead + team members with accounts + assignments (names, not emails)
+- [x] Activities tab lists milestones; each expands to its tasks with a progress bar from `progress_pct`
+- [x] "Add task" under a milestone; Done button disabled with a reason while tasks are open
+- [x] Responsible Personnel lists project lead + team members with accounts + assignments (names, not emails)
 - Verify: milestone with 2 tasks, finish 1 → 50%, can't mark done; finish both → can
 - Files: `src/pages/WorkPlanPage.tsx`, `src/lib/researchApi.ts`, `src/lib/personnelApi.ts`, `src/types/*.ts`
 - Deps: T14, T5
 
 ### T16 (FE) Tasks page: milestone + % completed — #15 · S
-- [ ] Task form has a Milestone select
-- [ ] Project selector options/title show "N% tasks completed"
+- [x] Task form has a Milestone select
+- [x] Project selector options/title show "N% tasks completed"
 - Verify: % matches done/total for the project
 - Files: `src/pages/TasksPage.tsx`
 - Deps: T14
 
 ### T17 (BE+FE) Overdue milestone alert to project leader — #14 · S
-- [ ] `risk/alerts/` includes an alert per overdue, not-done milestone for the project's leader (and admin)
-- [ ] Bell shows it; clicking opens the work plan
+- [x] `risk/alerts/` includes an alert per overdue, not-done milestone for the project's leader (and admin)
+- [x] Bell shows it; clicking opens the work plan
 - Verify: BE test with an overdue milestone; bell shows it as the leader
 - Files: `risk_indicators/services.py`, tests; FE `src/components/layout/Topbar.tsx` (or bell component)
 - Deps: T14

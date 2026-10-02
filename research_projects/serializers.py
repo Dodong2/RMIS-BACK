@@ -7,9 +7,15 @@ from .models import (
 
 
 class LeadSerializer(serializers.ModelSerializer):
+    # Names, not e-mails, in pickers and tables (client meeting 2026-10-01, #13)
+    full_name = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ["id", "email"]
+        fields = ["id", "email", "full_name"]
+
+    def get_full_name(self, obj):
+        return obj.get_full_name() or obj.email
 
 
 def validate_lead_role(user, required_code):
