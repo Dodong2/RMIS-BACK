@@ -61,7 +61,7 @@ class LeaderLoadView(APIView):
         )
         return Response([
             {
-                "user": u.id, "email": u.email, "role": u.role.code,
+                "user": u.id, "email": u.email, "full_name": u.get_full_name() or u.email, "role": u.role.code,
                 "active_programs": u.programs, "program_cap": 2,
                 "active_projects": u.projects, "project_cap": 3,
             }
