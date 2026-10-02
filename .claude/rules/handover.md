@@ -267,8 +267,8 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
 2026-10-02: finished every code task of the 2026-10-01 client plan (T1–T18) plus the 2026-10-02 follow-ups (F1–F3
 SF-017/SF-16 exports and peso inputs; N1–N5 staff e-mails, % completed, calendar, accomplishment report, reminders) and
 the open notes (Leader Load without programs, 6Ps/work plan in the manual wizard, full-length 6P particulars, leader
-download of a staff accomplishment report). Full suite: 102 tests pass before the last three commits; the touched apps
-pass after. Older history (2026-09-29 deploy fixes, Option A) is in git log and the module bullets above.
+download of a staff accomplishment report). Full suite: 106 tests pass (2026-10-02, after
+the last commit). Older history (2026-09-29 deploy fixes, Option A) is in git log and the module bullets above.
 
 ## Next thing to do in this repo
 1. Carl: `manage.py migrate` (`outputs.0003`), then test with the guide's PART 3 (Checkpoints A–D in the todo).
