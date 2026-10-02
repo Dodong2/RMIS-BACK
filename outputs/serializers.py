@@ -2,6 +2,8 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from accounts.permissions import ensure_in_scope
+
 from .models import CreativeWorkRecord, IPRecord, PublicationRecord, SenseRankedPublisher, ExpectedOutput, ProjectOutcome
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
@@ -137,6 +139,11 @@ class ExpectedOutputSerializer(serializers.ModelSerializer):
     def get_actual_count(self, obj):
         related = COMPUTED_6P.get(obj.category)
         return getattr(obj.project, related).count() if related else obj.manual_actual_count
+
+    def validate(self, attrs):
+        # Strict RBAC (client meeting 2026-10-01): leaders add 6Ps only to their own projects.
+        ensure_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
+        return attrs
 
 
 class ProjectOutcomeSerializer(serializers.ModelSerializer):

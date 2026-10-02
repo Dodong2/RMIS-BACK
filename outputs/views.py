@@ -2,7 +2,7 @@ from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import HasRole
+from accounts.permissions import HasRole, role_can
 from research_projects.models import Project
 from .models import (
     SIX_PS, CreativeWorkRecord, ExpectedOutput, IPRecord, ProjectOutcome, PublicationRecord, SenseRankedPublisher,
@@ -90,6 +90,12 @@ class CreativeWorkDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIView):
 class ExpectedOutputListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
     queryset = ExpectedOutput.objects.select_related("project").order_by("project_id", "category")
     serializer_class = ExpectedOutputSerializer
+
+    def get_permissions(self):
+        # Registrants (CRC Chair, DRD, ...) enter Section V in the registration wizard, same as the Excel import.
+        if self.request.method == "POST" and self.request.user.is_authenticated and role_can(self.request.user, "projects.register"):
+            return [permissions.IsAuthenticated()]
+        return super().get_permissions()
 
 
 class ExpectedOutputDetailView(RoleWritesMixin, generics.RetrieveUpdateDestroyAPIView):

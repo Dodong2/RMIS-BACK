@@ -6,7 +6,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope
+from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope, role_can
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from . import importer
 from .models import (
@@ -266,6 +266,9 @@ class MilestoneListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
+            # Registrants enter Section XI (work plan) in the registration wizard, same as the Excel import.
+            if self.request.user.is_authenticated and role_can(self.request.user, "projects.register"):
+                return [permissions.IsAuthenticated()]
             return [HasRole("projects.manage_milestones")]
         return [permissions.IsAuthenticated()]
 
