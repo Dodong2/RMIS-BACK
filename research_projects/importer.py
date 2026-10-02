@@ -121,7 +121,6 @@ TABLE_SHEETS = {
         ("QTR3", "q3_amount", "decimal", None),
         ("QTR4", "q4_amount", "decimal", None),
         ("Total", "amount", "decimal", None),
-        ("Funding Source", "funding_source", "text", None),
     ],
     "Work Plan": [
         ("Activity", "title", "text", None),

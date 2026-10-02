@@ -209,7 +209,8 @@ Carl runs from cron; the accomplishment report has no official form, so it is a 
 ## Phase 3: Budget and procurement
 
 ### T11 (FE) Remove funding source from LIB UI — #12 · S
-- [ ] No Funding Source field/default/check in the Prepare LIB modal; no Funding Sources tab
+- [x] No Funding Source field/default/check in the Prepare LIB modal; no Funding Sources tab (also gone from the
+      add-item form, the line-item table, the disbursement detail and the Excel template's Budget sheet)
 - Verify: prepare a LIB, saves with blank funding_source
 - Files: `src/pages/BudgetPage.tsx`
 - Deps: none
