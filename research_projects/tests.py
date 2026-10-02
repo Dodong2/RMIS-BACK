@@ -291,6 +291,43 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(response.data["errors"][0]["sheet"], "Expected Outputs (6Ps)")
         self.assertFalse(Project.objects.exists())
 
+    def test_dry_run_returns_the_preview_and_saves_nothing(self):
+        """Client meeting 2026-10-01 (#9): the Excel mode View button previews the SF-018 without registering."""
+        self.fill_project(**{"III. Objectives of the Study": "1. Train teachers\n2. Map communities"})
+        self.workbook["Project Team"].append(["Co-Project Leader", "Archieval M. Jain", "Male", None])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Travel Expenses", 5000, 2500, 2500, None, None, "LSPU"])
+        counts = lambda: (Project.objects.count(), ProjectEndorser.objects.count(), LineItem.objects.count())
+        before = counts()
+
+        buffer = io.BytesIO()
+        self.workbook.save(buffer)
+        buffer.seek(0)
+        buffer.name = "registration.xlsx"
+        response = self.client_for(self.leader).post("/api/projects/import/?dry_run=1", {"file": buffer}, format="multipart")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        preview = response.data["preview"]
+        self.assertEqual(preview["title"], "Bridging Academia and Communities")
+        self.assertEqual(preview["lead_email"], "leader@lspu.test")
+        self.assertEqual(preview["co_leaders"], [{"name": "Archieval M. Jain", "gender": "male"}])
+        self.assertEqual(preview["objectives"], ["Train teachers", "Map communities"])
+        self.assertEqual(preview["budget"][0]["q1"], 5000)
+        self.assertEqual(counts(), before)
+
+    def test_dry_run_with_errors_lists_them_like_a_real_upload(self):
+        self.fill_project()
+        self.workbook["Expected Outputs (6Ps)"].append(["Not a 6P", "x", 1])
+        buffer = io.BytesIO()
+        self.workbook.save(buffer)
+        buffer.seek(0)
+        buffer.name = "registration.xlsx"
+
+        response = self.client_for(self.admin).post("/api/projects/import/?dry_run=1", {"file": buffer}, format="multipart")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["errors"][0]["sheet"], "Expected Outputs (6Ps)")
+        self.assertFalse(Project.objects.exists())
+
     def test_a_non_workbook_file_is_rejected_cleanly(self):
         buffer = io.BytesIO(b"not an excel file")
         buffer.name = "notes.xlsx"

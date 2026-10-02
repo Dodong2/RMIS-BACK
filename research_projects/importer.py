@@ -354,3 +354,68 @@ def import_workbook(file_obj, request):
             "or one with a Study Component they lead."
         )})
     return project, errors
+
+
+def proposal_preview(project):
+    """The saved project in the shape of the frontend's SF-018 ProposalPreview, for ?dry_run=1 (client meeting
+    2026-10-01, #9). Read before the dry run rolls back, so it shows exactly what an upload would register."""
+    def person(member):
+        return {"name": member.name, "gender": member.gender}
+
+    team = list(project.team_members.order_by("id"))
+    line_items = LineItem.objects.filter(budget__project=project).order_by("id")
+    return {
+        "title": project.title,
+        "lead_name": project.lead.get_full_name() or project.lead.email,
+        "lead_email": project.lead.email,
+        "lead_gender": project.lead_gender,
+        "co_leaders": [person(m) for m in team if m.member_role == "co_leader"],
+        "team": [person(m) for m in team if m.member_role != "co_leader"],
+        "start_date": str(project.start_date or ""),
+        "target_end_date": str(project.target_end_date or ""),
+        "total_cost": str(project.total_cost or ""),
+        "implementing_unit": project.implementing_unit,
+        "campus": project.campus,
+        "college": project.college,
+        "contact_number": project.contact_number,
+        "cooperating_agencies": project.cooperating_agencies,
+        "sectors": project.sectors,
+        "sector_other": project.sector_other,
+        "is_continuing": project.is_continuing,
+        "continuing_year": str(project.continuing_year or ""),
+        "research_type": project.research_type,
+        "is_dry_research": project.is_dry_research,
+        "study_titles": [s.title for s in project.studies.order_by("id")],
+        "research_priority_area": project.research_priority_area,
+        "research_typology": project.research_typology,
+        "sdgs": project.sdgs,
+        "background": project.background,
+        # Manual entry saves "1. ...\n2. ..."; the preview numbers them itself
+        "objectives": [re.sub(r"^\d+[.)]\s*", "", line).strip() for line in project.objectives.splitlines() if line.strip()],
+        "methodology": project.methodology,
+        "outputs": [
+            {"category": o.category, "description": o.description, "target_count": o.target_count}
+            for o in project.expected_outputs.order_by("id")
+        ],
+        "socio_economic_significance": project.socio_economic_significance,
+        "beneficiaries": [
+            {"group": b.group, "description": b.description, "total": b.total}
+            for b in project.target_beneficiaries.order_by("id")
+        ],
+        "monitoring_evaluation": project.monitoring_evaluation,
+        "references": project.references,
+        "budget": [
+            {"category": i.category, "description": i.description,
+             "q1": float(i.q1_amount or 0), "q2": float(i.q2_amount or 0), "q3": float(i.q3_amount or 0), "q4": float(i.q4_amount or 0)}
+            for i in line_items
+        ],
+        "work_plan": [
+            {"title": m.title, "start_date": str(m.start_date or "") or None, "target_date": str(m.target_date or "") or None}
+            for m in project.milestones.order_by("id")
+        ],
+        "endorsers": [
+            {"name": e.name, "designation": e.designation, "signed_on": str(e.signed_on) if e.signed_on else None}
+            for e in project.endorsers.order_by("id")
+        ],
+        "proposal_submitted_on": str(project.proposal_submitted_on or ""),
+    }

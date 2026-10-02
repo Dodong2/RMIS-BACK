@@ -4,10 +4,10 @@ Plan: `plan.md` (same folder). Spec: `docs/ideas/client-changes-2026-10-01.md`. 
 Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE `npx tsc -b` + eslint + `npm run build`.
 
 ## Resume here (paused 2026-10-01 end of day)
-- Done and committed: T1–T9 plus the added T5b (names) and T8b (strict project read scope). Branch
+- Done and committed: T1–T10 plus the added T5b (names) and T8b (strict project read scope). Branch
   `feat/client-changes-2026-10-01` in both repos, **not pushed**, not merged to main.
 - Dev/Supabase DB already has migrations `accounts.0014`, `research_projects.0007` and `0008` applied.
-- Next: **T10** (Excel `?dry_run=1` + View button in Excel mode), then **Checkpoint B** (Carl reviews the whole
+- Next: **Checkpoint B** (Carl reviews the whole
   registration flow, manual + Excel, as project_leader and crc_chair).
 - Working rules: commit per task once verified; ask before migrating the shared DB or pushing. Local check servers:
   Django `runserver 8002` + Vite `5173` (`.env.local` points at 8002); `:8001` is the production container, don't
@@ -134,8 +134,8 @@ Found during T8: GET projects/ was IsAuthenticated-only, so a new project leader
 - Deps: T5–T8
 
 ### T10 (BE+FE) SF-018 preview, Excel mode — #9 · M
-- [ ] BE: `POST projects/import/?dry_run=1` parses + validates, returns the would-be payload, writes nothing
-- [ ] FE: Excel mode "View" button (after choosing a file) opens the same `ProposalPreview`; errors table unchanged
+- [x] BE: `POST projects/import/?dry_run=1` parses + validates, returns the would-be payload, writes nothing
+- [x] FE: Excel mode "View" button (after choosing a file) opens the same `ProposalPreview`; errors table unchanged
 - Verify: BE test asserts row counts unchanged after dry-run; FE preview of the BRIDGI template
 - Files: BE `research_projects/views.py`, `importer.py`, `tests.py`; FE `src/lib/researchApi.ts`,
   `src/pages/RegisterProjectPage.tsx`
