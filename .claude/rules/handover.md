@@ -1,5 +1,36 @@
 # RMIS Backend — Current Status
 
+## Client changes 2026-10-01/02 — READ THIS FIRST
+Branch `feat/client-changes-2026-10-01` (26 commits, not merged to `main`). Plan + per-task notes:
+`tasks/client-2026-10-01/todo.md`; spec: `docs/ideas/client-changes-2026-10-01.md`. Carl tests with
+`RMIS_Explainer_and_Testing_Guide.docx` (PART 3, follows the client's flow Registration → LIB → Work Plan → Tasks →
+Procurement → M&E → Reports) and the BRIDGI files in `dss/Dataset/`.
+- **Option A is REVERSED** (client asked, 2026-10-01): `project_leader` has `projects.register` again (`accounts.0014`),
+  but may only register projects where `lead` = themselves. Study/program leaders stay edit-only. The Module 2 bullet
+  below describes the old split; this wins.
+- **Strict read scope** (`accounts.permissions.visible_projects`, `ProjectVisibleMixin`): leaders and staff read only
+  projects they lead or belong to; anything else 404s. system_admin keeps every permission (few real accounts yet).
+- Program: hidden in the UI only; model/FKs/caps stay.
+- Registration: code-availability check, `full_name` on users, optional `Study.lead`, `ProjectEndorser` rows (Annex A),
+  LIB created with the project (`POST projects/<id>/lib/`), Excel `?dry_run=1` → SF-018 preview payload
+  (`importer.proposal_preview`). Funding Source dropped from the Excel template. Registrants (`projects.register`) may
+  create 6Ps and milestones (wizard parity with Excel); 6P writes are scope-checked; 6P particulars are a TextField.
+- Reports: `reports/forms.py` describes official forms as blocks rendered identically to PDF/DOCX/XLSX/CSV. Appendix E =
+  LSPU-RDO-SF-017 (needs `MidtermReport.objective_accomplishments`, % per objective per quarter, leader-entered),
+  Appendix F = SF-16 outline (auto-filled where RMIS has data, blank elsewhere). Both 404 outside `visible_projects`.
+  This supersedes the Module 14 note "PDF/DOCX rendering is intentionally plain".
+- Personnel: Brevo e-mail to the assignee on task create/reassign (`personnel/notifications.py`, RMIS calendar link +
+  Google Calendar link); `TaskUpdate.progress_pct`, `Task.progress_pct`; `Task.milestone` (milestone = parent; milestone
+  serializer `tasks_total/tasks_done/progress_pct`; can't be `done` with open tasks); monthly accomplishment report
+  `GET reports/accomplishment/?user=&month=YYYY-MM&file_format=`; `manage.py send_report_reminders --monthly|--quarterly
+  [--dry-run]` (cron lines in its docstring; Carl owns cron). Overdue, not-done milestones join `risk/alerts/`
+  (`kind: "milestone"`, `link`); every alert now has `kind` + `link`.
+- Leader load rows carry `full_name`; `LeadSerializer` has `full_name`.
+- Migrations on the branch: `accounts.0014`, `research_projects.0007/0008`, `monitoring.0004`, `personnel.0007/0008`,
+  `reports.0003` (all applied to the shared DB), `outputs.0003` (**apply before testing**).
+- Working rules (Carl, 2026-10-02): migrations on the shared DB are fine once tested locally; Carl runs the dev servers
+  (Django :8002, Vite :5173) and owns deployment; commit per task; ask before pushing.
+
 ## Module we're on
 All 15 modules of the client's revised structure are built. **Module 15 = Budget Office Data Synchronization** (new app
 `budget_sync`), defined 2026-09-24 in `RMIS chap1/RMIS_Module_Objective_Alignment.docx`. That supersedes the
@@ -233,27 +264,14 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-09-29: fixed what client testing (2026-09-28, self-hosted Dokploy deploy) hit, backend `0ac301f` + frontend
-`1e158a2`, both pushed to `main`. Migrations `accounts.0012` + `0013` applied to the Supabase DB (shared by local
-`.env` AND the prod container; Carl OK'd migrating with no testers on). Parity 0 differences; 62 tests pass.
-- `POST documents/documents/` 500 = the bucket rejected a non-PDF/Word MIME and `raise_for_status()` went uncaught.
-  Now: extension whitelist (400), upload before any DB change, version demote + create in `transaction.atomic()`,
-  storage rejection → 400, failed download-URL signing → `null`.
-- `POST projects/` 400 ×8 = `ebsdm.user@gmail.com` is a **program_leader** (not project_leader) registering a standalone
-  project; the rules rejected it as designed. Led to the Option A register/edit split (see Module 2 line).
-- Visibility: `LOGGING` sends 500 tracebacks to stdout (DEBUG=False printed nothing before); `AuditLog.error_detail`
-  keeps the first 1000 chars of a 4xx JSON body.
-NOTE for tests: `python manage.py test --keepdb` — dropping `test_postgres` failed with "being accessed by other
-users" (possibly `CONN_MAX_AGE=60`, not verified). The container restarts wipe `docker logs`.
+2026-10-02: finished every code task of the 2026-10-01 client plan (T1–T18) plus the 2026-10-02 follow-ups (F1–F3
+SF-017/SF-16 exports and peso inputs; N1–N5 staff e-mails, % completed, calendar, accomplishment report, reminders) and
+the open notes (Leader Load without programs, 6Ps/work plan in the manual wizard, full-length 6P particulars, leader
+download of a staff accomplishment report). Full suite: 102 tests pass before the last three commits; the touched apps
+pass after. Older history (2026-09-29 deploy fixes, Option A) is in git log and the module bullets above.
 
 ## Next thing to do in this repo
-1. Carl: **redeploy the backend in Dokploy** (prod container still runs pre-`0ac301f` code against the migrated DB:
-   leaders can't edit projects and audit inserts may silently fail until then). Confirm Netlify picked up `1e158a2`.
-2. Ask Carl/client: project status/closure — leaders or CRC only (see open questions).
-3. Frontend: show `error_detail` on the Audit Logs page; then the older backlog: new DPMIS endpoints, `critical`
-   risk level, permission matrix + user scope screens (re-verify against `rmis-frontend/src` first, this list lags).
-4. Still open from 2026-09-26: Capsule CV (Annex A) not built; template uses start/target dates for the work plan
-   instead of the form's quarter shading. (The "study leader attaches a Study to any project" question is moot now:
-   Study creation is register-only.)
-5. When the client/RDO answers the "still to confirm" items, adjust the named constants rather than logic.
-6. Optional: the DPMIS traceability HTML (`docs/dpmis_traceability.html`, T21) for the panel.
+1. Carl: `manage.py migrate` (`outputs.0003`), then test with the guide's PART 3 (Checkpoints A–D in the todo).
+2. Fix whatever the testing finds; then the final sign-off item in the todo.
+3. Still open from before: project status/closure (leaders or CRC only), Capsule CV (Annex A), the "still to confirm"
+   constants, optional DPMIS traceability HTML.

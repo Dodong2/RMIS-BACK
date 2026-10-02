@@ -10,7 +10,8 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 - 2026-10-02: client follow-up F1–F3 done (peso inputs, SF-017 Appendix E, SF-16 Appendix F).
 - 2026-10-02: N1–N5 done (task e-mails, % completed, calendar, accomplishment report, reminders command);
   migrations `personnel.0007` + `reports.0003` applied.
-- 2026-10-02: Phase 3 (T11–T13) and Phase 4 (T14–T17) done; migration `personnel.0008` (Task.milestone) applied.
+- 2026-10-02: Phase 3 (T11–T13), Phase 4 (T14–T17) and Phase 5 code/docs (T18–T19) done; migration `outputs.0003`
+  (full-length 6P particulars) needs applying. Earlier: migration `personnel.0008` (Task.milestone) applied.
   Carl tests Checkpoints B, C and D together with the updated testing guide.
 - Next: **Checkpoint B** (Carl reviews the whole
   registration flow, manual + Excel, as project_leader and crc_chair).
@@ -275,16 +276,41 @@ Carl runs from cron; the accomplishment report has no official form, so it is a 
 ## Phase 5: Polish and wrap-up
 
 ### T18 (FE) Hover/cursor states — #18 · S
-- [ ] Every action button/icon button has `cursor-pointer` and a visible hover (shared class in `protoStyles` or
-      `index.css`); sweep pages
+- [x] Every action button/icon button has `cursor-pointer` and a visible hover (shared class in `protoStyles` or
+      `index.css`); sweep pages (global `@layer base` rule in `index.css`: pointer + brightness hover on every enabled
+      button; clickable rows/cards already had `cursor-pointer`)
 - Verify: hover through every page as admin
 - Files: `src/index.css`, pages with raw buttons
 - Deps: none (do last to avoid conflicts)
 
 ### T19 Handover, docs, memory · S
-- [ ] Both repos' `.claude/rules/handover.md` updated (frontend notes the Option A reversal)
-- [ ] Spec checklist: all 18 items mapped to commits
+- [x] Both repos' `.claude/rules/handover.md` updated (frontend notes the Option A reversal)
+- [x] Spec checklist: all 18 items mapped to commits (below)
 - Deps: all
 
+#### Spec checklist (BE = rmis-backend, FE = rmis-frontend; branch `feat/client-changes-2026-10-01`)
+| # | Item | Commits |
+|---|------|---------|
+| 1, 4 | Leader registers own approved project (lead = self) | BE 1d4a6a4 · FE b43f9fb |
+| 2 | Program removed from the UI | FE 89570be, f7c0988 (Leader Load) |
+| 3 | Toast when the project code exists | BE 523bb4e · FE dee3e29 |
+| 5 | Campus card is the only campus input | FE dee3e29 |
+| 6 | Team picker: accounts + free text | BE 59cf513 · FE 8d246c8 |
+| 7 | Study component titles; `Study.lead` optional | BE f306af9 · FE 6a35ecf |
+| 8 | Annex A "Add Endorser" by role | BE 6b70b27 · FE a478a0a |
+| 9 | SF-018 preview, Manual and Excel | FE f63a533 · BE de93684 · FE 7268881, 838c92b (6Ps/work plan) |
+| 10 | Per-step required fields | FE dee3e29 |
+| 11 | Budget Requirements (LIB) step | BE 6ea7984 · FE 98972cb |
+| 12 | No funding source in the LIB | FE 77bab15 · BE a010d35 |
+| 13 | Responsible Personnel from assigned accounts, by name | BE 1583e3e · FE b52c069 |
+| 14 | Milestone = parent of tasks; progress; done-gate; overdue alert | BE 2dde622 · FE b52c069 |
+| 15 | "% tasks completed" per project | FE b52c069 |
+| 16 | Leader sees the admin procurement UI, scoped | FE db5049b (BE already scoped) |
+| 17 | Procurement KPI strip | FE db5049b |
+| 18 | Hover/cursor on every action button | FE 1eee882 |
+| T5b/T8b | Names on sign-up/admin edit; strict read scope | BE 053618e, 8c0d564 · FE 54d1e93 |
+| 10-02 | SF-017/SF-16 exports, peso inputs, staff e-mails, % completed, calendar, accomplishment report, reminders | BE 192929b, 5d78b85 · FE dbbbff1, bead4eb, acf2133, 4cb18f7 |
+| extra | Full-length 6P particulars; registrants add 6Ps/work plan | BE 9962052, 73a6205 |
+
 ### Checkpoint: Complete
-- [ ] All 18 items done or explicitly deferred; BE suite + FE build clean; Carl sign-off
+- [ ] All 18 items done or explicitly deferred; BE suite + FE build clean; Carl sign-off (18/18 built; waiting on Carl)
