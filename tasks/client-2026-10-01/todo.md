@@ -10,7 +10,7 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 - 2026-10-02: client follow-up F1–F3 done (peso inputs, SF-017 Appendix E, SF-16 Appendix F).
 - 2026-10-02: N1–N5 done (task e-mails, % completed, calendar, accomplishment report, reminders command);
   migrations `personnel.0007` + `reports.0003` applied.
-- 2026-10-02: Phase 3 (T11–T13) and Phase 4 (T14–T17) done; migration `personnel.0008` (Task.milestone) needs applying.
+- 2026-10-02: Phase 3 (T11–T13) and Phase 4 (T14–T17) done; migration `personnel.0008` (Task.milestone) applied.
   Carl tests Checkpoints B, C and D together with the updated testing guide.
 - Next: **Checkpoint B** (Carl reviews the whole
   registration flow, manual + Excel, as project_leader and crc_chair).
