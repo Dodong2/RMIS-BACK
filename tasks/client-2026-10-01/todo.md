@@ -216,15 +216,18 @@ Carl runs from cron; the accomplishment report has no official form, so it is a 
 - Deps: none
 
 ### T12 (BE+FE) Leader procurement parity — #16 · S
-- [ ] Reproduce `/procurement` as project_leader vs system_admin; list every difference (403s, empty tabs, hidden UI)
-- [ ] Leader sees the same tabs/UI as admin, data limited to own projects; status actions stay officer/admin-only
+- [x] Reproduce `/procurement` as project_leader vs system_admin; list every difference (403s, empty tabs, hidden UI)
+      (2026-10-02: BE already scoped — leader gets own projects/budgets/APP items/requests, 400 on another project's
+      item, 403 on status moves; the only UI gap was the hidden Action column)
+- [x] Leader sees the same tabs/UI as admin, data limited to own projects; status actions stay officer/admin-only
+      (Action column now shown to leaders as "Awaiting Procurement Office" / Released date)
 - Verify: as leader, own requests and APP items visible, other projects' not
 - Files: `src/pages/ProcurementPage.tsx`, maybe BE `budget_lib/views.py`, `financial_monitoring/views.py`
 - Deps: none
 
 ### T13 (FE) Procurement officer KPI strip — #17 · S
-- [ ] KPI cards above the table: Total Requests, Completed (released), Ongoing (requested + processing), Cancelled;
-      follow the project filter
+- [x] KPI cards above the table: Total Requests, Completed (released), Ongoing (requested + processing), Cancelled;
+      follow the project filter (plus Delayed and Open Amount; status/delayed filters now narrow only the table)
 - Verify: counts match the table as procurement_officer_lib
 - Files: `src/pages/ProcurementPage.tsx`
 - Deps: T12
