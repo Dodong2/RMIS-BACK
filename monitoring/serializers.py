@@ -83,10 +83,34 @@ class MidtermReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = MidtermReport
         fields = [
-            "id", "project", "project_year", "narrative", "expenditure_summary",
+            "id", "project", "project_year", "narrative", "expenditure_summary", "objective_accomplishments",
             "document", "submitted_by", "submitted_at",
         ]
         read_only_fields = ["submitted_by"]
+
+    def validate_objective_accomplishments(self, rows):
+        """SF-017 rows: a non-blank objective and Q1-Q4 % from 0 to 100 (blank = not yet reported)."""
+        if not isinstance(rows, list):
+            raise serializers.ValidationError("Must be a list of objectives.")
+        cleaned = []
+        for i, row in enumerate(rows, start=1):
+            if not isinstance(row, dict) or not str(row.get("objective") or "").strip():
+                raise serializers.ValidationError(f"Objective {i}: the objective text is required.")
+            item = {"objective": str(row["objective"]).strip()}
+            for q in ("q1", "q2", "q3", "q4"):
+                value = row.get(q)
+                if value in (None, ""):
+                    item[q] = None
+                    continue
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    raise serializers.ValidationError(f"Objective {i}: {q.upper()} must be a number.")
+                if not 0 <= value <= 100:
+                    raise serializers.ValidationError(f"Objective {i}: {q.upper()} must be from 0 to 100.")
+                item[q] = value
+            cleaned.append(item)
+        return cleaned
 
 
 class TerminalReportSerializer(serializers.ModelSerializer):

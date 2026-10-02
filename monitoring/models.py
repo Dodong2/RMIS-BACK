@@ -40,6 +40,9 @@ class MidtermReport(models.Model):
     project_year = models.PositiveIntegerField(default=1, help_text="Which year of a multi-year project this covers")
     narrative = models.TextField(blank=True)
     expenditure_summary = models.TextField(blank=True, help_text="Summary of expenditures per quarter")
+    # LSPU-RDO-SF-017: [{"objective": str, "q1".."q4": % accomplishment 0-100 or null}], entered by the leader
+    # (client follow-up 2026-10-02)
+    objective_accomplishments = models.JSONField(default=list, blank=True)
     document = models.ForeignKey(
         Document, on_delete=models.SET_NULL, null=True, blank=True, related_name="midterm_reports"
     )

@@ -4,10 +4,10 @@ from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import HasRole
+from accounts.permissions import HasRole, visible_projects
 from dashboard import services as dashboard_services
 
-from . import services
+from . import forms, services
 from .models import GeneratedReportLog
 from .renderers import CONTENT_TYPES, render
 from .serializers import GeneratedReportLogSerializer
@@ -35,32 +35,46 @@ def build_report_response(request, report_type, title, data, filters=None):
     return response, None
 
 
-class AppendixEReportView(APIView):
+class FormReportView(APIView):
+    """Appendix E/F as the official LSPU form (reports/forms.py), the same layout in every file format. Readable
+    only for projects the user may see (visible_projects, client meeting 2026-10-01)."""
+
     permission_classes = [permissions.IsAuthenticated]
+    report_type = build_form = missing = None
 
     def get(self, request, project_id):
-        data = dashboard_services.appendix_e_export(project_id)
-        response, error = build_report_response(
-            request, "appendix_e", "Appendix E - Midterm Progress Report", data, filters={"project_id": project_id}
+        visible = visible_projects(request.user)
+        if visible is not None and not visible.filter(pk=project_id).exists():
+            return Response({"detail": "Not found."}, status=404)
+        form = self.build_form(project_id)
+        if form is None:
+            return Response({"detail": self.missing}, status=404)
+        fmt = request.query_params.get("file_format", "csv")
+        if fmt not in forms.FORM_RENDERERS:
+            return Response({"detail": f"Unsupported format: {fmt}. Choose one of {list(forms.FORM_RENDERERS)}."}, status=400)
+        content = forms.FORM_RENDERERS[fmt](form)
+        GeneratedReportLog.objects.create(
+            report_type=self.report_type, format=fmt, filters={"project_id": project_id}, generated_by=request.user
         )
-        if error:
-            return Response({"detail": error}, status=400)
+        response = HttpResponse(content, content_type=CONTENT_TYPES[fmt])
+        response["Content-Disposition"] = f'attachment; filename="{self.report_type}_{timezone.now():%Y%m%d%H%M%S}.{fmt}"'
         return response
 
 
-class AppendixFReportView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+class AppendixEReportView(FormReportView):
+    """LSPU-RDO-SF-017, one per submitted project year."""
 
-    def get(self, request, project_id):
-        data = dashboard_services.appendix_f_export(project_id)
-        if data is None:
-            return Response({"detail": "No terminal report submitted for this project."}, status=404)
-        response, error = build_report_response(
-            request, "appendix_f", "Appendix F - Terminal Report", data, filters={"project_id": project_id}
-        )
-        if error:
-            return Response({"detail": error}, status=400)
-        return response
+    report_type = "appendix_e"
+    build_form = staticmethod(forms.appendix_e_form)
+    missing = "No midterm report submitted for this project."
+
+
+class AppendixFReportView(FormReportView):
+    """SF-16 terminal narrative report outline."""
+
+    report_type = "appendix_f"
+    build_form = staticmethod(forms.appendix_f_form)
+    missing = "No terminal report submitted for this project."
 
 
 class AppendixGReportView(APIView):

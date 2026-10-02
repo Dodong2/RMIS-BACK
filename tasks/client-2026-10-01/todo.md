@@ -7,6 +7,8 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 - Done and committed: T1–T10 plus the added T5b (names) and T8b (strict project read scope). Branch
   `feat/client-changes-2026-10-01` in both repos, **not pushed**, not merged to main.
 - Dev/Supabase DB already has migrations `accounts.0014`, `research_projects.0007` and `0008` applied.
+  **`monitoring.0004` (F2) is NOT applied yet** — ask Carl before migrating; until then midterm list/submit 500s on the dev DB.
+- 2026-10-02: client follow-up F1–F3 done (peso inputs, SF-017 Appendix E, SF-16 Appendix F).
 - Next: **Checkpoint B** (Carl reviews the whole
   registration flow, manual + Excel, as project_leader and crc_chair).
 - Working rules: commit per task once verified; ask before migrating the shared DB or pushing. Local check servers:
@@ -140,6 +142,29 @@ Found during T8: GET projects/ was IsAuthenticated-only, so a new project leader
 - Files: BE `research_projects/views.py`, `importer.py`, `tests.py`; FE `src/lib/researchApi.ts`,
   `src/pages/RegisterProjectPage.tsx`
 - Deps: T9
+
+## Client follow-up 2026-10-02 (before Checkpoint B)
+Decisions: leader enters % per objective per quarter on the midterm report; SF-16 auto-fills what RMIS has
+and leaves the other sections blank; all four export formats follow the same form layout.
+
+### F1 (FE) Peso inputs show commas and decimals · S
+- [x] `MoneyInput`: shows `10,000` while typing and `10,000.00` on blur; stores the plain number
+- [x] Used for Total Project/Study Cost and the LIB QTR1–4 inputs in the registration wizard
+- Files: `src/components/common/MoneyInput.tsx` (new), `src/pages/RegisterProjectPage.tsx`
+
+### F2 (BE+FE) Appendix E follows SF-017 · M
+- [x] `MidtermReport.objective_accomplishments` (JSON list of objective + q1–q4 %, 0–100), migration `monitoring/0004`
+- [x] Midterm form: objectives prefilled from the project, Q1–Q4 % inputs per objective, add/remove rows
+- [x] Export (PDF/Word/Excel/CSV) = SF-017: header, objectives × Q1–Q4 table, 6Ps matrix (item, particulars,
+      quantity, remarks = actual), terminal note, Project Leader / Dean signatures; one form per project year
+- Files: BE `monitoring/models.py`, `serializers.py`, `reports/forms.py` (new), `renderers.py`, `views.py`, `tests.py`;
+  FE `src/components/monitoring/Reports.tsx`, `src/lib/monitoringApi.ts`, `src/types/monitoring.ts`
+
+### F3 (BE) Appendix F follows SF-16 · M
+- [x] Export = SF-16 outline: title page from the project; Executive Summary = terminal narrative; Project Rationale =
+      Background; Objectives; Significance; Research Methodology; Literature Cited = References; other sections blank
+- [x] Appendix E/F exports 404 for projects outside `visible_projects` (T8b scope)
+- Files: `reports/forms.py`, `reports/views.py`, `reports/tests.py`
 
 ### Checkpoint B
 - [ ] Register BRIDGI end-to-end as project_leader, manual and Excel, preview matches the PDF
