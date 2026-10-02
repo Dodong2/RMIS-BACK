@@ -11,7 +11,7 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 - 2026-10-02: N1–N5 done (task e-mails, % completed, calendar, accomplishment report, reminders command);
   migrations `personnel.0007` + `reports.0003` applied.
 - 2026-10-02: Phase 3 (T11–T13), Phase 4 (T14–T17) and Phase 5 code/docs (T18–T19) done; migration `outputs.0003`
-  (full-length 6P particulars) needs applying. Earlier: migration `personnel.0008` (Task.milestone) applied.
+  (full-length 6P particulars) applied. Earlier: migration `personnel.0008` (Task.milestone) applied.
   Carl tests Checkpoints B, C and D together with the updated testing guide.
 - Next: **Checkpoint B** (Carl reviews the whole
   registration flow, manual + Excel, as project_leader and crc_chair).
@@ -50,7 +50,7 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 - Deps: none
 
 ### Checkpoint A
-- [ ] BE tests pass, FE builds clean
+- [x] BE tests pass, FE builds clean (2026-10-02: 106 tests, build clean)
 - [ ] Leader registers own project; admin sees all leaders; no Program UI left
 - [ ] Carl reviews
 
