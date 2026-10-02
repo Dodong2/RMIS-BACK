@@ -138,7 +138,8 @@ class ExpectedOutput(models.Model):
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="expected_outputs")
     category = models.CharField(max_length=30, choices=SIX_PS)
-    description = models.CharField(max_length=300)
+    # TextField: the SF-018 particulars run past 300 characters (BRIDGI's People Services, Places/Partnerships, Policy)
+    description = models.TextField()
     target_count = models.PositiveIntegerField(default=1)
     manual_actual_count = models.PositiveIntegerField(default=0, help_text="Used for products/people/places/policies")
     created_at = models.DateTimeField(auto_now_add=True)
