@@ -6,8 +6,7 @@ Every task: BE `manage.py check` + `makemigrations --check` + focused tests; FE 
 ## Resume here (paused 2026-10-01 end of day)
 - Done and committed: T1–T10 plus the added T5b (names) and T8b (strict project read scope). Branch
   `feat/client-changes-2026-10-01` in both repos, **not pushed**, not merged to main.
-- Dev/Supabase DB already has migrations `accounts.0014`, `research_projects.0007` and `0008` applied.
-  **`monitoring.0004` (F2) is NOT applied yet** — ask Carl before migrating; until then midterm list/submit 500s on the dev DB.
+- Dev/Supabase DB already has migrations `accounts.0014`, `research_projects.0007`, `0008` and `monitoring.0004` applied.
 - 2026-10-02: client follow-up F1–F3 done (peso inputs, SF-017 Appendix E, SF-16 Appendix F).
 - Next: **Checkpoint B** (Carl reviews the whole
   registration flow, manual + Excel, as project_leader and crc_chair).
