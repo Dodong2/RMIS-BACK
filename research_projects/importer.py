@@ -20,7 +20,7 @@ from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from outputs.models import SIX_PS
 from outputs.serializers import ExpectedOutputSerializer
 
-from .models import Program, Project, ProjectEndorser, ProjectTeamMember
+from .models import CollegeUnit, Program, Project, ProjectEndorser, ProjectTeamMember
 from .serializers import (
     ProjectSerializer, ProjectTeamMemberSerializer, StudySerializer, TargetBeneficiarySerializer,
     WorkPlanMilestoneSerializer, leader_owns,
@@ -28,6 +28,11 @@ from .serializers import (
 
 NEW_OR_CONTINUING = (("new", "New Proposal"), ("continuing", "Continuing"))
 WET_OR_DRY = (("wet", "Wet Research"), ("dry", "Dry Research"))
+
+# One dropdown since client feedback 2026-10-06; saved to both college and implementing_unit, like manual entry.
+COLLEGE_UNIT_LABEL = "College Unit - Implementing Unit"
+# Templates downloaded before the merge still have the two old rows; read either as the merged field.
+OLD_COLLEGE_UNIT_LABELS = ("Implementing Unit", "College Unit")
 
 # (label in column A, serializer field, kind, choices, note in column C). Order follows the form.
 PROJECT_FIELDS = [
@@ -41,9 +46,8 @@ PROJECT_FIELDS = [
     ("Start Date", "start_date", "date", None, "Date cell or YYYY-MM-DD"),
     ("End Date", "target_end_date", "date", None, "Date cell or YYYY-MM-DD"),
     ("Total Project/Study Cost", "total_cost", "decimal", None, "Number"),
-    ("Implementing Unit", "implementing_unit", "text", None, ""),
     ("Campus", "campus", "text", None, ""),
-    ("College Unit", "college", "text", None, "e.g. CTE"),
+    (COLLEGE_UNIT_LABEL, "implementing_unit", "college_unit", None, "Must match a unit in System Admin > College Units"),
     ("Cooperating Agency/ies", "cooperating_agencies", "text", None, ""),
     ("Sector", "sectors", "multi", Project.SECTOR_CHOICES, "Required; one or more, comma-separated"),
     ("Sector (if Others)", "sector_other", "text", None, "Required when Sector includes Others"),
@@ -182,6 +186,11 @@ def _convert(raw, kind, choices):
         if not program:
             raise CellError(f"No RMIS Program with code '{raw}'.")
         return program.pk
+    if kind == "college_unit":
+        unit = CollegeUnit.objects.filter(name__iexact=str(raw).strip()).first()
+        if not unit:
+            raise CellError(f"'{raw}' is not in System Admin > College Units.")
+        return unit.name
     if kind == "sdgs":
         try:
             return [int(part) for part in re.split(r"[,;]", str(raw)) if part.strip()]
@@ -220,6 +229,8 @@ def build_template():
     ws.append(["Field", "Value", "Notes / allowed values"])
     for label, _, kind, choices, note in PROJECT_FIELDS:
         allowed = _allowed(kind, choices)
+        if kind == "college_unit":
+            allowed = ", ".join(CollegeUnit.objects.values_list("name", flat=True))
         ws.append([label, None, f"{note}. {allowed}".strip(". ") if allowed else note])
     ws.column_dimensions["A"].width = 45
     ws.column_dimensions["B"].width = 60
@@ -244,6 +255,8 @@ def build_template():
 
 def _read_project_sheet(ws, errors):
     by_label = {_norm(label): (field, kind, choices) for label, field, kind, choices, _ in PROJECT_FIELDS}
+    for old in OLD_COLLEGE_UNIT_LABELS:
+        by_label[_norm(old)] = by_label[_norm(COLLEGE_UNIT_LABEL)]
     data = {}
     for row_number, row in enumerate(ws.iter_rows(min_row=2, max_col=2, values_only=True), start=2):
         if not row or row[0] is None or _norm(row[0]) not in by_label:
@@ -260,6 +273,8 @@ def _read_project_sheet(ws, errors):
         data["is_continuing"] = data["is_continuing"] == "continuing"
     if "is_dry_research" in data:
         data["is_dry_research"] = data["is_dry_research"] == "dry"
+    if "implementing_unit" in data:
+        data["college"] = data["implementing_unit"]
     data.setdefault("funding_type", "institutional")
     return data
 

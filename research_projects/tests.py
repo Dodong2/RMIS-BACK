@@ -5,7 +5,7 @@ import openpyxl
 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
-from research_projects.models import Project, ProjectEndorser
+from research_projects.models import CollegeUnit, Project, ProjectEndorser
 
 
 def project_payload(lead, **overrides):
@@ -221,6 +221,7 @@ class ExcelImportTests(RMISTestCase):
         super().setUp()
         self.admin = self.make_user("system_admin")
         self.leader = self.make_user("project_leader", email="leader@lspu.test")
+        CollegeUnit.objects.create(name="CTE")
         template = self.client_for(self.admin).get("/api/projects/import-template/")
         self.assertEqual(template.status_code, 200)
         self.workbook = openpyxl.load_workbook(io.BytesIO(template.content))
@@ -234,7 +235,7 @@ class ExcelImportTests(RMISTestCase):
             "Start Date": datetime.datetime(2026, 1, 1),
             "Sector": "Education, Community Development",
             "Sustainable Development Goals (SDGs)": "4, 11, 17",
-            "College Unit": "CTE",
+            "College Unit - Implementing Unit": "cte",
         }
         defaults.update(values)
         for row in self.workbook["Project"].iter_rows(min_row=2):
@@ -268,6 +269,21 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(project.target_beneficiaries.get().total, 2000)
         self.assertEqual(LineItem.objects.get(budget__project=project).amount, 10000)
         self.assertEqual(project.milestones.count(), 1)
+
+    def test_college_unit_must_be_in_the_admin_list_and_fills_both_fields(self):
+        self.fill_project()
+        self.assertEqual(self.upload().status_code, 201)
+        project = Project.objects.get()
+        self.assertEqual((project.college, project.implementing_unit), ("CTE", "CTE"))
+
+        self.fill_project(**{"LSPU Faculty Research Number (Project Code)": "LSPU-X2", "College Unit - Implementing Unit": "CCS"})
+        response = self.upload()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["errors"][0]["field"], "College Unit - Implementing Unit")
+
+    def test_template_lists_the_college_units(self):
+        notes = {row[0].value: row[2].value for row in self.workbook["Project"].iter_rows(min_row=2)}
+        self.assertIn("CTE", notes["College Unit - Implementing Unit"])
 
     def test_annex_a_on_the_project_sheet_becomes_endorser_rows(self):
         self.fill_project(**{"Endorsed By (Dean/Associate Dean)": "Adriel G. Roman", "Recommending Approval (VPRDE)": "Robert C. Agatep"})
