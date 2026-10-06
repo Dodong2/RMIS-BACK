@@ -174,8 +174,8 @@ class ManualRegistrationTests(RMISTestCase):
         crc_project = Project.objects.create(title="A", project_code="A-1", funding_type="core_funded", lead=leader)
         own_project = Project.objects.create(title="B", project_code="B-1", funding_type="core_funded", lead=leader)
         rows = [
-            {"category": "mooe", "description": "Travel Expenses", "fiscal_year": 2026, "q1_amount": "5000", "q2_amount": "2500", "q3_amount": "2500"},
-            {"category": "co", "description": "Voice Recorder", "fiscal_year": 2026, "q1_amount": "7500"},
+            {"category": "mooe", "description": "Travel Expenses", "fiscal_year": 2026, "unit": "pax", "quantity": "4", "unit_cost": "2500"},
+            {"category": "co", "description": "Voice Recorder", "fiscal_year": 2026, "unit": "unit", "quantity": "1", "unit_cost": "7500"},
         ]
 
         by_crc = self.client_for(self.make_user("crc_chair")).post(f"/api/projects/{crc_project.id}/lib/", {"line_items": rows}, format="json")
@@ -193,7 +193,7 @@ class ManualRegistrationTests(RMISTestCase):
     def test_registration_lib_step_is_all_or_nothing_and_scoped(self):
         leader, other = self.make_user("project_leader"), self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
-        rows = [{"category": "mooe", "description": "Travel", "q1_amount": "100"}, {"category": "nope", "description": "Bad"}]
+        rows = [{"category": "mooe", "description": "Travel", "unit": "lot", "quantity": "1", "unit_cost": "100"}, {"category": "nope", "description": "Bad"}]
 
         bad_row = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": rows}, format="json")
         outsider = self.client_for(other).post(f"/api/projects/{project.id}/lib/", {"line_items": rows[:1]}, format="json")
@@ -202,6 +202,18 @@ class ManualRegistrationTests(RMISTestCase):
         self.assertEqual(bad_row.data["errors"][0]["row"], 2)
         self.assertEqual(outsider.status_code, 400)
         self.assertFalse(LineItemBudget.objects.exists())
+
+    def test_line_item_total_must_equal_qty_times_unit_cost(self):
+        admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
+        budget = self.client_for(admin).post("/api/budget/budgets/", {"project": project.id}, format="json").data
+        row = {"budget": budget["id"], "category": "mooe", "description": "Snacks", "unit": "pax", "quantity": "30", "unit_cost": "85.50"}
+
+        wrong = self.client_for(admin).post("/api/budget/line-items/", {**row, "amount": "2500"}, format="json")
+        right = self.client_for(admin).post("/api/budget/line-items/", {**row, "amount": "2565"}, format="json")
+
+        self.assertEqual(wrong.status_code, 400)
+        self.assertEqual(right.status_code, 201, right.data)
 
     def test_line_item_quarters_must_add_up_to_the_amount(self):
         admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
@@ -257,7 +269,7 @@ class ExcelImportTests(RMISTestCase):
         self.workbook["Project Team"].append(["Team Member", "EIU Coordinators", None, None])
         self.workbook["Expected Outputs (6Ps)"].append(["Patent", "Novel technology", 1])
         self.workbook["Target Beneficiaries"].append(["Community beneficiaries", "Farmers", 2000])
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Travel Expenses", 5000, 2500, 2500, None, None, "LSPU"])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Travel Expenses", "pax", 4, 2500, None])
         self.workbook["Work Plan"].append(["Logistic preparations", datetime.datetime(2026, 1, 1), datetime.datetime(2026, 3, 31)])
 
         response = self.upload()
@@ -324,7 +336,7 @@ class ExcelImportTests(RMISTestCase):
         """Client meeting 2026-10-01 (#9): the Excel mode View button previews the SF-018 without registering."""
         self.fill_project(**{"III. Objectives of the Study": "1. Train teachers\n2. Map communities"})
         self.workbook["Project Team"].append(["Co-Project Leader", "Archieval M. Jain", "Male", None])
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Travel Expenses", 5000, 2500, 2500, None, None, "LSPU"])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Travel Expenses", "pax", 4, 2500, None])
         counts = lambda: (Project.objects.count(), ProjectEndorser.objects.count(), LineItem.objects.count())
         before = counts()
 
@@ -340,7 +352,9 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(preview["lead_email"], "leader@lspu.test")
         self.assertEqual(preview["co_leaders"], [{"name": "Archieval M. Jain", "gender": "male"}])
         self.assertEqual(preview["objectives"], ["Train teachers", "Map communities"])
-        self.assertEqual(preview["budget"][0]["q1"], 5000)
+        self.assertEqual(preview["budget"][0], {
+            "category": "mooe", "description": "Travel Expenses", "unit": "pax", "quantity": 4, "unit_cost": 2500, "total": 10000,
+        })
         self.assertEqual(counts(), before)
 
     def test_dry_run_with_errors_lists_them_like_a_real_upload(self):

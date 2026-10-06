@@ -121,7 +121,7 @@ class ProjectCodeAvailableView(APIView):
 
 
 class ProjectLibView(APIView):
-    """POST {"line_items": [{category, description, fiscal_year?, q1_amount..q4_amount, amount?}]}: the registration
+    """POST {"line_items": [{category, description, fiscal_year?, unit, quantity, unit_cost, amount?}]}: the registration
     wizard's Budget Requirements step (client meeting 2026-10-01, #11) as draft LIB v1. Gated by projects.register,
     not budget.manage, because CRC Chair/DRD/RIUH register projects but don't encode budgets otherwise.
     All-or-nothing; a project that already has a LIB is refused."""

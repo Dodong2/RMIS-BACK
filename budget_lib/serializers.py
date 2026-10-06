@@ -1,3 +1,5 @@
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
@@ -10,12 +12,17 @@ CERTIFY_ROLES = ["system_admin", "finance_budget"]
 QUARTER_FIELDS = ["q1_amount", "q2_amount", "q3_amount", "q4_amount"]
 
 
+def line_total(quantity, unit_cost):
+    """Qty x Unit Cost, rounded to centavos."""
+    return (Decimal(str(quantity)) * Decimal(str(unit_cost))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 class LineItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = LineItem
         fields = [
-            "id", "budget", "category", "description", "amount", "fiscal_year", "funding_source", "is_counterpart",
-            "q1_amount", "q2_amount", "q3_amount", "q4_amount", "is_app_flagged", "created_at",
+            "id", "budget", "category", "description", "amount", "unit", "quantity", "unit_cost",
+            "fiscal_year", "funding_source", "is_counterpart", "q1_amount", "q2_amount", "q3_amount", "q4_amount", "is_app_flagged", "created_at",
         ]
         read_only_fields = ["is_app_flagged"]
 
@@ -28,6 +35,10 @@ class LineItemSerializer(serializers.ModelSerializer):
         amount = attrs.get("amount", getattr(self.instance, "amount", None))
         if any(q is not None for q in quarters) and sum(q or 0 for q in quarters) != amount:
             raise serializers.ValidationError({"amount": "QTR1-QTR4 amounts must add up to the line item amount."})
+        quantity = attrs.get("quantity", getattr(self.instance, "quantity", None))
+        unit_cost = attrs.get("unit_cost", getattr(self.instance, "unit_cost", None))
+        if quantity is not None and unit_cost is not None and line_total(quantity, unit_cost) != amount:
+            raise serializers.ValidationError({"amount": "Total must equal Qty x Unit Cost."})
         return attrs
 
 

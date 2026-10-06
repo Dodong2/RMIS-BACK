@@ -40,16 +40,24 @@ class LineItem(models.Model):
         ("mooe", "Maintenance and Other Operating Expenses"),
         ("co", "Capital Outlay"),
     )
+    UNIT_CHOICES = (
+        ("unit", "unit"), ("month", "month"), ("lump_sum", "lump sum"), ("pax", "pax"),
+        ("lot", "lot"), ("set", "set"), ("hr", "hr"),
+    )
 
     budget = models.ForeignKey(LineItemBudget, on_delete=models.CASCADE, related_name="line_items")
     category = models.CharField(max_length=10, choices=CATEGORY_CHOICES)
     description = models.CharField(max_length=300)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
+    # Client feedback 2026-10-06: registration LIB rows are Unit / Qty / Unit Cost, and amount = quantity x unit_cost
+    unit = models.CharField(max_length=10, choices=UNIT_CHOICES, blank=True)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    unit_cost = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     # DPMIS-based spec BM-02/04/05: annual allocation, funding source, counterpart funding
     fiscal_year = models.PositiveIntegerField(null=True, blank=True)
     funding_source = models.CharField(max_length=150, blank=True, help_text="e.g. LSPU GAA, DOST-PCAARRD, LGU")
     is_counterpart = models.BooleanField(default=False, help_text="Counterpart (institutional share) funding")
-    # LSPU-RDO-SF-018 Section X quarterly breakdown; optional, must add up to amount when given
+    # Old LSPU-RDO-SF-018 Section X quarterly breakdown (kept for older LIBs); optional, must add up to amount when given
     q1_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     q2_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     q3_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)

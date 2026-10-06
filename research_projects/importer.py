@@ -16,7 +16,7 @@ from openpyxl.utils import get_column_letter
 from accounts.models import User
 from accounts.permissions import LEADER_ROLES
 from budget_lib.models import LineItem
-from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
+from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer, line_total
 from outputs.models import SIX_PS
 from outputs.serializers import ExpectedOutputSerializer
 
@@ -123,10 +123,9 @@ TABLE_SHEETS = {
         ("Fiscal Year", "fiscal_year", "int", None),
         ("Category", "category", "choice", CATEGORIES),
         ("Particulars", "description", "text", None),
-        ("QTR1", "q1_amount", "decimal", None),
-        ("QTR2", "q2_amount", "decimal", None),
-        ("QTR3", "q3_amount", "decimal", None),
-        ("QTR4", "q4_amount", "decimal", None),
+        ("Unit", "unit", "choice", LineItem.UNIT_CHOICES),
+        ("Qty", "quantity", "decimal", None),
+        ("Unit Cost", "unit_cost", "decimal", None),
         ("Total", "amount", "decimal", None),
     ],
     "Work Plan": [
@@ -224,9 +223,13 @@ def _allowed(kind, choices):
 
 
 def fill_line_item_amount(data):
-    """SF-018 Section X gives QTR1-QTR4; the line item amount is their total unless given."""
+    """Section X rows give Qty and Unit Cost, so the amount is Qty x Unit Cost unless given. Older payloads that
+    still send QTR1-QTR4 get their total instead."""
     if data.get("amount") in (None, ""):
-        data["amount"] = str(sum(Decimal(str(data.get(f) or 0)) for f in ("q1_amount", "q2_amount", "q3_amount", "q4_amount")))
+        if data.get("quantity") not in (None, "") and data.get("unit_cost") not in (None, ""):
+            data["amount"] = str(line_total(data["quantity"], data["unit_cost"]))
+        else:
+            data["amount"] = str(sum(Decimal(str(data.get(f) or 0)) for f in ("q1_amount", "q2_amount", "q3_amount", "q4_amount")))
     return data
 
 
@@ -427,8 +430,9 @@ def proposal_preview(project):
         "monitoring_evaluation": project.monitoring_evaluation,
         "references": project.references,
         "budget": [
-            {"category": i.category, "description": i.description,
-             "q1": float(i.q1_amount or 0), "q2": float(i.q2_amount or 0), "q3": float(i.q3_amount or 0), "q4": float(i.q4_amount or 0)}
+            {"category": i.category, "description": i.description, "unit": i.get_unit_display() if i.unit else "",
+             "quantity": float(i.quantity) if i.quantity is not None else None,
+             "unit_cost": float(i.unit_cost) if i.unit_cost is not None else None, "total": float(i.amount)}
             for i in line_items
         ],
         "work_plan": [
