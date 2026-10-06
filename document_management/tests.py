@@ -109,3 +109,50 @@ class DocumentUploadTests(RMISTestCase):
         self.current.refresh_from_db()
         self.assertTrue(self.current.is_current)
         self.assertEqual(Document.objects.count(), 1)
+
+
+class StagedUploadTests(RMISTestCase):
+    """Register Approved Project uploads documents before the project exists, then trades the staged_token for a
+    real Document once the project is created."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.make_user("system_admin")
+        self.project = Project.objects.create(
+            title="P", project_code="P-1", funding_type="core_funded", lead=self.make_user("project_leader"),
+        )
+
+    def stage(self, user, name="NOA.pdf"):
+        return self.client_for(user).post("/api/documents/documents/staged/", {
+            "file": SimpleUploadedFile(name, b"data", content_type="application/pdf"),
+        }, format="multipart")
+
+    def register(self, user, token):
+        return self.client_for(user).post("/api/documents/documents/", {
+            "project": self.project.id, "document_type": "other", "stage": "inception", "staged_token": token,
+        })
+
+    def test_a_staged_file_is_moved_into_the_project_on_register(self):
+        staged = self.stage(self.admin)
+        self.assertEqual(staged.status_code, 201)
+        staged_path = self.upload_document.call_args.args[1]
+        self.assertTrue(staged_path.startswith(f"_staged/{self.admin.id}/"))
+
+        response = self.register(self.admin, staged.data["staged_token"])
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["file_name"], "NOA.pdf")
+        self.assertEqual(response.data["file_size"], 4)
+        self.move_document.assert_called_once_with(staged_path, "P-1/other/v1_NOA.pdf")
+
+    def test_an_unsupported_staged_file_is_rejected_before_storage(self):
+        self.assertEqual(self.stage(self.admin, "tool.exe").status_code, 400)
+        self.upload_document.assert_not_called()
+
+    def test_another_users_token_or_a_forged_token_is_rejected(self):
+        token = self.stage(self.admin).data["staged_token"]
+        other = self.make_user("system_admin")
+
+        self.assertEqual(self.register(other, token).status_code, 400)
+        self.assertEqual(self.register(self.admin, token + "x").status_code, 400)
+        self.move_document.assert_not_called()

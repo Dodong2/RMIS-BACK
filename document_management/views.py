@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 
 from accounts.permissions import HasRole, acting_for, role_can, visible_documents
 from .models import Document, DocumentShare
-from .serializers import DocumentListSerializer, DocumentSerializer, DocumentShareSerializer
+from .serializers import DocumentListSerializer, DocumentSerializer, DocumentShareSerializer, StagedUploadSerializer
 
 
 class DocumentListCreateView(generics.ListCreateAPIView):
@@ -28,6 +28,17 @@ class DocumentListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(uploaded_by=self.request.user)
+
+
+class StagedDocumentUploadView(APIView):
+    """Upload a file before its project exists; returns a staged_token for POST documents/ (see StagedUploadSerializer)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = StagedUploadSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.save(), status=status.HTTP_201_CREATED)
 
 
 class DocumentDetailView(generics.RetrieveAPIView):

@@ -26,6 +26,17 @@ def upload_document(file_obj, path, content_type):
     return path
 
 
+def move_document(source, destination):
+    """Move an object inside the bucket (used to promote a staged upload to its final project path)."""
+    resp = requests.post(
+        f"{settings.SUPABASE_URL}/storage/v1/object/move",
+        headers=_headers(),
+        json={"bucketId": settings.SUPABASE_STORAGE_BUCKET, "sourceKey": source, "destinationKey": destination},
+    )
+    resp.raise_for_status()
+    return destination
+
+
 def get_signed_url(path, expires_in=3600):
     """Return a short-lived signed URL for downloading a private document."""
     resp = requests.post(

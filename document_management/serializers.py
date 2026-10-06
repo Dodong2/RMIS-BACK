@@ -1,14 +1,16 @@
 import logging
 import os
 import re
+import uuid
 
 import requests
+from django.core import signing
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Document, DocumentShare
-from .storage import get_signed_url, upload_document
+from .storage import get_signed_url, move_document, upload_document
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +30,53 @@ ALLOWED_FILE_TYPES = {
 }
 
 
+STAGED_SALT = "document_management.staged"
+STAGED_MAX_AGE = 24 * 60 * 60  # a staged upload must be registered within a day
+
+
 def _safe_filename(name):
     return re.sub(r"[^A-Za-z0-9._-]", "_", name)
+
+
+def _validate_file(file_obj):
+    if file_obj.size > MAX_UPLOAD_BYTES:
+        raise serializers.ValidationError({"file": f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit."})
+    if os.path.splitext(file_obj.name)[1].lower() not in ALLOWED_FILE_TYPES:
+        raise serializers.ValidationError(
+            {"file": f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_FILE_TYPES))}."}
+        )
+
+
+def _storage_error(exc, path):
+    logger.exception("Document storage call failed for %s", path)
+    detail = getattr(exc.response, "text", "") if exc.response is not None else str(exc)
+    return serializers.ValidationError({"file": f"The file storage rejected the upload: {detail[:200]}"})
+
+
+class StagedUploadSerializer(serializers.Serializer):
+    """Register Approved Project uploads its documents before the project exists (so the user sees a progress bar
+    and can't register with a half-finished upload). The file goes to a per-user staging folder, and the client
+    gets a signed token that DocumentSerializer later trades for a real Document by moving the file into place."""
+
+    file = serializers.FileField()
+
+    def validate_file(self, file_obj):
+        _validate_file(file_obj)
+        return file_obj
+
+    def create(self, validated_data):
+        file_obj = validated_data["file"]
+        user = self.context["request"].user
+        content_type = ALLOWED_FILE_TYPES[os.path.splitext(file_obj.name)[1].lower()]
+        path = f"_staged/{user.id}/{uuid.uuid4().hex}_{_safe_filename(file_obj.name)}"
+        try:
+            upload_document(file_obj, path, content_type)
+        except requests.RequestException as exc:
+            raise _storage_error(exc, path)
+        token = signing.dumps(
+            {"path": path, "name": file_obj.name, "size": file_obj.size, "user": user.id}, salt=STAGED_SALT,
+        )
+        return {"staged_token": token, "file_name": file_obj.name, "file_size": file_obj.size}
 
 
 class DocumentListSerializer(serializers.ModelSerializer):
@@ -46,14 +93,15 @@ class DocumentListSerializer(serializers.ModelSerializer):
 
 
 class DocumentSerializer(serializers.ModelSerializer):
-    file = serializers.FileField(write_only=True)
+    file = serializers.FileField(write_only=True, required=False)
+    staged_token = serializers.CharField(write_only=True, required=False)
     download_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
         fields = [
             "id", "project", "study", "document_type", "stage", "sensitivity", "version_number", "is_current",
-            "file", "file_name", "file_size", "content_type", "download_url",
+            "file", "staged_token", "file_name", "file_size", "content_type", "download_url",
             "is_archived", "retention_until", "uploaded_by", "uploaded_at",
             "review_status", "review_remarks", "reviewed_by", "reviewed_at",
         ]
@@ -78,22 +126,31 @@ class DocumentSerializer(serializers.ModelSerializer):
         if study and study.project_id != project.id:
             raise serializers.ValidationError({"study": "Study does not belong to this project."})
         file_obj = attrs.get("file")
-        if file_obj and file_obj.size > MAX_UPLOAD_BYTES:
-            raise serializers.ValidationError({"file": f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit."})
-        if file_obj and os.path.splitext(file_obj.name)[1].lower() not in ALLOWED_FILE_TYPES:
-            raise serializers.ValidationError(
-                {"file": f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_FILE_TYPES))}."}
-            )
+        token = attrs.pop("staged_token", None)
+        if bool(file_obj) == bool(token):
+            raise serializers.ValidationError({"file": "Send either a file or a staged_token."})
+        if file_obj:
+            _validate_file(file_obj)
+        else:
+            try:
+                staged = signing.loads(token, salt=STAGED_SALT, max_age=STAGED_MAX_AGE)
+            except signing.BadSignature:
+                raise serializers.ValidationError({"staged_token": "Upload expired or invalid. Upload the file again."})
+            if staged["user"] != self.context["request"].user.id:
+                raise serializers.ValidationError({"staged_token": "This upload belongs to another user."})
+            attrs["staged"] = staged
         return attrs
 
     def create(self, validated_data):
         if "sensitivity" not in self.initial_data and validated_data["document_type"] == "lib":
             validated_data["sensitivity"] = "financial"
-        file_obj = validated_data.pop("file")
+        file_obj = validated_data.pop("file", None)
+        staged = validated_data.pop("staged", None)
+        file_name = file_obj.name if file_obj else staged["name"]
         project = validated_data["project"]
         document_type = validated_data["document_type"]
         study = validated_data.get("study")
-        content_type = ALLOWED_FILE_TYPES[os.path.splitext(file_obj.name)[1].lower()]
+        content_type = ALLOWED_FILE_TYPES[os.path.splitext(file_name)[1].lower()]
 
         siblings = Document.objects.filter(project=project, document_type=document_type, study=study)
         last_version = siblings.order_by("-version_number").first()
@@ -101,20 +158,21 @@ class DocumentSerializer(serializers.ModelSerializer):
 
         # Upload first: if storage rejects the file, nothing in the DB has changed yet (the previous version
         # stays current) and the user gets a 400 instead of a 500.
-        path = f"{project.project_code}/{document_type}/v{validated_data['version_number']}_{_safe_filename(file_obj.name)}"
+        path = f"{project.project_code}/{document_type}/v{validated_data['version_number']}_{_safe_filename(file_name)}"
         try:
-            upload_document(file_obj, path, content_type)
+            if file_obj:
+                upload_document(file_obj, path, content_type)
+            else:
+                move_document(staged["path"], path)
         except requests.RequestException as exc:
-            logger.exception("Document upload to storage failed for %s", path)
-            detail = getattr(exc.response, "text", "") if exc.response is not None else str(exc)
-            raise serializers.ValidationError({"file": f"The file storage rejected the upload: {detail[:200]}"})
+            raise _storage_error(exc, path)
 
         with transaction.atomic():
             siblings.filter(is_current=True).update(is_current=False)
             return Document.objects.create(
                 storage_path=path,
-                file_name=file_obj.name,
-                file_size=file_obj.size,
+                file_name=file_name,
+                file_size=file_obj.size if file_obj else staged["size"],
                 content_type=content_type,
                 **validated_data,
             )
