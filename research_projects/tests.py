@@ -400,3 +400,29 @@ class ProjectReadScopeTests(RMISTestCase):
         self.mine.studies.create(title="My study")
 
         self.assertEqual(self.codes(self.leader, "/api/studies/"), ["My study"])
+
+
+class CollegeUnitTests(RMISTestCase):
+    """System Admin manages the "College Unit - Implementing Unit" choices; everyone else only reads them."""
+
+    def test_system_admin_can_add_rename_and_delete_a_unit(self):
+        client = self.client_for(self.make_user("system_admin"))
+
+        created = client.post("/api/college-units/", {"name": " CCS "}, format="json")
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["name"], "CCS")
+        self.assertEqual(client.patch(f"/api/college-units/{created.data['id']}/", {"name": "CCS - ICT"}, format="json").status_code, 200)
+        self.assertEqual(client.delete(f"/api/college-units/{created.data['id']}/").status_code, 204)
+
+    def test_duplicate_names_are_rejected_regardless_of_case(self):
+        client = self.client_for(self.make_user("system_admin"))
+        client.post("/api/college-units/", {"name": "CCS"}, format="json")
+
+        self.assertEqual(client.post("/api/college-units/", {"name": "ccs"}, format="json").status_code, 400)
+
+    def test_other_roles_can_read_but_not_edit(self):
+        self.client_for(self.make_user("system_admin")).post("/api/college-units/", {"name": "CTE"}, format="json")
+        riuh = self.client_for(self.make_user("riuh"))
+
+        self.assertEqual([u["name"] for u in riuh.get("/api/college-units/").data], ["CTE"])
+        self.assertEqual(riuh.post("/api/college-units/", {"name": "CAS"}, format="json").status_code, 403)

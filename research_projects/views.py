@@ -10,10 +10,10 @@ from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope, 
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from . import importer
 from .models import (
-    Program, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
+    CollegeUnit, Program, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
 from .serializers import (
-    ProgramSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
+    CollegeUnitSerializer, ProgramSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
     ProjectTeamMemberSerializer, StudySerializer,
     TargetBeneficiarySerializer, WorkPlanMilestoneSerializer, ensure_registrant_in_scope,
 )
@@ -30,6 +30,28 @@ REGISTRATION_ROLES = ["system_admin", "crc_chair", "drd", "riuh", "project_leade
 EDIT_ROLES = REGISTRATION_ROLES + ["program_leader", "study_leader"]
 # Leaders capture their own work plan (Module Structure M2); ensure_in_scope limits them to their projects.
 MILESTONE_ROLES = ["system_admin", "crc_chair", "program_leader", "project_leader", "study_leader"]
+
+
+class CollegeUnitListCreateView(generics.ListCreateAPIView):
+    """Everyone signed in reads the list (it feeds the registration dropdown); only the System Admin edits it."""
+
+    queryset = CollegeUnit.objects.all()
+    serializer_class = CollegeUnitSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [HasRole("accounts.manage_users")]
+        return [permissions.IsAuthenticated()]
+
+
+class CollegeUnitDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = CollegeUnit.objects.all()
+    serializer_class = CollegeUnitSerializer
+
+    def get_permissions(self):
+        if self.request.method in ("PUT", "PATCH", "DELETE"):
+            return [HasRole("accounts.manage_users")]
+        return [permissions.IsAuthenticated()]
 
 
 class ProgramListCreateView(generics.ListCreateAPIView):

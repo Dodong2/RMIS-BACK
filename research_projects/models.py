@@ -27,6 +27,20 @@ class Program(models.Model):
         return self.title
 
 
+class CollegeUnit(models.Model):
+    """Choices for the "College Unit - Implementing Unit" dropdown on Register Approved Project (e.g. CCS). Managed by
+    the System Admin. Projects keep the chosen name as text, so renaming or deleting a unit never changes old projects."""
+
+    name = models.CharField(max_length=100, unique=True)  # fits Project.college (100) and implementing_unit (150)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Project(models.Model):
     FUNDING_CHOICES = Program.FUNDING_CHOICES
     STATUS_CHOICES = Program.STATUS_CHOICES
