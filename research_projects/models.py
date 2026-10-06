@@ -27,18 +27,34 @@ class Program(models.Model):
         return self.title
 
 
-class CollegeUnit(models.Model):
-    """Choices for the "College Unit - Implementing Unit" dropdown on Register Approved Project (e.g. CCS). Managed by
-    the System Admin. Projects keep the chosen name as text, so renaming or deleting a unit never changes old projects."""
+class AdminChoice(models.Model):
+    """A dropdown choice on Register Approved Project, managed by the System Admin. Projects keep the chosen name as
+    text, so renaming or deleting a choice never changes projects already registered."""
 
-    name = models.CharField(max_length=100, unique=True)  # fits Project.college (100) and implementing_unit (150)
+    name = models.CharField(max_length=100, unique=True)  # fits Project.college (100), implementing_unit/rei_thrust (150)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        abstract = True
         ordering = ["name"]
 
     def __str__(self):
         return self.name
+
+
+class CollegeUnit(AdminChoice):
+    """"College Unit - Implementing Unit" dropdown (e.g. CCS)."""
+
+
+class ReiThrust(AdminChoice):
+    """"REI Thrust" dropdown on Project Details."""
+
+
+class CooperatingAgency(AdminChoice):
+    """"Cooperating Agency/ies" multi-select on Proponents & Team (e.g. DOST-PCAARRD)."""
+
+    class Meta(AdminChoice.Meta):
+        verbose_name_plural = "cooperating agencies"
 
 
 class Project(models.Model):

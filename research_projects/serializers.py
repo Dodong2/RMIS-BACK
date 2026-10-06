@@ -2,20 +2,35 @@ from rest_framework import serializers
 from accounts.models import Role, User
 from accounts.permissions import LEADER_ROLES, ensure_in_scope, scoped_projects
 from .models import (
-    CollegeUnit, Program, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
+    CollegeUnit, CooperatingAgency, Program, ReiThrust, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
 
 
-class CollegeUnitSerializer(serializers.ModelSerializer):
+class AdminChoiceSerializer(serializers.ModelSerializer):
     class Meta:
-        model = CollegeUnit
         fields = ["id", "name", "created_at"]
 
     def validate_name(self, value):
         value = value.strip()
-        if CollegeUnit.objects.filter(name__iexact=value).exclude(pk=getattr(self.instance, "pk", None)).exists():
-            raise serializers.ValidationError("This college/implementing unit already exists.")
+        model = self.Meta.model
+        if model.objects.filter(name__iexact=value).exclude(pk=getattr(self.instance, "pk", None)).exists():
+            raise serializers.ValidationError(f"This {model._meta.verbose_name} already exists.")
         return value
+
+
+class CollegeUnitSerializer(AdminChoiceSerializer):
+    class Meta(AdminChoiceSerializer.Meta):
+        model = CollegeUnit
+
+
+class ReiThrustSerializer(AdminChoiceSerializer):
+    class Meta(AdminChoiceSerializer.Meta):
+        model = ReiThrust
+
+
+class CooperatingAgencySerializer(AdminChoiceSerializer):
+    class Meta(AdminChoiceSerializer.Meta):
+        model = CooperatingAgency
 
 
 class LeadSerializer(serializers.ModelSerializer):

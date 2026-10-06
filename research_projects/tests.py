@@ -5,7 +5,7 @@ import openpyxl
 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
-from research_projects.models import CollegeUnit, Project, ProjectEndorser
+from research_projects.models import CollegeUnit, CooperatingAgency, Project, ProjectEndorser, ReiThrust
 
 
 def project_payload(lead, **overrides):
@@ -222,6 +222,8 @@ class ExcelImportTests(RMISTestCase):
         self.admin = self.make_user("system_admin")
         self.leader = self.make_user("project_leader", email="leader@lspu.test")
         CollegeUnit.objects.create(name="CTE")
+        ReiThrust.objects.create(name="Sustainable Agriculture")
+        CooperatingAgency.objects.bulk_create([CooperatingAgency(name="DOST-PCAARRD"), CooperatingAgency(name="LGU of Siniloan, Laguna")])
         template = self.client_for(self.admin).get("/api/projects/import-template/")
         self.assertEqual(template.status_code, 200)
         self.workbook = openpyxl.load_workbook(io.BytesIO(template.content))
@@ -280,6 +282,17 @@ class ExcelImportTests(RMISTestCase):
         response = self.upload()
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["errors"][0]["field"], "College Unit - Implementing Unit")
+
+    def test_rei_thrust_and_agencies_must_be_in_the_admin_lists(self):
+        self.fill_project(**{"REI Thrust": "sustainable agriculture", "Cooperating Agency/ies": "dost-pcaarrd; LGU of Siniloan, Laguna"})
+        self.assertEqual(self.upload().status_code, 201)
+        project = Project.objects.get()
+        self.assertEqual(project.rei_thrust, "Sustainable Agriculture")
+        self.assertEqual(project.cooperating_agencies, "DOST-PCAARRD, LGU of Siniloan, Laguna")
+
+        self.fill_project(**{"LSPU Faculty Research Number (Project Code)": "LSPU-X2", "REI Thrust": "Space", "Cooperating Agency/ies": "DOST-PCAARRD; CHED"})
+        fields = sorted(e["field"] for e in self.upload().data["errors"])
+        self.assertEqual(fields, ["Cooperating Agency/ies", "REI Thrust"])
 
     def test_template_lists_the_college_units(self):
         notes = {row[0].value: row[2].value for row in self.workbook["Project"].iter_rows(min_row=2)}
@@ -442,3 +455,13 @@ class CollegeUnitTests(RMISTestCase):
 
         self.assertEqual([u["name"] for u in riuh.get("/api/college-units/").data], ["CTE"])
         self.assertEqual(riuh.post("/api/college-units/", {"name": "CAS"}, format="json").status_code, 403)
+
+    def test_rei_thrusts_and_cooperating_agencies_have_the_same_admin_crud(self):
+        admin, riuh = self.client_for(self.make_user("system_admin")), self.client_for(self.make_user("riuh"))
+        for prefix in ("rei-thrusts", "cooperating-agencies"):
+            created = admin.post(f"/api/{prefix}/", {"name": "X"}, format="json")
+            self.assertEqual(created.status_code, 201)
+            self.assertEqual(admin.post(f"/api/{prefix}/", {"name": "x"}, format="json").status_code, 400)
+            self.assertEqual([c["name"] for c in riuh.get(f"/api/{prefix}/").data], ["X"])
+            self.assertEqual(riuh.delete(f"/api/{prefix}/{created.data['id']}/").status_code, 403)
+            self.assertEqual(admin.delete(f"/api/{prefix}/{created.data['id']}/").status_code, 204)

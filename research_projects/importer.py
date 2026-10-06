@@ -20,7 +20,7 @@ from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from outputs.models import SIX_PS
 from outputs.serializers import ExpectedOutputSerializer
 
-from .models import CollegeUnit, Program, Project, ProjectEndorser, ProjectTeamMember
+from .models import CollegeUnit, CooperatingAgency, Program, Project, ReiThrust, ProjectEndorser, ProjectTeamMember
 from .serializers import (
     ProjectSerializer, ProjectTeamMemberSerializer, StudySerializer, TargetBeneficiarySerializer,
     WorkPlanMilestoneSerializer, leader_owns,
@@ -31,6 +31,8 @@ WET_OR_DRY = (("wet", "Wet Research"), ("dry", "Dry Research"))
 
 # One dropdown since client feedback 2026-10-06; saved to both college and implementing_unit, like manual entry.
 COLLEGE_UNIT_LABEL = "College Unit - Implementing Unit"
+# System Admin pages that manage each dropdown, named in import errors and template notes
+ADMIN_CHOICE_PAGES = {CollegeUnit: "College Units", ReiThrust: "REI Thrusts", CooperatingAgency: "Cooperating Agencies"}
 # Templates downloaded before the merge still have the two old rows; read either as the merged field.
 OLD_COLLEGE_UNIT_LABELS = ("Implementing Unit", "College Unit")
 
@@ -47,8 +49,9 @@ PROJECT_FIELDS = [
     ("End Date", "target_end_date", "date", None, "Date cell or YYYY-MM-DD"),
     ("Total Project/Study Cost", "total_cost", "decimal", None, "Number"),
     ("Campus", "campus", "text", None, ""),
-    (COLLEGE_UNIT_LABEL, "implementing_unit", "college_unit", None, "Must match a unit in System Admin > College Units"),
-    ("Cooperating Agency/ies", "cooperating_agencies", "text", None, ""),
+    (COLLEGE_UNIT_LABEL, "implementing_unit", "admin_choice", CollegeUnit, "Must match System Admin > College Units"),
+    ("Cooperating Agency/ies", "cooperating_agencies", "admin_choices", CooperatingAgency,
+     "One or more, separated by semicolons; must match System Admin > Cooperating Agencies"),
     ("Sector", "sectors", "multi", Project.SECTOR_CHOICES, "Required; one or more, comma-separated"),
     ("Sector (if Others)", "sector_other", "text", None, "Required when Sector includes Others"),
     ("New or Continuing", "is_continuing", "choice", NEW_OR_CONTINUING, "Blank = New Proposal"),
@@ -58,7 +61,7 @@ PROJECT_FIELDS = [
     ("Research Priority Area", "research_priority_area", "choice", Project.PRIORITY_AREA_CHOICES, ""),
     ("Research Typology", "research_typology", "multi", Project.TYPOLOGY_CHOICES, "One or more, comma-separated"),
     ("Sustainable Development Goals (SDGs)", "sdgs", "sdgs", None, "Required; goal numbers 1-17, comma-separated"),
-    ("REI Thrust", "rei_thrust", "text", None, "Optional"),
+    ("REI Thrust", "rei_thrust", "admin_choice", ReiThrust, "Optional; must match System Admin > REI Thrusts"),
     ("II. Background of the Study", "background", "text", None, ""),
     ("III. Objectives of the Study", "objectives", "text", None, ""),
     ("IV. Project Descriptions/Methodology", "methodology", "text", None, ""),
@@ -186,11 +189,16 @@ def _convert(raw, kind, choices):
         if not program:
             raise CellError(f"No RMIS Program with code '{raw}'.")
         return program.pk
-    if kind == "college_unit":
-        unit = CollegeUnit.objects.filter(name__iexact=str(raw).strip()).first()
-        if not unit:
-            raise CellError(f"'{raw}' is not in System Admin > College Units.")
-        return unit.name
+    if kind in ("admin_choice", "admin_choices"):
+        # Agency names can contain commas (e.g. "LGU of Siniloan, Laguna"), so several are split on ; or new lines
+        parts = re.split(r"[;\n]", str(raw)) if kind == "admin_choices" else [str(raw)]
+        names = []
+        for part in filter(str.strip, parts):
+            choice = choices.objects.filter(name__iexact=part.strip()).first()
+            if not choice:
+                raise CellError(f"'{part.strip()}' is not in System Admin > {ADMIN_CHOICE_PAGES[choices]}.")
+            names.append(choice.name)
+        return ", ".join(names)
     if kind == "sdgs":
         try:
             return [int(part) for part in re.split(r"[,;]", str(raw)) if part.strip()]
@@ -229,8 +237,8 @@ def build_template():
     ws.append(["Field", "Value", "Notes / allowed values"])
     for label, _, kind, choices, note in PROJECT_FIELDS:
         allowed = _allowed(kind, choices)
-        if kind == "college_unit":
-            allowed = ", ".join(CollegeUnit.objects.values_list("name", flat=True))
+        if kind in ("admin_choice", "admin_choices"):
+            allowed = "; ".join(choices.objects.values_list("name", flat=True))
         ws.append([label, None, f"{note}. {allowed}".strip(". ") if allowed else note])
     ws.column_dimensions["A"].width = 45
     ws.column_dimensions["B"].width = 60

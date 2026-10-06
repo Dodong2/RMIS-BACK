@@ -1,7 +1,8 @@
 from django.urls import path
 from .views import (
-    CollegeUnitListCreateView,
-    CollegeUnitDetailView,
+    ADMIN_CHOICES,
+    AdminChoiceListCreateView,
+    AdminChoiceDetailView,
     ProgramListCreateView,
     ProgramDetailView,
     ProjectListCreateView,
@@ -24,8 +25,6 @@ from .views import (
 )
 
 urlpatterns = [
-    path("college-units/", CollegeUnitListCreateView.as_view()),
-    path("college-units/<int:pk>/", CollegeUnitDetailView.as_view()),
     path("programs/", ProgramListCreateView.as_view()),
     path("programs/<int:pk>/", ProgramDetailView.as_view()),
     path("projects/", ProjectListCreateView.as_view()),
@@ -46,3 +45,9 @@ urlpatterns = [
     path("milestones/", MilestoneListCreateView.as_view()),
     path("milestones/<int:pk>/", MilestoneDetailView.as_view()),
 ]
+
+for prefix, (model, serializer) in ADMIN_CHOICES.items():
+    urlpatterns += [
+        path(f"{prefix}/", AdminChoiceListCreateView.as_view(queryset=model.objects.all(), serializer_class=serializer)),
+        path(f"{prefix}/<int:pk>/", AdminChoiceDetailView.as_view(queryset=model.objects.all(), serializer_class=serializer)),
+    ]

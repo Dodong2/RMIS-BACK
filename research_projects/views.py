@@ -10,10 +10,10 @@ from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope, 
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from . import importer
 from .models import (
-    CollegeUnit, Program, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
+    CollegeUnit, CooperatingAgency, Program, ReiThrust, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
 from .serializers import (
-    CollegeUnitSerializer, ProgramSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
+    CollegeUnitSerializer, CooperatingAgencySerializer, ProgramSerializer, ReiThrustSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
     ProjectTeamMemberSerializer, StudySerializer,
     TargetBeneficiarySerializer, WorkPlanMilestoneSerializer, ensure_registrant_in_scope,
 )
@@ -32,11 +32,9 @@ EDIT_ROLES = REGISTRATION_ROLES + ["program_leader", "study_leader"]
 MILESTONE_ROLES = ["system_admin", "crc_chair", "program_leader", "project_leader", "study_leader"]
 
 
-class CollegeUnitListCreateView(generics.ListCreateAPIView):
-    """Everyone signed in reads the list (it feeds the registration dropdown); only the System Admin edits it."""
-
-    queryset = CollegeUnit.objects.all()
-    serializer_class = CollegeUnitSerializer
+class AdminChoiceListCreateView(generics.ListCreateAPIView):
+    """Registration dropdown choices (see AdminChoice). Everyone signed in reads the list; only the System Admin
+    edits it. urls.py passes queryset/serializer_class per choice list."""
 
     def get_permissions(self):
         if self.request.method == "POST":
@@ -44,14 +42,18 @@ class CollegeUnitListCreateView(generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class CollegeUnitDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = CollegeUnit.objects.all()
-    serializer_class = CollegeUnitSerializer
-
+class AdminChoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH", "DELETE"):
             return [HasRole("accounts.manage_users")]
         return [permissions.IsAuthenticated()]
+
+
+ADMIN_CHOICES = {
+    "college-units": (CollegeUnit, CollegeUnitSerializer),
+    "rei-thrusts": (ReiThrust, ReiThrustSerializer),
+    "cooperating-agencies": (CooperatingAgency, CooperatingAgencySerializer),
+}
 
 
 class ProgramListCreateView(generics.ListCreateAPIView):
