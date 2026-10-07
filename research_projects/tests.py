@@ -215,6 +215,19 @@ class ManualRegistrationTests(RMISTestCase):
         self.assertEqual(wrong.status_code, 400)
         self.assertEqual(right.status_code, 201, right.data)
 
+    def test_line_item_keeps_its_justification(self):
+        admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
+        budget = self.client_for(admin).post("/api/budget/budgets/", {"project": project.id}, format="json").data
+
+        response = self.client_for(admin).post("/api/budget/line-items/", {
+            "budget": budget["id"], "category": "ps", "description": "Honorarium", "unit": "month", "quantity": "18",
+            "unit_cost": "8000", "amount": "144000", "justification": "PI honorarium.",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["justification"], "PI honorarium.")
+
     def test_line_item_quarters_must_add_up_to_the_amount(self):
         admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)

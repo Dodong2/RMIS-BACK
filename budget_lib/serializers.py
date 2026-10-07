@@ -22,7 +22,7 @@ class LineItemSerializer(serializers.ModelSerializer):
         model = LineItem
         fields = [
             "id", "budget", "category", "description", "amount", "unit", "quantity", "unit_cost",
-            "fiscal_year", "funding_source", "is_counterpart", "q1_amount", "q2_amount", "q3_amount", "q4_amount", "is_app_flagged", "created_at",
+            "fiscal_year", "funding_source", "is_counterpart", "justification", "q1_amount", "q2_amount", "q3_amount", "q4_amount", "is_app_flagged", "created_at",
         ]
         read_only_fields = ["is_app_flagged"]
 
