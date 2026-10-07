@@ -61,7 +61,7 @@ class LeaderLoadView(APIView):
         )
         return Response([
             {
-                "user": u.id, "email": u.email, "full_name": u.get_full_name() or u.email, "role": u.role.code,
+                "user": u.id, "email": u.email, "full_name": u.display_name, "role": u.role.code,
                 "active_programs": u.programs, "program_cap": 2,
                 "active_projects": u.projects, "project_cap": 3,
             }
@@ -255,7 +255,7 @@ class WorkloadView(APIView):
         if project_id:
             tasks = tasks.filter(project_id=project_id)
         rows = (
-            tasks.values("assignee", "assignee__email")
+            tasks.values("assignee", "assignee__email", "assignee__first_name", "assignee__last_name")
             .annotate(
                 open=Count("id", filter=~Q(status="done")),
                 overdue=Count("id", filter=Q(due_date__lt=date.today()) & ~Q(status="done")),
@@ -268,7 +268,9 @@ class WorkloadView(APIView):
             TaskUpdate.objects.filter(task__in=tasks).values("task__assignee").annotate(total=Sum("hours")).values_list("task__assignee", "total")
         )
         return Response([
-            {"assignee": r["assignee"], "email": r["assignee__email"], "open": r["open"], "overdue": r["overdue"], "done": r["done"],
+            {"assignee": r["assignee"], "email": r["assignee__email"],
+             "full_name": f"{r['assignee__first_name']} {r['assignee__last_name']}".strip() or r["assignee__email"],
+             "open": r["open"], "overdue": r["overdue"], "done": r["done"],
              "estimated_hours": r["estimated_hours"] or 0, "logged_hours": logged.get(r["assignee"]) or 0}
             for r in rows
         ])

@@ -42,6 +42,12 @@ class User(AbstractUser):
     def __str__(self):
         return self.email
 
+    @property
+    def display_name(self):
+        """Name shown across the system (client request 2026-10-07). Older accounts registered before names were
+        required fall back to the e-mail until an admin fills the name in."""
+        return self.get_full_name() or self.email
+
 
 class AuditLog(models.Model):
     """Request-level audit trail — who called which mutating API endpoint,

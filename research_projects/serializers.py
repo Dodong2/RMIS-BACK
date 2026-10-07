@@ -35,14 +35,11 @@ class CooperatingAgencySerializer(AdminChoiceSerializer):
 
 class LeadSerializer(serializers.ModelSerializer):
     # Names, not e-mails, in pickers and tables (client meeting 2026-10-01, #13)
-    full_name = serializers.SerializerMethodField()
+    full_name = serializers.CharField(source="display_name", read_only=True)
 
     class Meta:
         model = User
         fields = ["id", "email", "full_name"]
-
-    def get_full_name(self, obj):
-        return obj.get_full_name() or obj.email
 
 
 def validate_lead_role(user, required_code):
@@ -296,7 +293,8 @@ class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
 
 class ProjectStatusHistorySerializer(serializers.ModelSerializer):
     changed_by_email = serializers.EmailField(source="changed_by.email", read_only=True)
+    changed_by_name = serializers.CharField(source="changed_by.display_name", read_only=True, default=None)
 
     class Meta:
         model = ProjectStatusHistory
-        fields = ["id", "project", "from_status", "to_status", "remarks", "changed_by", "changed_by_email", "changed_at"]
+        fields = ["id", "project", "from_status", "to_status", "remarks", "changed_by", "changed_by_email", "changed_by_name", "changed_at"]

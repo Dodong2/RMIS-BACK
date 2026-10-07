@@ -298,13 +298,25 @@ class GoogleAuthTests(RMISTestCase):
     def test_request_creates_a_pending_google_user(self):
         self.supabase_says(200)
 
-        response = APIClient().post("/api/auth/google/request/", {"supabase_access_token": "x"}, format="json")
+        response = APIClient().post(
+            "/api/auth/google/request/",
+            {"supabase_access_token": "x", "first_name": "Grace", "last_name": "Esmade"}, format="json",
+        )
 
         self.assertEqual(response.status_code, 201)
         user = User.objects.get(email="g.user@lspu.test")
+        self.assertEqual(user.get_full_name(), "Grace Esmade")
         self.assertEqual(user.registration_method, "google")
         self.assertFalse(user.is_active)
         self.assertFalse(user.has_usable_password())
+
+    def test_request_needs_a_first_and_last_name(self):
+        self.supabase_says(200)
+
+        response = APIClient().post("/api/auth/google/request/", {"supabase_access_token": "x", "first_name": "Grace"}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(User.objects.filter(email="g.user@lspu.test").exists())
 
 
 class AuditLogTests(RMISTestCase):

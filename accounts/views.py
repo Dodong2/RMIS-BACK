@@ -63,9 +63,13 @@ class GoogleRequestView(APIView):
     def post(self, request):
         token = request.data.get("supabase_access_token")
         requested_role_id = request.data.get("requested_role")
+        first_name = request.data.get("first_name", "").strip()
+        last_name = request.data.get("last_name", "").strip()
 
         if not token:
             return Response({"detail": "Missing token."}, status=400)
+        if not first_name or not last_name:
+            return Response({"detail": "First and last name are required."}, status=400)
 
         resp = http.get(
             f"{settings.SUPABASE_URL}/auth/v1/user",
@@ -86,6 +90,8 @@ class GoogleRequestView(APIView):
                 username=username,
                 email=email,
                 supabase_uid=supabase_uid,
+                first_name=first_name[:150],
+                last_name=last_name[:150],
                 is_active=False,
                 is_pending_role=True,
                 registration_method="google",

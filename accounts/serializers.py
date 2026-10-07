@@ -30,15 +30,16 @@ class EmailLoginSerializer(LoginSerializer):
 
 class PendingUserSerializer(serializers.ModelSerializer):
     requested_role = RoleSerializer(read_only=True)
+    full_name = serializers.CharField(source="display_name", read_only=True)
 
     class Meta:
         model = User
-        fields = ["id", "email", "registration_method", "requested_role", "date_joined"]
+        fields = ["id", "email", "full_name", "registration_method", "requested_role", "date_joined"]
 
 
 class UserListSerializer(serializers.ModelSerializer):
     role = RoleSerializer(read_only=True)
-    full_name = serializers.SerializerMethodField()
+    full_name = serializers.CharField(source="display_name", read_only=True)
 
     class Meta:
         model = User
@@ -46,10 +47,6 @@ class UserListSerializer(serializers.ModelSerializer):
             "id", "email", "full_name", "first_name", "last_name", "role", "office", "position", "scope", "is_active",
             "account_status", "date_joined",
         ]
-
-    def get_full_name(self, obj):
-        """For the people pickers (client meeting 2026-10-01). Most accounts have no name yet, so fall back to e-mail."""
-        return obj.get_full_name() or obj.email
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -77,20 +74,22 @@ class UserScopeSerializer(serializers.Serializer):
 
 class AuditLogSerializer(serializers.ModelSerializer):
     actor_email = serializers.CharField(source="actor.email", read_only=True, default=None)
+    actor_name = serializers.CharField(source="actor.display_name", read_only=True, default=None)
 
     class Meta:
         model = AuditLog
-        fields = ["id", "actor", "actor_email", "method", "path", "status_code", "ip_address", "error_detail", "created_at"]
+        fields = ["id", "actor", "actor_email", "actor_name", "method", "path", "status_code", "ip_address", "error_detail", "created_at"]
 
 class TemporaryReplacementSerializer(serializers.ModelSerializer):
     suspended_user_email = serializers.EmailField(source="suspended_user.email", read_only=True)
     replacement_email = serializers.EmailField(source="replacement.email", read_only=True)
+    replacement_name = serializers.CharField(source="replacement.display_name", read_only=True)
     is_current = serializers.SerializerMethodField()
 
     class Meta:
         model = TemporaryReplacement
         fields = [
-            "id", "suspended_user", "suspended_user_email", "replacement", "replacement_email", "designation",
+            "id", "suspended_user", "suspended_user_email", "replacement", "replacement_email", "replacement_name", "designation",
             "coverage", "start_date", "end_date", "basis", "created_by", "created_at", "ended_at", "is_current",
         ]
         read_only_fields = ["created_by", "ended_at"]

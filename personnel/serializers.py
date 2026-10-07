@@ -144,10 +144,11 @@ class TaskSerializer(serializers.ModelSerializer):
 
 class TaskUpdateSerializer(serializers.ModelSerializer):
     author_email = serializers.EmailField(source="author.email", read_only=True)
+    author_name = serializers.CharField(source="author.display_name", read_only=True)
 
     class Meta:
         model = TaskUpdate
-        fields = ["id", "task", "author", "author_email", "note", "kind", "hours", "progress_pct", "new_status", "created_at"]
+        fields = ["id", "task", "author", "author_email", "author_name", "note", "kind", "hours", "progress_pct", "new_status", "created_at"]
         read_only_fields = ["task", "author"]
 
     def validate(self, attrs):

@@ -30,7 +30,7 @@ def notify_admins_new_registration(user):
         send_brevo_email(
             admin_email,
             "New RMIS Registration Pending",
-            f"<p>{user.email} registered via {method} and requested the role: {requested}.</p>"
+            f"<p>{user.get_full_name()} ({user.email}) registered via {method} and requested the role: {requested}.</p>"
             f"<p>Go to the Pending Users page in RMIS to review and assign a role.</p>",
         )
 

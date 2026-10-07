@@ -180,15 +180,17 @@ class DocumentSerializer(serializers.ModelSerializer):
 
 class DocumentShareSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source="user.email", read_only=True)
+    user_name = serializers.CharField(source="user.display_name", read_only=True)
     user_role = serializers.CharField(source="user.role.name", read_only=True, default=None)
     granted_by_email = serializers.EmailField(source="granted_by.email", read_only=True)
+    granted_by_name = serializers.CharField(source="granted_by.display_name", read_only=True)
     is_active = serializers.SerializerMethodField()
 
     class Meta:
         model = DocumentShare
         fields = [
-            "id", "document", "user", "user_email", "user_role", "reason", "expires_on",
-            "granted_by", "granted_by_email", "granted_at", "revoked_by", "revoked_at", "is_active",
+            "id", "document", "user", "user_email", "user_name", "user_role", "reason", "expires_on",
+            "granted_by", "granted_by_email", "granted_by_name", "granted_at", "revoked_by", "revoked_at", "is_active",
         ]
         read_only_fields = ["document", "granted_by", "revoked_by", "revoked_at"]
 
