@@ -448,34 +448,49 @@ class ProjectReadScopeTests(RMISTestCase):
 class CollegeUnitTests(RMISTestCase):
     """System Admin manages the "College Unit - Implementing Unit" choices; everyone else only reads them."""
 
-    def test_system_admin_can_add_rename_and_delete_a_unit(self):
+    def test_system_admin_adds_a_unit_as_abbreviation_and_college(self):
         client = self.client_for(self.make_user("system_admin"))
 
-        created = client.post("/api/college-units/", {"name": " CCS "}, format="json")
+        created = client.post("/api/college-units/", {"code": " CA ", "title": " College of Agriculture "}, format="json")
         self.assertEqual(created.status_code, 201)
-        self.assertEqual(created.data["name"], "CCS")
-        self.assertEqual(client.patch(f"/api/college-units/{created.data['id']}/", {"name": "CCS - ICT"}, format="json").status_code, 200)
+        self.assertEqual((created.data["code"], created.data["title"]), ("CA", "College of Agriculture"))
+        self.assertEqual(created.data["name"], "CA - College of Agriculture")
+        renamed = client.patch(f"/api/college-units/{created.data['id']}/", {"title": "College of Agri"}, format="json")
+        self.assertEqual(renamed.data["name"], "CA - College of Agri")
         self.assertEqual(client.delete(f"/api/college-units/{created.data['id']}/").status_code, 204)
 
-    def test_duplicate_names_are_rejected_regardless_of_case(self):
+    def test_code_and_title_are_required(self):
         client = self.client_for(self.make_user("system_admin"))
-        client.post("/api/college-units/", {"name": "CCS"}, format="json")
 
-        self.assertEqual(client.post("/api/college-units/", {"name": "ccs"}, format="json").status_code, 400)
+        self.assertEqual(client.post("/api/college-units/", {"code": "CA"}, format="json").status_code, 400)
+        self.assertEqual(client.post("/api/college-units/", {"code": " ", "title": "College of Agriculture"}, format="json").status_code, 400)
+
+    def test_duplicate_codes_are_rejected_regardless_of_case(self):
+        client = self.client_for(self.make_user("system_admin"))
+        client.post("/api/college-units/", {"code": "CCS", "title": "College of Computer Studies"}, format="json")
+
+        self.assertEqual(client.post("/api/college-units/", {"code": "ccs", "title": "Other"}, format="json").status_code, 400)
 
     def test_other_roles_can_read_but_not_edit(self):
-        self.client_for(self.make_user("system_admin")).post("/api/college-units/", {"name": "CTE"}, format="json")
+        self.client_for(self.make_user("system_admin")).post("/api/college-units/", {"code": "CTE", "title": "College of Teacher Education"}, format="json")
         riuh = self.client_for(self.make_user("riuh"))
 
-        self.assertEqual([u["name"] for u in riuh.get("/api/college-units/").data], ["CTE"])
-        self.assertEqual(riuh.post("/api/college-units/", {"name": "CAS"}, format="json").status_code, 403)
+        self.assertEqual([u["name"] for u in riuh.get("/api/college-units/").data], ["CTE - College of Teacher Education"])
+        self.assertEqual(riuh.post("/api/college-units/", {"code": "CAS", "title": "Arts"}, format="json").status_code, 403)
 
-    def test_rei_thrusts_and_cooperating_agencies_have_the_same_admin_crud(self):
+    def test_rei_thrust_name_is_code_then_title(self):
         admin, riuh = self.client_for(self.make_user("system_admin")), self.client_for(self.make_user("riuh"))
-        for prefix in ("rei-thrusts", "cooperating-agencies"):
-            created = admin.post(f"/api/{prefix}/", {"name": "X"}, format="json")
-            self.assertEqual(created.status_code, 201)
-            self.assertEqual(admin.post(f"/api/{prefix}/", {"name": "x"}, format="json").status_code, 400)
-            self.assertEqual([c["name"] for c in riuh.get(f"/api/{prefix}/").data], ["X"])
-            self.assertEqual(riuh.delete(f"/api/{prefix}/{created.data['id']}/").status_code, 403)
-            self.assertEqual(admin.delete(f"/api/{prefix}/{created.data['id']}/").status_code, 204)
+
+        created = admin.post("/api/rei-thrusts/", {"code": "REI-01", "title": "Agriculture, Fisheries, and Food Security"}, format="json")
+        self.assertEqual(created.data["name"], "REI-01 Agriculture, Fisheries, and Food Security")
+        self.assertEqual(admin.post("/api/rei-thrusts/", {"code": "rei-01", "title": "X"}, format="json").status_code, 400)
+        self.assertEqual(riuh.delete(f"/api/rei-thrusts/{created.data['id']}/").status_code, 403)
+
+    def test_cooperating_agencies_keep_a_single_name(self):
+        admin, riuh = self.client_for(self.make_user("system_admin")), self.client_for(self.make_user("riuh"))
+        created = admin.post("/api/cooperating-agencies/", {"name": "X"}, format="json")
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(admin.post("/api/cooperating-agencies/", {"name": "x"}, format="json").status_code, 400)
+        self.assertEqual([c["name"] for c in riuh.get("/api/cooperating-agencies/").data], ["X"])
+        self.assertEqual(riuh.delete(f"/api/cooperating-agencies/{created.data['id']}/").status_code, 403)
+        self.assertEqual(admin.delete(f"/api/cooperating-agencies/{created.data['id']}/").status_code, 204)

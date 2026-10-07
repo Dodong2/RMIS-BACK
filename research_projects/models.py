@@ -42,12 +42,33 @@ class AdminChoice(models.Model):
         return self.name
 
 
-class CollegeUnit(AdminChoice):
-    """"College Unit - Implementing Unit" dropdown (e.g. CCS)."""
+class CodedChoice(AdminChoice):
+    """A choice the System Admin enters as a code plus a title (client request 2026-10-07). `name` is built from them
+    and is still what projects store and the Excel import matches. Entries made before the split may have a blank
+    code until the admin edits them."""
+
+    SEPARATOR = " "
+
+    code = models.CharField(max_length=20, blank=True)
+    title = models.CharField(max_length=100, blank=True)
+
+    class Meta(AdminChoice.Meta):
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        if self.code and self.title:
+            self.name = f"{self.code}{self.SEPARATOR}{self.title}"
+        super().save(*args, **kwargs)
 
 
-class ReiThrust(AdminChoice):
-    """"REI Thrust" dropdown on Project Details."""
+class CollegeUnit(CodedChoice):
+    """"College Unit - Implementing Unit" dropdown, e.g. "CA - College of Agriculture"."""
+
+    SEPARATOR = " - "
+
+
+class ReiThrust(CodedChoice):
+    """"REI Thrust" dropdown on Project Details, e.g. "REI-01 Agriculture, Fisheries, and Food Security"."""
 
 
 class CooperatingAgency(AdminChoice):

@@ -18,13 +18,40 @@ class AdminChoiceSerializer(serializers.ModelSerializer):
         return value
 
 
-class CollegeUnitSerializer(AdminChoiceSerializer):
+class CodedChoiceSerializer(AdminChoiceSerializer):
+    """Code + title in, combined `name` out (see CodedChoice)."""
+
+    code = serializers.CharField(max_length=20)
+    title = serializers.CharField(max_length=100)
+
     class Meta(AdminChoiceSerializer.Meta):
+        fields = ["id", "code", "title", "name", "created_at"]
+        read_only_fields = ["name"]
+
+    def validate(self, attrs):
+        model = self.Meta.model
+        code = attrs.get("code", getattr(self.instance, "code", "")).strip()
+        title = attrs.get("title", getattr(self.instance, "title", "")).strip()
+        if not code or not title:
+            raise serializers.ValidationError("Both the code and the title are required.")
+        name = f"{code}{model.SEPARATOR}{title}"
+        if len(name) > 100:
+            raise serializers.ValidationError("The code and title together must be 100 characters or fewer.")
+        others = model.objects.exclude(pk=getattr(self.instance, "pk", None))
+        if others.filter(code__iexact=code).exists():
+            raise serializers.ValidationError({"code": f"The code {code} is already used."})
+        if others.filter(name__iexact=name).exists():
+            raise serializers.ValidationError(f"This {model._meta.verbose_name} already exists.")
+        return {**attrs, "code": code, "title": title}
+
+
+class CollegeUnitSerializer(CodedChoiceSerializer):
+    class Meta(CodedChoiceSerializer.Meta):
         model = CollegeUnit
 
 
-class ReiThrustSerializer(AdminChoiceSerializer):
-    class Meta(AdminChoiceSerializer.Meta):
+class ReiThrustSerializer(CodedChoiceSerializer):
+    class Meta(CodedChoiceSerializer.Meta):
         model = ReiThrust
 
 
