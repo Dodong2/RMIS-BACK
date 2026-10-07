@@ -189,6 +189,27 @@ class MilestoneTaskTests(RMISTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("milestone", response.data)
 
+    def test_task_due_date_stays_within_the_activity_dates(self):
+        self.milestone.start_date = datetime.date(2026, 3, 1)
+        self.milestone.save()
+        post = lambda due: self.client.post("/api/personnel/tasks/", {
+            "project": self.project.pk, "title": "x", "assignee": self.staff.pk, "milestone": self.milestone.pk, "due_date": due,
+        }, format="json")
+
+        self.assertEqual(post("2026-02-28").status_code, 400)
+        self.assertEqual(post("2026-07-01").status_code, 400)
+        self.assertIn("planned dates", str(post("2026-07-01").data))
+        self.assertEqual(post("2026-03-01").status_code, 201)
+        self.assertEqual(post("2026-06-30").status_code, 201)
+
+    def test_old_task_outside_the_dates_can_still_be_edited(self):
+        task = Task.objects.get(pk=self.add_task("Survey"))
+        Task.objects.filter(pk=task.pk).update(due_date=datetime.date(2026, 12, 1))
+
+        response = self.client.patch(f"/api/personnel/tasks/{task.pk}/", {"title": "Survey v2"}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+
     def test_tasks_filter_by_milestone(self):
         self.add_task("Survey")
         self.client.post("/api/personnel/tasks/", {"project": self.project.pk, "title": "Loose", "assignee": self.staff.pk}, format="json")

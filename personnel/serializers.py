@@ -139,6 +139,15 @@ class TaskSerializer(serializers.ModelSerializer):
         milestone = attrs.get("milestone", getattr(self.instance, "milestone", None))
         if milestone and milestone.project_id != project.id:
             raise serializers.ValidationError({"milestone": "Milestone does not belong to this project."})
+        # Client request 2026-10-07: a task under a work plan activity is due within that activity's planned dates.
+        # Checked only when the due date or activity changes, so older tasks can still be edited.
+        due = attrs.get("due_date", getattr(self.instance, "due_date", None))
+        if milestone and due and ("due_date" in attrs or "milestone" in attrs):
+            if (milestone.start_date and due < milestone.start_date) or due > milestone.target_date:
+                start = milestone.start_date.isoformat() if milestone.start_date else "the start"
+                raise serializers.ValidationError(
+                    {"due_date": f"The due date must be within the activity's planned dates ({start} to {milestone.target_date.isoformat()})."}
+                )
         return attrs
 
 
