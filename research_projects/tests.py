@@ -482,7 +482,7 @@ class CollegeUnitTests(RMISTestCase):
         admin, riuh = self.client_for(self.make_user("system_admin")), self.client_for(self.make_user("riuh"))
 
         created = admin.post("/api/rei-thrusts/", {"code": "REI-01", "title": "Agriculture, Fisheries, and Food Security"}, format="json")
-        self.assertEqual(created.data["name"], "REI-01 Agriculture, Fisheries, and Food Security")
+        self.assertEqual(created.data["name"], "REI-01 - Agriculture, Fisheries, and Food Security")
         self.assertEqual(admin.post("/api/rei-thrusts/", {"code": "rei-01", "title": "X"}, format="json").status_code, 400)
         self.assertEqual(riuh.delete(f"/api/rei-thrusts/{created.data['id']}/").status_code, 403)
 

@@ -47,7 +47,7 @@ class CodedChoice(AdminChoice):
     and is still what projects store and the Excel import matches. Entries made before the split may have a blank
     code until the admin edits them."""
 
-    SEPARATOR = " "
+    SEPARATOR = " - "
 
     code = models.CharField(max_length=20, blank=True)
     title = models.CharField(max_length=100, blank=True)
@@ -64,11 +64,9 @@ class CodedChoice(AdminChoice):
 class CollegeUnit(CodedChoice):
     """"College Unit - Implementing Unit" dropdown, e.g. "CA - College of Agriculture"."""
 
-    SEPARATOR = " - "
-
 
 class ReiThrust(CodedChoice):
-    """"REI Thrust" dropdown on Project Details, e.g. "REI-01 Agriculture, Fisheries, and Food Security"."""
+    """"REI Thrust" dropdown on Project Details, e.g. "REI-01 - Agriculture, Fisheries, and Food Security"."""
 
 
 class CooperatingAgency(AdminChoice):
