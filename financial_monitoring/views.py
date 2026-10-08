@@ -61,7 +61,7 @@ class RealignmentListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
     serializer_class = BudgetRealignmentSerializer
 
     def get_queryset(self):
-        qs = BudgetRealignment.objects.select_related("from_line_item", "to_line_item").order_by("-created_at")
+        qs = BudgetRealignment.objects.select_related("from_line_item", "to_line_item", "reviewed_by").order_by("-created_at")
         budget_id = self.request.query_params.get("budget")
         if budget_id:
             qs = qs.filter(from_line_item__budget_id=budget_id)

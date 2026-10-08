@@ -78,13 +78,14 @@ class RealignmentReviewSerializer(serializers.Serializer):
 class BudgetRealignmentSerializer(serializers.ModelSerializer):
     tier = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
+    reviewed_by_name = serializers.CharField(source="reviewed_by.display_name", read_only=True, default=None)
 
     class Meta:
         model = BudgetRealignment
         fields = [
             "id", "from_line_item", "to_line_item", "new_item_category", "new_item_description",
             "amount", "tier", "status", "justification", "requested_by",
-            "reviewed_by", "reviewed_at", "bor_resolution_number", "created_at",
+            "reviewed_by", "reviewed_by_name", "reviewed_at", "bor_resolution_number", "created_at",
         ]
         read_only_fields = ["requested_by", "reviewed_by", "reviewed_at", "bor_resolution_number"]
 
