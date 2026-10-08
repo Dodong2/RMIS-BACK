@@ -145,19 +145,17 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        tier = validated_data["tier"]
-        validated_data["status"] = {
-            "minor": "implemented", "major": "pending_approval", "bor": "pending_bor",
-        }[tier]
+        # Client 2026-10-08: every realignment, minor ones included, waits for the Budget Officer.
+        validated_data["status"] = "pending_bor" if validated_data["tier"] == "bor" else "pending_approval"
         return BudgetRealignment.objects.create(**validated_data)
 
 
 def review_realignment(realignment, reviewer, decision, bor_resolution_number=""):
-    """Approve/reject a major or BOR-tier realignment. Caller must have checked it's still pending."""
+    """Approve/reject a pending realignment. Caller must have checked it's still pending."""
     with transaction.atomic():
         if decision == "rejected":
             realignment.status = "rejected"
-        elif realignment.tier == "major":
+        elif realignment.tier != "bor":
             realignment.status = "approved"
         else:  # bor
             if not bor_resolution_number:

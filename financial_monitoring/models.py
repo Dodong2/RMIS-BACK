@@ -34,9 +34,10 @@ class Disbursement(models.Model):
 class BudgetRealignment(models.Model):
     """
     Transfer of funds from one line item to another (or into a brand-new item),
-    tiered per the R&D Manual: <=33% of the source item is self-implementable,
-    33-100% needs University Administration approval, >100% or a new expense
-    item needs Board of Regents approval (tracked here as a reference only).
+    tiered per the R&D Manual (<=33% / 33-100% / >100% or a new expense item).
+    Client 2026-10-08: every tier waits for the Finance/Budget Officer; the BOR
+    tier also records the Board of Regents resolution number. "implemented" is
+    only on older rows from when <=33% applied immediately.
     """
 
     TIER_CHOICES = (

@@ -85,8 +85,8 @@ class RealignmentDetailView(BudgetScopedMixin, generics.RetrieveAPIView):
 
 class RealignmentReviewView(APIView):
     """
-    Approve/reject a major or BOR-tier realignment. Both tiers are reviewed by
-    the Finance/Budget Officer or system_admin (client 2026-10-08); BOR-tier
+    Approve/reject a pending realignment. Every tier is reviewed by the
+    Finance/Budget Officer or system_admin (client 2026-10-08); BOR-tier
     still needs the Board of Regents resolution number (no BOR role exists).
     """
 
