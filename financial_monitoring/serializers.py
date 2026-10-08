@@ -11,8 +11,9 @@ from .models import APPLIED_STATUSES, BudgetRealignment, Disbursement, Procureme
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 REALIGNMENT_REQUEST_ROLES = ["system_admin", "project_leader"]
-REALIGNMENT_MAJOR_REVIEW_ROLES = ["system_admin", "university_admin"]
-REALIGNMENT_BOR_REVIEW_ROLES = ["system_admin"]  # client-confirmed: BOR-tier approval is system_admin only
+# Client 2026-10-08: the Finance/Budget Officer approves realignments; system_admin can too (for testing).
+REALIGNMENT_MAJOR_REVIEW_ROLES = ["system_admin", "finance_budget"]
+REALIGNMENT_BOR_REVIEW_ROLES = ["system_admin", "finance_budget"]
 DISBURSEMENT_ROLES = ["system_admin", "finance_budget"]
 PROCUREMENT_REQUEST_ROLES = ["system_admin", "program_leader", "project_leader"]  # "signed by the Lead Proponent"
 PROCUREMENT_STATUS_ROLES = ["system_admin", "procurement_officer_lib"]
