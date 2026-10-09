@@ -80,6 +80,14 @@ class AppendixFReportView(FormReportView):
     missing = "No terminal report submitted for this project."
 
 
+class ProposalFormReportView(FormReportView):
+    """LSPU-RDO-SF-018, laid out like the registration wizard's preview (client request 2026-10-09)."""
+
+    report_type = "proposal_form"
+    build_form = staticmethod(forms.proposal_form)
+    missing = "Project not found."
+
+
 class AccomplishmentReportView(APIView):
     """GET reports/accomplishment/?user=&month=YYYY-MM&file_format=: a project staff's Monthly Accomplishment Report,
     pulled from their tasks (client follow-up 2026-10-02). Staff get only their own (user defaults to them);

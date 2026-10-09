@@ -3,9 +3,10 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import HasRole, acting_for, role_can, visible_documents
+from accounts.permissions import HasRole, acting_for, role_can, visible_documents, visible_projects
+from research_projects.models import Project
 from .models import Document, DocumentShare
-from .serializers import DocumentListSerializer, DocumentSerializer, DocumentShareSerializer, StagedUploadSerializer
+from .serializers import DocumentListSerializer, DocumentSerializer, DocumentShareSerializer, StagedUploadSerializer, store_generated_document
 
 
 class DocumentListCreateView(generics.ListCreateAPIView):
@@ -39,6 +40,28 @@ class StagedDocumentUploadView(APIView):
         serializer = StagedUploadSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         return Response(serializer.save(), status=status.HTTP_201_CREATED)
+
+
+class ProposalFormSaveView(APIView):
+    """POST documents/proposal-form/ {project}: Register Project saves the project's Research Proposal Form (SF-018)
+    as a PDF document (client request 2026-10-09), as a new version each time. Project Team sensitivity, so the
+    project's leader and team, RIUH and the university-wide roles see it."""
+
+    permission_classes = [HasRole("projects.register")]
+
+    def post(self, request):
+        from reports.forms import proposal_form, render_form_pdf
+
+        visible = visible_projects(request.user)
+        projects = Project.objects.all() if visible is None else visible
+        project = generics.get_object_or_404(projects, pk=request.data.get("project"))
+        document = store_generated_document(
+            {"project": project, "document_type": "proposal_form", "stage": "inception", "sensitivity": "project_team",
+             "uploaded_by": request.user},
+            f"Research_Proposal_Form_{project.project_code}.pdf",
+            render_form_pdf(proposal_form(project.pk)),
+        )
+        return Response(DocumentSerializer(document, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
 class DocumentDetailView(generics.RetrieveAPIView):

@@ -119,3 +119,58 @@ class FormExportTests(RMISTestCase):
         self.assertEqual(self.export("e", "csv", other).status_code, 404)
         self.assertEqual(self.export("f", "csv", other).status_code, 404)
         self.assertEqual(self.export("f", "csv", self.admin).status_code, 200)
+
+
+class ProposalFormTests(RMISTestCase):
+    """Client request 2026-10-09: Register Project saves the SF-018 preview to Document Management, downloadable as
+    PDF, Word or Excel in the preview's layout."""
+
+    def setUp(self):
+        super().setUp()
+        from datetime import date
+
+        from budget_lib.models import LineItem, LineItemBudget
+        from research_projects.models import WorkPlanMilestone
+
+        self.leader = self.make_user("project_leader", first_name="Aimee", last_name="Chavez")
+        self.project = Project.objects.create(
+            title="Bridging Academia and Communities", project_code="BRIDGI-1", funding_type="institutional",
+            lead=self.leader, objectives="1. Evaluate the status", sectors=["education"], total_cost=50000,
+            start_date=date(2026, 1, 1), target_end_date=date(2026, 12, 31),
+        )
+        budget = LineItemBudget.objects.create(project=self.project, version_number=1)
+        LineItem.objects.create(budget=budget, category="mooe", description="Travel Expenses", amount=50000)
+        WorkPlanMilestone.objects.create(project=self.project, title="Data gathering", start_date=date(2026, 2, 1), target_date=date(2026, 4, 30))
+        ProjectEndorser.objects.create(project=self.project, name="Adriel G. Roman", designation="Dean/Associate Dean")
+
+    def test_the_form_downloads_in_every_format(self):
+        for fmt in ("pdf", "docx", "xlsx"):
+            response = self.client_for(self.leader).get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": fmt})
+            self.assertEqual(response.status_code, 200, fmt)
+            text = text_of(fmt, response.content)
+            if fmt == "pdf":
+                self.assertTrue(response.content.startswith(b"%PDF"))
+                continue
+            for expected in ("RESEARCH PROPOSAL FORM", "Bridging Academia and Communities", "[/] Education", "Travel Expenses",
+                             "GRAND TOTAL", "1. Data gathering", "ADRIEL G. ROMAN"):
+                self.assertIn(expected, text, fmt)
+
+    def test_register_saves_the_form_as_a_project_team_document(self):
+        from document_management.models import Document
+
+        client = self.client_for(self.leader)
+        first = client.post("/api/documents/documents/proposal-form/", {"project": self.project.pk}, format="json")
+        second = client.post("/api/documents/documents/proposal-form/", {"project": self.project.pk}, format="json")
+
+        self.assertEqual((first.status_code, second.status_code), (201, 201), first.data)
+        self.assertEqual(second.data["version_number"], 2)
+        doc = Document.objects.get(pk=second.data["id"])
+        self.assertEqual((doc.document_type, doc.sensitivity, doc.content_type), ("proposal_form", "project_team", "application/pdf"))
+        self.assertTrue(self.upload_document.call_args.args[0].read().startswith(b"%PDF"))
+        self.assertEqual(self.client_for(self.make_user("riuh")).get(f"/api/documents/documents/{doc.pk}/").status_code, 200)
+        self.assertEqual(self.client_for(self.make_user("university_admin")).get(f"/api/documents/documents/{doc.pk}/").status_code, 200)
+
+    def test_other_leaders_cannot_save_or_download_it(self):
+        other = self.client_for(self.make_user("project_leader"))
+        self.assertEqual(other.post("/api/documents/documents/proposal-form/", {"project": self.project.pk}, format="json").status_code, 404)
+        self.assertEqual(other.get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": "pdf"}).status_code, 404)

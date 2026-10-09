@@ -9,6 +9,8 @@ Block kinds:
   {"kind": "line", "text": str, "italic": bool}             one line of text
   {"kind": "table", "header": [[...], ...], "rows": [[...]], "widths": [...], "spans": [(row, first, last)]}
       spans merge header cells of header row `row` from column `first` to `last`
+      optional: "header_fill" (hex), "row_fills" {row: hex}, "cell_fills" [(row, col, hex)], "bold_rows" [row],
+      "bold_first" (bold first column; default: tables without a header). Rows here are body rows.
   {"kind": "heading", "text": str, "level": 1|2}            outline heading (SF-16)
   {"kind": "section", "heading": str, "body": str, "level": 1|2}  heading + text; blank body = space to write in
   {"kind": "signatures", "items": [(label, name, role), ...]}
@@ -169,6 +171,223 @@ def appendix_f_form(project_id):
     return {"title": "Appendix F - Terminal Report", "landscape": False, "blocks": blocks}
 
 
+# ---- LSPU-RDO-SF-018 Research Proposal Form ----------------------------------------------------------------------
+
+PROPOSAL_FILL = "E7DFC6"  # the beige section bars of the frontend's ProposalPreview
+GANTT_FILL = "FDE047"
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+SDG_LABELS = [
+    "No Poverty", "Zero Hunger", "Good Health and Well-being", "Quality Education", "Gender Equality",
+    "Clean Water and Sanitation", "Affordable and Clean Energy", "Decent Work and Economic Growth",
+    "Industry, Innovation and Infrastructure", "Reduced Inequalities", "Sustainable Cities and Communities",
+    "Responsible Consumption and Production", "Climate Action", "Life Below Water", "Life on Land",
+    "Peace, Justice and Strong Institutions", "Partnerships for the Goals",
+]
+BUDGET_GROUPS = [
+    ("ps", "PERSONAL SERVICES (PS)"),
+    ("mooe", "MAINTENANCE AND OTHER OPERATING EXPENSES (MOOE)"),
+    ("co", "EQUIPMENT OUTLAY (CO)"),
+]
+
+
+def _box(checked, label):
+    return f"[{'/' if checked else ' '}] {label}"
+
+
+def _boxes(choices, picked):
+    return "    ".join(_box(code in picked, label) for code, label in choices)
+
+
+def _form_date(value):
+    return f"{datetime.date.fromisoformat(value):%B %d, %Y}" if value else ""
+
+
+def _with_gender(person):
+    return ", ".join(v for v in (person["name"], (person.get("gender") or "").capitalize()) if v)
+
+
+def _money(n):
+    return f"{n:,.2f}" if n else "-"
+
+
+def _section(title, body):
+    return {"kind": "table", "header": [[title]], "rows": [[body or "Not provided"]], "widths": [100], "header_fill": PROPOSAL_FILL}
+
+
+def _work_plan_block(data):
+    """Section XI as the preview's Gantt chart: year 1 = calendar year of the earliest date, one column per month."""
+    dates = [d for d in [data["start_date"], data["target_end_date"]] + [x for w in data["work_plan"] for x in (w["start_date"], w["target_date"])] if d]
+    first = min(int(d[:4]) for d in dates) if dates else datetime.date.today().year
+    years = max(1, (max(int(d[:4]) for d in dates) if dates else first) - first + 1)
+    months = years * 12
+
+    def index(d):
+        return (int(d[:4]) - first) * 12 + int(d[5:7]) - 1
+
+    def month(d):
+        return MONTHS[int(d[5:7]) - 1] if d else ""
+
+    width = 3 + months
+    header = [
+        ["XI. WORK PLAN"] + [""] * (width - 1),
+        ["", "", ""] + [f"{q // 4 + 1}Q{q % 4 + 1}" if m == 0 else "" for q in range(years * 4) for m in range(3)],
+        ["Workplan", "Start", "End"] + [MONTHS[m % 12] if years == 1 else MONTHS[m % 12][0] for m in range(months)],
+    ]
+    spans = [(0, 0, width - 1)] + [(1, 3 + q * 3, 5 + q * 3) for q in range(years * 4)]
+    rows, fills = [], []
+    for i, w in enumerate(data["work_plan"]):
+        start, end = w["start_date"] or w["target_date"], w["target_date"] or w["start_date"]
+        rows.append([f"{i + 1}. {w['title']}", month(w["start_date"]), month(w["target_date"])] + [""] * months)
+        if start and end:
+            fills += [(i, 3 + m, GANTT_FILL) for m in range(index(start), index(end) + 1)]
+    if not rows:
+        rows = [["Set under Work Plan after registration, or through the Excel upload."] + [""] * (width - 1)]
+    return {"kind": "table", "header": header, "rows": rows, "spans": spans, "widths": [26, 8, 8] + [3] * months,
+            "header_fill": PROPOSAL_FILL, "cell_fills": fills, "bold_first": True}
+
+
+def proposal_form(project_id):
+    """The Research Proposal Form (LSPU-RDO-SF-018) of a registered project, laid out like the wizard's Research
+    Proposal Form Preview (client request 2026-10-09). Built from importer.proposal_preview, the same data the
+    preview shows."""
+    from research_projects.importer import proposal_preview
+    from research_projects.models import Project
+
+    project = Project.objects.filter(pk=project_id).select_related("lead").first()
+    if project is None:
+        return None
+    data = proposal_preview(project)
+    total_cost = f"PhP {float(data['total_cost']):,.2f}" if data["total_cost"] else "—"
+    duration = " – ".join(v for v in (_form_date(data["start_date"]), _form_date(data["target_end_date"])) if v)
+    team = [[f"Team Member {i}", _with_gender(m)] for i, m in enumerate(data["team"], start=1)] or [["Team Member", "None listed"]]
+    sector_other = f": {data['sector_other']}" if data["sector_other"] else ""
+    continuing = f"Continuing (Year {data['continuing_year']})" if data["is_continuing"] and data["continuing_year"] else "Continuing (i.e., Year 2, Year 3, and so on…)"
+
+    budget_rows, row_fills, bold_rows = [], {}, []
+    for key, label in BUDGET_GROUPS:
+        items = [b for b in data["budget"] if b["category"] == key]
+        if not items:
+            continue
+        row_fills[len(budget_rows)] = PROPOSAL_FILL
+        bold_rows.append(len(budget_rows))
+        budget_rows.append([label, "", "", "", ""])
+        for b in items:
+            budget_rows.append([f"    {b['description']}", b["unit"], f"{b['quantity']:g}" if b["quantity"] is not None else "",
+                                _money(b["unit_cost"]) if b["unit_cost"] is not None else "", _money(b["total"])])
+        row_fills[len(budget_rows)] = "E2E8F0"
+        bold_rows.append(len(budget_rows))
+        budget_rows.append(["SUBTOTAL", "", "", "", _money(sum(b["total"] for b in items))])
+    if budget_rows:
+        row_fills[len(budget_rows)] = "FECACA"
+        bold_rows.append(len(budget_rows))
+        budget_rows.append(["GRAND TOTAL", "", "", "", _money(sum(b["total"] for b in data["budget"]))])
+    else:
+        budget_rows = [["No LIB entered.", "", "", "", ""]]
+
+    outputs = [[FORM_6P_LABELS.get(o["category"], o["category"]), o["description"], str(o["target_count"])] for o in data["outputs"]]
+    beneficiaries = [[b["group"] + (f" – {b['description']}" if b["description"] else ""), str(b["total"])] for b in data["beneficiaries"]]
+    endorsers = [row for e in data["endorsers"] for row in (
+        ["Name", e["name"].upper()],
+        ["Designation", (e["designation"] or "—") + (f" · Date Signed: {_form_date(e['signed_on'])}" if e["signed_on"] else "")],
+    )]
+    submitted = f" · {_form_date(data['proposal_submitted_on'])}" if data["proposal_submitted_on"] else ""
+
+    blocks = [
+        {"kind": "header", "lines": UNIVERSITY, "title": "RESEARCH PROPOSAL FORM (LSPU-FUNDED RESEARCH)"},
+        {
+            "kind": "table",
+            "header": [["I. PROJECT/STUDY DETAILS", ""]],
+            "spans": [(0, 0, 1)],
+            "header_fill": PROPOSAL_FILL,
+            "bold_first": True,
+            "rows": [
+                ["TITLE", data["title"] or "—"],
+                ["PROJECT LEADER/GENDER", _with_gender({"name": data["lead_name"], "gender": data["lead_gender"]}) or "—"],
+                ["CO-PROJECT LEADER/GENDER", "; ".join(map(_with_gender, data["co_leaders"])) or "—"],
+                *team,
+                ["DURATION", duration or "—"],
+                ["START DATE", _form_date(data["start_date"]) or "—"],
+                ["END DATE", _form_date(data["target_end_date"]) or "—"],
+                ["TOTAL PROJECT/STUDY COST", total_cost],
+                ["IMPLEMENTING UNIT", data["implementing_unit"] or "—"],
+                ["CAMPUS", f"{data['campus']} Campus" if data["campus"] else "—"],
+                ["CONTACT NO/S.", data["contact_number"] or "—"],
+                ["E-MAIL ADDRESS", data["lead_email"] or "—"],
+                ["COOPERATING AGENCY/IES", data["cooperating_agencies"]],
+            ],
+            "widths": [30, 70],
+        },
+        _section("SECTOR", _boxes(Project.SECTOR_CHOICES, data["sectors"]) + sector_other),
+        _section("RESEARCH PROPOSAL CLASSIFICATION", "\n".join([
+            f"{_box(not data['is_continuing'], 'New Proposal')}    {_box(data['is_continuing'], continuing)}",
+            f"{_box(False, 'Program*')}    {_box(True, 'Project**')}    {_box(False, 'Study')}",
+            _boxes(Project.RESEARCH_TYPE_CHOICES, [data["research_type"]]),
+            f"{_box(not data['is_dry_research'], 'Wet Research (i.e., with laboratory)')}    {_box(data['is_dry_research'], 'Dry Research')}",
+        ])),
+        _section("STUDY COMPONENT TITLES", "\n".join(f"Study {i}: {t}" for i, t in enumerate(data["study_titles"] or ["", ""], start=1))),
+        _section("RESEARCH PRIORITY AREA", "\n".join(_box(code == data["research_priority_area"], label) for code, label in Project.PRIORITY_AREA_CHOICES)),
+        _section("RESEARCH TYPOLOGY", "\n".join(_box(code in data["research_typology"], label) for code, label in Project.TYPOLOGY_CHOICES)),
+        _section("SUSTAINABLE DEVELOPMENT GOALS (SDGs)", "; ".join(f"SDG {n} — {SDG_LABELS[n - 1]}" for n in data["sdgs"]) or "None selected"),
+        _section("II. BACKGROUND OF THE STUDY", data["background"]),
+        _section("III. OBJECTIVES OF THE STUDY", "\n".join(f"{i}. {o}" for i, o in enumerate(data["objectives"], start=1))),
+        _section("IV. PROJECT DESCRIPTIONS/METHODOLOGY", data["methodology"]),
+        {
+            "kind": "table",
+            "header": [["V. QUANTIFIABLE EXPECTED OUTPUTS: 6Ps", "", ""], ["ITEM", "PARTICULARS", "QUANTITY"]],
+            "spans": [(0, 0, 2)],
+            "header_fill": PROPOSAL_FILL,
+            "rows": outputs or [["Set under Research Outputs after registration, or through the Excel upload.", "", ""]],
+            "widths": [25, 60, 15],
+        },
+        _section("VI. SOCIO-ECONOMIC SIGNIFICANCE", data["socio_economic_significance"]),
+        {
+            "kind": "table",
+            "header": [["VII. TARGET BENEFICIARIES", ""], ["Target Beneficiaries", "Total"]],
+            "spans": [(0, 0, 1)],
+            "header_fill": PROPOSAL_FILL,
+            "rows": beneficiaries or [["None listed", ""]],
+            "widths": [85, 15],
+        },
+        _section("VIII. MONITORING/EVALUATION", data["monitoring_evaluation"]),
+        _section("IX. LIST OF REFERENCES", data["references"]),
+        {
+            "kind": "table",
+            "header": [["X. BUDGET REQUIREMENTS", "", "", "", ""], ["DESCRIPTION", "UNIT", "QTY", "UNIT COST", "TOTAL"]],
+            "spans": [(0, 0, 4)],
+            "header_fill": PROPOSAL_FILL,
+            "rows": budget_rows,
+            "row_fills": row_fills,
+            "bold_rows": bold_rows,
+            "bold_first": False,
+            "widths": [45, 10, 8, 14, 14],
+        },
+        _work_plan_block(data),
+        {"kind": "page_break"},
+        {"kind": "header", "lines": ["Annex A"], "title": "ENDORSEMENT PAGE"},
+        {
+            "kind": "table",
+            "header": [["SUBMITTED BY:", ""]],
+            "spans": [(0, 0, 1)],
+            "header_fill": PROPOSAL_FILL,
+            "rows": [["Name", f"{(data['lead_name'] or '—').upper()} · Project Leader{submitted}"]],
+            "widths": [25, 75],
+            "bold_first": False,
+        },
+        {
+            "kind": "table",
+            "header": [["ENDORSED, NOTED, RECOMMENDED AND APPROVED BY (in order):", ""]],
+            "spans": [(0, 0, 1)],
+            "header_fill": PROPOSAL_FILL,
+            "rows": endorsers or [["No endorsers entered.", ""]],
+            "widths": [25, 75],
+            "bold_first": False,
+        },
+    ]
+    if data["college"]:
+        blocks.append({"kind": "line", "text": f"College Unit: {data['college']}", "italic": True})
+    return {"title": "Research Proposal Form", "landscape": False, "blocks": blocks}
+
+
 # ---- Project staff Monthly Accomplishment Report -------------------------------------------------------------------
 
 def month_bounds(month):
@@ -240,6 +459,13 @@ def accomplishment_form(user, month, projects=None):
 
 def _table_width(block):
     return len(block["rows"][0]) if block["rows"] else len(block["header"][-1]) if block["header"] else 2
+
+
+def _cell_style(block, r, c):
+    """(fill hex or None, bold) of body cell r, c."""
+    fill = next((h for fr, fc, h in block.get("cell_fills", ()) if fr == r and fc == c), None) or block.get("row_fills", {}).get(r)
+    bold = r in block.get("bold_rows", ()) or (c == 0 and block.get("bold_first", not block["header"]))
+    return fill, bold
 
 
 def _flat_rows(form):
@@ -319,20 +545,28 @@ def render_form_xlsx(form):
             ws.row_dimensions[row].height = 15 * (1 + len(block["text"]) // 90)
             row += 1
         elif kind == "table":
-            for i, w in enumerate(block.get("widths", [])):
-                widths[i + 1] = max(widths.get(i + 1, 0), w)
             width = _table_width(block)
+            for i, w in enumerate(block.get("widths", []) if width > 1 else []):
+                widths[i + 1] = max(widths.get(i + 1, 0), w)
             for h, header in enumerate(block["header"]):
+                if width == 1:
+                    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=span)
                 for c in range(width):
-                    put(row, c + 1, header[c] or None, font=Font(bold=True), fill=fill, border=grid,
+                    put(row, c + 1, header[c] or None, font=Font(bold=True), border=grid,
+                        fill=PatternFill("solid", fgColor=block["header_fill"]) if "header_fill" in block else fill,
                         alignment=Alignment(horizontal="center", vertical="center", wrap_text=True))
                 for span_row, first, last in block.get("spans", []):
                     if span_row == h:
                         ws.merge_cells(start_row=row, start_column=first + 1, end_row=row, end_column=last + 1)
                 row += 1
-            for values in block["rows"]:
+            for r, values in enumerate(block["rows"]):
+                if width == 1:  # a form section: one box across the whole form
+                    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=span)
+                    ws.row_dimensions[row].height = 15 * sum(1 + len(line) // 120 for line in (values[0] or "").split("\n"))
                 for c, value in enumerate(values):
-                    put(row, c + 1, value, border=grid, font=Font(bold=not block["header"] and c == 0))
+                    cell_fill, bold = _cell_style(block, r, c)
+                    put(row, c + 1, value, border=grid, font=Font(bold=bold),
+                        **({"fill": PatternFill("solid", fgColor=cell_fill)} if cell_fill else {}))
                 row += 1
             row += 1
         elif kind == "heading":
@@ -366,13 +600,13 @@ def render_form_xlsx(form):
     return buf.getvalue()
 
 
-def _shade(cell):
+def _shade(cell, color=HEADER_FILL):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
     shading = OxmlElement("w:shd")
     shading.set(qn("w:val"), "clear")
-    shading.set(qn("w:fill"), HEADER_FILL)
+    shading.set(qn("w:fill"), color)
     cell._tc.get_or_add_tcPr().append(shading)
 
 
@@ -420,7 +654,7 @@ def render_form_docx(form):
                 cells = table.add_row().cells
                 for c in range(width):
                     cells[c].text = header[c]
-                    _shade(cells[c])
+                    _shade(cells[c], block.get("header_fill", HEADER_FILL))
                     for run in cells[c].paragraphs[0].runs:
                         run.bold = True
                     cells[c].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -431,12 +665,16 @@ def render_form_docx(form):
                         for run in merged.paragraphs[0].runs:
                             run.bold = True
                         merged.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            for values in block["rows"]:
+            for r, values in enumerate(block["rows"]):
                 cells = table.add_row().cells
                 for c, value in enumerate(values):
                     cells[c].text = value
-                    if not block["header"] and c == 0 and value:
-                        cells[c].paragraphs[0].runs[0].bold = True
+                    cell_fill, bold = _cell_style(block, r, c)
+                    if cell_fill:
+                        _shade(cells[c], cell_fill)
+                    if bold:
+                        for run in cells[c].paragraphs[0].runs:
+                            run.bold = True
             for c, column in enumerate(table.columns):  # LibreOffice reads the grid, Word reads each cell
                 column.width = col_widths[c]
             for r in table.rows:
@@ -509,16 +747,22 @@ def render_form_pdf(form):
             width = _table_width(block)
             header = [[Paragraph(f"<b>{escape(v)}</b>", ParagraphStyle("th", parent=small, alignment=TA_CENTER))
                        for v in row] for row in block["header"]]
-            body = [[p(v, small) for v in row] for row in block["rows"]]
-            if not block["header"]:  # label/value table: bold labels
-                body = [[Paragraph(f"<b>{escape(r[0])}</b>", small), *[p(v, small) for v in r[1:]]] for r in block["rows"]]
+            def body_cell(r, c, v):
+                return Paragraph(f"<b>{escape(v or '')}</b>", small) if _cell_style(block, r, c)[1] else p(v, small)
+
+            body = [[body_cell(r, c, v) for c, v in enumerate(row)] for r, row in enumerate(block["rows"])]
             widths = block.get("widths") or [100 / width] * width
             usable = pagesize[0] - 80
             table = Table(header + body or [[""] * width], colWidths=[usable * w / sum(widths) for w in widths],
                           repeatRows=len(header))
             style = [("GRID", (0, 0), (-1, -1), 0.5, colors.black), ("VALIGN", (0, 0), (-1, -1), "TOP")]
             if header:
-                style.append(("BACKGROUND", (0, 0), (-1, len(header) - 1), colors.HexColor(f"#{HEADER_FILL}")))
+                style.append(("BACKGROUND", (0, 0), (-1, len(header) - 1), colors.HexColor(f"#{block.get('header_fill', HEADER_FILL)}")))
+            for r, values in enumerate(block["rows"]):
+                for c in range(len(values)):
+                    cell_fill = _cell_style(block, r, c)[0]
+                    if cell_fill:
+                        style.append(("BACKGROUND", (c, len(header) + r), (c, len(header) + r), colors.HexColor(f"#{cell_fill}")))
             for span_row, first, last in block.get("spans", []):
                 style.append(("SPAN", (first, span_row), (last, span_row)))
             table.setStyle(TableStyle(style))

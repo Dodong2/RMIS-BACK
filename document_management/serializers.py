@@ -1,3 +1,4 @@
+import io
 import logging
 import os
 import re
@@ -146,36 +147,36 @@ class DocumentSerializer(serializers.ModelSerializer):
             validated_data["sensitivity"] = "financial"
         file_obj = validated_data.pop("file", None)
         staged = validated_data.pop("staged", None)
-        file_name = file_obj.name if file_obj else staged["name"]
-        project = validated_data["project"]
-        document_type = validated_data["document_type"]
-        study = validated_data.get("study")
-        content_type = ALLOWED_FILE_TYPES[os.path.splitext(file_name)[1].lower()]
+        if file_obj:
+            return store_document(validated_data, file_obj.name, file_obj.size, lambda path, ct: upload_document(file_obj, path, ct))
+        return store_document(validated_data, staged["name"], staged["size"], lambda path, ct: move_document(staged["path"], path))
 
-        siblings = Document.objects.filter(project=project, document_type=document_type, study=study)
-        last_version = siblings.order_by("-version_number").first()
-        validated_data["version_number"] = (last_version.version_number + 1) if last_version else 1
 
-        # Upload first: if storage rejects the file, nothing in the DB has changed yet (the previous version
-        # stays current) and the user gets a 400 instead of a 500.
-        path = f"{project.project_code}/{document_type}/v{validated_data['version_number']}_{_safe_filename(file_name)}"
-        try:
-            if file_obj:
-                upload_document(file_obj, path, content_type)
-            else:
-                move_document(staged["path"], path)
-        except requests.RequestException as exc:
-            raise _storage_error(exc, path)
+def store_generated_document(fields, file_name, content):
+    """store_document for a file RMIS builds itself (e.g. the Research Proposal Form PDF)."""
+    return store_document(fields, file_name, len(content), lambda path, ct: upload_document(io.BytesIO(content), path, ct))
 
-        with transaction.atomic():
-            siblings.filter(is_current=True).update(is_current=False)
-            return Document.objects.create(
-                storage_path=path,
-                file_name=file_name,
-                file_size=file_obj.size if file_obj else staged["size"],
-                content_type=content_type,
-                **validated_data,
-            )
+
+def store_document(fields, file_name, size, put):
+    """Save a new current version of (project, document_type, study). `put(path, content_type)` places the file in
+    storage; it runs first, so if storage rejects the file nothing in the DB has changed yet (the previous version
+    stays current) and the user gets a 400 instead of a 500."""
+    project, document_type = fields["project"], fields["document_type"]
+    content_type = ALLOWED_FILE_TYPES[os.path.splitext(file_name)[1].lower()]
+    siblings = Document.objects.filter(project=project, document_type=document_type, study=fields.get("study"))
+    last_version = siblings.order_by("-version_number").first()
+    version = (last_version.version_number + 1) if last_version else 1
+    path = f"{project.project_code}/{document_type}/v{version}_{_safe_filename(file_name)}"
+    try:
+        put(path, content_type)
+    except requests.RequestException as exc:
+        raise _storage_error(exc, path)
+
+    with transaction.atomic():
+        siblings.filter(is_current=True).update(is_current=False)
+        return Document.objects.create(
+            storage_path=path, file_name=file_name, file_size=size, content_type=content_type, version_number=version, **fields
+        )
 
 
 class DocumentShareSerializer(serializers.ModelSerializer):

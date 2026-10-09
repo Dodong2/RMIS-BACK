@@ -22,6 +22,7 @@ class Document(models.Model):
         ("midterm_report", "Midterm Report"),
         ("terminal_report", "Terminal Report"),
         ("accomplishment_report", "Accomplishment Report"),
+        ("proposal_form", "Research Proposal Form (SF-018)"),
         ("thesis", "Thesis"),
         ("dissertation", "Dissertation"),
         ("dataset", "Research Dataset"),
