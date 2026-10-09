@@ -76,6 +76,13 @@ class CooperatingAgency(AdminChoice):
         verbose_name_plural = "cooperating agencies"
 
 
+class EndorserChoice(AdminChoice):
+    """An Annex A signatory the System Admin enters by hand (client request 2026-10-09), picked by name in step 7 of
+    the wizard. Not tied to accounts or roles yet; the project copies the name and designation into ProjectEndorser."""
+
+    designation = models.CharField(max_length=200, blank=True)
+
+
 class Project(models.Model):
     FUNDING_CHOICES = Program.FUNDING_CHOICES
     STATUS_CHOICES = Program.STATUS_CHOICES

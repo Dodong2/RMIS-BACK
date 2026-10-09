@@ -2,7 +2,7 @@ from rest_framework import serializers
 from accounts.models import Role, User
 from accounts.permissions import LEADER_ROLES, ensure_in_scope, scoped_projects
 from .models import (
-    CollegeUnit, CooperatingAgency, Program, ReiThrust, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
+    CollegeUnit, CooperatingAgency, EndorserChoice, Program, ReiThrust, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
 
 
@@ -58,6 +58,12 @@ class ReiThrustSerializer(CodedChoiceSerializer):
 class CooperatingAgencySerializer(AdminChoiceSerializer):
     class Meta(AdminChoiceSerializer.Meta):
         model = CooperatingAgency
+
+
+class EndorserChoiceSerializer(AdminChoiceSerializer):
+    class Meta(AdminChoiceSerializer.Meta):
+        model = EndorserChoice
+        fields = ["id", "name", "designation", "created_at"]
 
 
 class LeadSerializer(serializers.ModelSerializer):

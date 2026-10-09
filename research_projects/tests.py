@@ -507,3 +507,13 @@ class CollegeUnitTests(RMISTestCase):
         self.assertEqual([c["name"] for c in riuh.get("/api/cooperating-agencies/").data], ["X"])
         self.assertEqual(riuh.delete(f"/api/cooperating-agencies/{created.data['id']}/").status_code, 403)
         self.assertEqual(admin.delete(f"/api/cooperating-agencies/{created.data['id']}/").status_code, 204)
+
+    def test_endorsers_carry_a_designation(self):
+        admin, riuh = self.client_for(self.make_user("system_admin")), self.client_for(self.make_user("riuh"))
+        created = admin.post("/api/endorsers/", {"name": " Adriel G. Roman ", "designation": "Dean/Associate Dean"}, format="json")
+        self.assertEqual((created.data["name"], created.data["designation"]), ("Adriel G. Roman", "Dean/Associate Dean"))
+        self.assertEqual(admin.post("/api/endorsers/", {"name": "adriel g. roman"}, format="json").status_code, 400)
+        self.assertEqual(admin.patch(f"/api/endorsers/{created.data['id']}/", {"designation": "Dean"}, format="json").data["designation"], "Dean")
+        self.assertEqual(riuh.get("/api/endorsers/").data[0]["designation"], "Dean")
+        self.assertEqual(riuh.post("/api/endorsers/", {"name": "X"}, format="json").status_code, 403)
+        self.assertEqual(admin.delete(f"/api/endorsers/{created.data['id']}/").status_code, 204)

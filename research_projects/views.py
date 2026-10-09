@@ -10,10 +10,10 @@ from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope, 
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from . import importer
 from .models import (
-    CollegeUnit, CooperatingAgency, Program, ReiThrust, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
+    CollegeUnit, CooperatingAgency, EndorserChoice, Program, ReiThrust, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
 from .serializers import (
-    CollegeUnitSerializer, CooperatingAgencySerializer, ProgramSerializer, ReiThrustSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
+    CollegeUnitSerializer, CooperatingAgencySerializer, EndorserChoiceSerializer, ProgramSerializer, ReiThrustSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
     ProjectTeamMemberSerializer, StudySerializer,
     TargetBeneficiarySerializer, WorkPlanMilestoneSerializer, ensure_registrant_in_scope,
 )
@@ -53,6 +53,7 @@ ADMIN_CHOICES = {
     "college-units": (CollegeUnit, CollegeUnitSerializer),
     "rei-thrusts": (ReiThrust, ReiThrustSerializer),
     "cooperating-agencies": (CooperatingAgency, CooperatingAgencySerializer),
+    "endorsers": (EndorserChoice, EndorserChoiceSerializer),
 }
 
 
