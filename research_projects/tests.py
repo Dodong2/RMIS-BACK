@@ -517,3 +517,47 @@ class CollegeUnitTests(RMISTestCase):
         self.assertEqual(riuh.get("/api/endorsers/").data[0]["designation"], "Dean")
         self.assertEqual(riuh.post("/api/endorsers/", {"name": "X"}, format="json").status_code, 403)
         self.assertEqual(admin.delete(f"/api/endorsers/{created.data['id']}/").status_code, 204)
+
+
+class EditRegisteredProjectTests(RMISTestCase):
+    """Client request 2026-10-09: the Project Leader (and System Admin) edits a registered project through the
+    SF-018 form on the project page; these are the calls its Save Changes makes."""
+
+    def setUp(self):
+        super().setUp()
+        from outputs.models import ExpectedOutput
+        from research_projects.models import ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone
+
+        self.leader = self.make_user("project_leader")
+        self.project = Project.objects.create(
+            title="Old", project_code="LSPU-9", funding_type="core_funded", lead=self.leader, sectors=["education"], sdgs=[4],
+        )
+        self.member = ProjectTeamMember.objects.create(project=self.project, member_role="member", name="A")
+        self.study = Study.objects.create(project=self.project, title="S1")
+        self.output = ExpectedOutput.objects.create(project=self.project, category="publications", description="D")
+        self.beneficiary = TargetBeneficiary.objects.create(project=self.project, group="Farmers", total=5)
+        self.milestone = WorkPlanMilestone.objects.create(project=self.project, title="M", target_date=datetime.date(2026, 5, 1))
+        self.endorser = ProjectEndorser.objects.create(project=self.project, name="X", designation="Dean")
+
+    def test_the_leader_saves_every_section_but_not_the_code(self):
+        c = self.client_for(self.leader)
+        ok = lambda r: self.assertIn(r.status_code, (200, 201, 204), getattr(r, "data", r))
+        ok(c.patch(f"/api/projects/{self.project.pk}/", {"title": "New", "sectors": ["education", "others"], "sector_other": "X",
+                                                         "objectives": "1. A\n2. B", "start_date": None}, format="json"))
+        ok(c.patch(f"/api/project-team/{self.member.pk}/", {"member_role": "co_leader", "name": "B", "gender": "female"}, format="json"))
+        ok(c.post("/api/project-team/", {"project": self.project.pk, "member_role": "member", "name": "C", "gender": ""}, format="json"))
+        ok(c.patch(f"/api/studies/{self.study.pk}/", {"title": "S1b"}, format="json"))
+        ok(c.post("/api/studies/", {"project": self.project.pk, "title": "S2"}, format="json"))
+        ok(c.patch(f"/api/outputs/expected-outputs/{self.output.pk}/", {"category": "patents", "description": "E", "target_count": 2}, format="json"))
+        ok(c.patch(f"/api/target-beneficiaries/{self.beneficiary.pk}/", {"group": "Fisherfolk", "description": "", "total": 9}, format="json"))
+        ok(c.patch(f"/api/milestones/{self.milestone.pk}/", {"title": "M2", "start_date": None, "target_date": "2026-06-01"}, format="json"))
+        ok(c.patch(f"/api/project-endorsers/{self.endorser.pk}/", {"name": "Y", "designation": "Dean", "signed_on": None}, format="json"))
+        ok(c.delete(f"/api/target-beneficiaries/{self.beneficiary.pk}/"))
+        ok(c.delete(f"/api/outputs/expected-outputs/{self.output.pk}/"))
+        ok(c.delete(f"/api/milestones/{self.milestone.pk}/"))
+        ok(c.delete(f"/api/project-endorsers/{self.endorser.pk}/"))
+        ok(c.delete(f"/api/project-team/{self.member.pk}/"))
+
+        self.project.refresh_from_db()
+        self.assertEqual((self.project.title, self.project.sector_other), ("New", "X"))
+        self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"project_code": "LSPU-10"}, format="json").status_code, 400)
