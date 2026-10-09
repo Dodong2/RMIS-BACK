@@ -131,6 +131,8 @@ class BudgetScopedMixin:
 
 # Document visibility by sensitivity level (client clarification Q8).
 UNIVERSITY_WIDE_ROLES = ["system_admin", "vprei", "drd", "university_admin"]
+# The Research Proposal Form saved on register: only these roles, plus the project's own leader (client 2026-10-09)
+PROPOSAL_FORM_ROLES = ["system_admin", "riuh", "university_admin"]
 
 
 def visible_documents(user, queryset):
@@ -138,7 +140,18 @@ def visible_documents(user, queryset):
     from datetime import date
 
     shared = queryset.filter(shares__user=user, shares__revoked_at__isnull=True, shares__expires_on__gte=date.today())
-    return (_visible_by_role(user, queryset) | shared).distinct()
+    return (_without_others_proposal_forms(user, _visible_by_role(user, queryset)) | shared).distinct()
+
+
+def _without_others_proposal_forms(user, queryset):
+    from django.db.models import Q
+
+    code = user.role.code if user.role else None
+    if code in PROPOSAL_FORM_ROLES:
+        return queryset
+    if code == "project_leader":
+        return queryset.exclude(Q(document_type="proposal_form") & ~Q(project__lead__in=[user.pk, *acting_for(user)]))
+    return queryset.exclude(document_type="proposal_form")
 
 
 def _visible_by_role(user, queryset):

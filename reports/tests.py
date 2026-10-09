@@ -143,7 +143,11 @@ class ProposalFormTests(RMISTestCase):
         WorkPlanMilestone.objects.create(project=self.project, title="Data gathering", start_date=date(2026, 2, 1), target_date=date(2026, 4, 30))
         ProjectEndorser.objects.create(project=self.project, name="Adriel G. Roman", designation="Dean/Associate Dean")
 
+    def save(self, user=None):
+        return self.client_for(user or self.leader).post("/api/documents/documents/proposal-form/", {"project": self.project.pk}, format="json")
+
     def test_the_form_downloads_in_every_format(self):
+        self.save()
         for fmt in ("pdf", "docx", "xlsx"):
             response = self.client_for(self.leader).get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": fmt})
             self.assertEqual(response.status_code, 200, fmt)
@@ -167,10 +171,28 @@ class ProposalFormTests(RMISTestCase):
         doc = Document.objects.get(pk=second.data["id"])
         self.assertEqual((doc.document_type, doc.sensitivity, doc.content_type), ("proposal_form", "project_team", "application/pdf"))
         self.assertTrue(self.upload_document.call_args.args[0].read().startswith(b"%PDF"))
-        self.assertEqual(self.client_for(self.make_user("riuh")).get(f"/api/documents/documents/{doc.pk}/").status_code, 200)
-        self.assertEqual(self.client_for(self.make_user("university_admin")).get(f"/api/documents/documents/{doc.pk}/").status_code, 200)
+        for role in ("system_admin", "riuh", "university_admin"):
+            self.assertEqual(self.client_for(self.make_user(role)).get(f"/api/documents/documents/{doc.pk}/").status_code, 200, role)
+
+    def test_only_the_leader_riuh_university_admin_and_system_admin_see_it(self):
+        self.save()
+        from datetime import date
+
+        from personnel.models import ProjectAssignment
+
+        staff = self.make_user("project_staff")
+        ProjectAssignment.objects.create(project=self.project, user=staff, start_date=date.today())
+        for user in (self.make_user("vprei"), self.make_user("drd"), self.make_user("crc_chair"), staff):
+            client = self.client_for(user)
+            listed = client.get("/api/documents/documents/", {"project": self.project.pk}).data
+            self.assertEqual([d for d in listed if d["document_type"] == "proposal_form"], [], user.role.code)
+            self.assertEqual(client.get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": "pdf"}).status_code, 404, user.role.code)
+        for role in ("riuh", "university_admin", "system_admin"):
+            response = self.client_for(self.make_user(role)).get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": "pdf"})
+            self.assertEqual(response.status_code, 200, role)
 
     def test_other_leaders_cannot_save_or_download_it(self):
+        self.save()
         other = self.client_for(self.make_user("project_leader"))
         self.assertEqual(other.post("/api/documents/documents/proposal-form/", {"project": self.project.pk}, format="json").status_code, 404)
         self.assertEqual(other.get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": "pdf"}).status_code, 404)

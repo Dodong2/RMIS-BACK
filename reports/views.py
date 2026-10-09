@@ -7,8 +7,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from accounts.permissions import HasRole, visible_projects
+from accounts.permissions import HasRole, visible_documents, visible_projects
 from dashboard import services as dashboard_services
+from document_management.models import Document
 
 from . import forms, services
 from .models import GeneratedReportLog
@@ -81,11 +82,18 @@ class AppendixFReportView(FormReportView):
 
 
 class ProposalFormReportView(FormReportView):
-    """LSPU-RDO-SF-018, laid out like the registration wizard's preview (client request 2026-10-09)."""
+    """LSPU-RDO-SF-018, laid out like the registration wizard's preview (client request 2026-10-09). Downloadable
+    by whoever may open the project's saved Research Proposal Form document (accounts.permissions.visible_documents)."""
 
     report_type = "proposal_form"
     build_form = staticmethod(forms.proposal_form)
     missing = "Project not found."
+
+    def get(self, request, project_id):
+        saved = Document.objects.filter(project_id=project_id, document_type="proposal_form")
+        if not visible_documents(request.user, saved).exists():
+            return Response({"detail": "Not found."}, status=404)
+        return super().get(request, project_id)
 
 
 class AccomplishmentReportView(APIView):
