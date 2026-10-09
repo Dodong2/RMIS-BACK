@@ -132,7 +132,7 @@ class BudgetScopedMixin:
 # Document visibility by sensitivity level (client clarification Q8).
 UNIVERSITY_WIDE_ROLES = ["system_admin", "vprei", "drd", "university_admin"]
 # The Research Proposal Form saved on register: only these roles, plus the project's own leader (client 2026-10-09)
-PROPOSAL_FORM_ROLES = ["system_admin", "riuh", "university_admin"]
+PROPOSAL_FORM_ROLES = ["system_admin", "riuh", "crc_chair"]
 
 
 def visible_documents(user, queryset):

@@ -44,8 +44,8 @@ class StagedDocumentUploadView(APIView):
 
 class ProposalFormSaveView(APIView):
     """POST documents/proposal-form/ {project}: Register Project saves the project's Research Proposal Form (SF-018)
-    as a PDF document (client request 2026-10-09), as a new version each time. Project Team sensitivity, so the
-    project's leader and team, RIUH and the university-wide roles see it."""
+    as a PDF document (client request 2026-10-09), as a new version each time. Only the System Admin, RIUH, the CRC
+    Chairperson and the project's own leader see it (accounts.permissions.PROPOSAL_FORM_ROLES)."""
 
     permission_classes = [HasRole("projects.register")]
 

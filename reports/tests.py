@@ -171,10 +171,10 @@ class ProposalFormTests(RMISTestCase):
         doc = Document.objects.get(pk=second.data["id"])
         self.assertEqual((doc.document_type, doc.sensitivity, doc.content_type), ("proposal_form", "project_team", "application/pdf"))
         self.assertTrue(self.upload_document.call_args.args[0].read().startswith(b"%PDF"))
-        for role in ("system_admin", "riuh", "university_admin"):
+        for role in ("system_admin", "riuh", "crc_chair"):
             self.assertEqual(self.client_for(self.make_user(role)).get(f"/api/documents/documents/{doc.pk}/").status_code, 200, role)
 
-    def test_only_the_leader_riuh_university_admin_and_system_admin_see_it(self):
+    def test_only_the_leader_riuh_crc_chair_and_system_admin_see_it(self):
         self.save()
         from datetime import date
 
@@ -182,12 +182,12 @@ class ProposalFormTests(RMISTestCase):
 
         staff = self.make_user("project_staff")
         ProjectAssignment.objects.create(project=self.project, user=staff, start_date=date.today())
-        for user in (self.make_user("vprei"), self.make_user("drd"), self.make_user("crc_chair"), staff):
+        for user in (self.make_user("vprei"), self.make_user("drd"), self.make_user("university_admin"), staff):
             client = self.client_for(user)
             listed = client.get("/api/documents/documents/", {"project": self.project.pk}).data
             self.assertEqual([d for d in listed if d["document_type"] == "proposal_form"], [], user.role.code)
             self.assertEqual(client.get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": "pdf"}).status_code, 404, user.role.code)
-        for role in ("riuh", "university_admin", "system_admin"):
+        for role in ("riuh", "crc_chair", "system_admin"):
             response = self.client_for(self.make_user(role)).get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": "pdf"})
             self.assertEqual(response.status_code, 200, role)
 
