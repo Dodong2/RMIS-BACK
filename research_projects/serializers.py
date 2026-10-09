@@ -1,6 +1,7 @@
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 from accounts.models import Role, User
-from accounts.permissions import LEADER_ROLES, ensure_in_scope, scoped_projects
+from accounts.permissions import LEADER_ROLES, acting_for, ensure_in_scope, scoped_projects
 from .models import (
     CollegeUnit, CooperatingAgency, EndorserChoice, Program, ReiThrust, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
@@ -111,7 +112,26 @@ def ensure_leader_keeps(serializer, attrs, fields):
         return
     changed = [f for f in fields if f in attrs and attrs[f] != getattr(serializer.instance, f)]
     if changed:
-        raise serializers.ValidationError({f: "Only the CRC Chair, DRD or RIUH can change this." for f in changed})
+        raise serializers.ValidationError({f: "Only the System Admin can change this." for f in changed})
+
+
+def can_edit_registration(user, project):
+    """Client request 2026-10-09: once registered, a project's SF-018 data is edited only by the System Admin and the
+    project's own Project Leader (or their acting replacement)."""
+    code = user.role.code if user.role else None
+    return code == "system_admin" or (code == "project_leader" and project.lead_id in [user.pk, *acting_for(user)])
+
+
+def ensure_registration_editor(serializer, project, attrs, fields=None):
+    """Blocks everyone else from changing a registered project's form data (`fields`, default: everything but the
+    status, which the Closure tab changes). Creating rows is left alone: the wizard and the Excel import add them
+    right after registering, as CRC Chair, DRD or RIUH too."""
+    request = serializer.context.get("request")
+    if request is None or serializer.instance is None or can_edit_registration(request.user, project):
+        return
+    guarded = [f for f in attrs if (f in fields if fields else f != "status")]
+    if any(attrs[f] != getattr(serializer.instance, f) for f in guarded):
+        raise PermissionDenied("Only the System Admin or the project's Project Leader can edit a registered project.")
 
 
 def ensure_project_leader_registers_self(serializer, lead):
@@ -218,6 +238,8 @@ class ProjectSerializer(serializers.ModelSerializer):
         validate_lead_role(lead, "project_leader")
         ensure_project_leader_registers_self(self, lead)
         ensure_leader_keeps(self, attrs, ["project_code", "lead", "program"])
+        if self.instance is not None:
+            ensure_registration_editor(self, self.instance, attrs)
         program = attrs.get("program", getattr(self.instance, "program", None))
         ensure_registrant_in_scope(self, self.instance, leads=[lead, program.lead if program else None])
         validate_lead_concurrency(
@@ -233,7 +255,9 @@ class ProjectTeamMemberSerializer(serializers.ModelSerializer):
         fields = ["id", "project", "member_role", "name", "gender", "user"]
 
     def validate(self, attrs):
-        ensure_registrant_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        ensure_registrant_in_scope(self, project)
+        ensure_registration_editor(self, project, attrs)
         return attrs
 
 
@@ -243,7 +267,9 @@ class ProjectEndorserSerializer(serializers.ModelSerializer):
         fields = ["id", "project", "role_code", "user", "name", "designation", "signed_on"]
 
     def validate(self, attrs):
-        ensure_registrant_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        ensure_registrant_in_scope(self, project)
+        ensure_registration_editor(self, project, attrs)
         role_code = attrs.get("role_code", getattr(self.instance, "role_code", ""))
         user = attrs.get("user", getattr(self.instance, "user", None))
         if role_code and not Role.objects.filter(code=role_code).exists():
@@ -259,7 +285,9 @@ class TargetBeneficiarySerializer(serializers.ModelSerializer):
         fields = ["id", "project", "group", "description", "total"]
 
     def validate(self, attrs):
-        ensure_registrant_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        ensure_registrant_in_scope(self, project)
+        ensure_registration_editor(self, project, attrs)
         return attrs
 
 
@@ -278,6 +306,7 @@ class StudySerializer(serializers.ModelSerializer):
         ensure_leader_keeps(self, attrs, ["project", "lead"])
         program_lead = project.program.lead if project.program else None
         ensure_registrant_in_scope(self, project, leads=[lead, project.lead, program_lead])
+        ensure_registration_editor(self, project, attrs, fields=["title"])
         return attrs
 
 

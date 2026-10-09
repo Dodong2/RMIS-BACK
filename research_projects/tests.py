@@ -561,3 +561,18 @@ class EditRegisteredProjectTests(RMISTestCase):
         self.project.refresh_from_db()
         self.assertEqual((self.project.title, self.project.sector_other), ("New", "X"))
         self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"project_code": "LSPU-10"}, format="json").status_code, 400)
+
+    def test_only_the_system_admin_and_the_projects_leader_edit_it(self):
+        for code in ("crc_chair", "drd", "riuh"):
+            c = self.client_for(self.make_user(code))
+            self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"title": "Changed"}, format="json").status_code, 403, code)
+            self.assertEqual(c.patch(f"/api/project-team/{self.member.pk}/", {"name": "Z"}, format="json").status_code, 403, code)
+            self.assertEqual(c.patch(f"/api/project-endorsers/{self.endorser.pk}/", {"name": "Z"}, format="json").status_code, 403, code)
+            self.assertEqual(c.patch(f"/api/studies/{self.study.pk}/", {"title": "Z"}, format="json").status_code, 403, code)
+            self.assertEqual(c.delete(f"/api/target-beneficiaries/{self.beneficiary.pk}/").status_code, 403, code)
+        crc = self.client_for(self.make_user("crc_chair"))
+        closed = crc.patch(f"/api/projects/{self.project.pk}/", {"status": "completed", "status_remarks": "Done"}, format="json")
+        self.assertEqual(closed.status_code, 200, closed.data)
+        admin = self.client_for(self.make_user("system_admin"))
+        recoded = admin.patch(f"/api/projects/{self.project.pk}/", {"title": "Fixed", "project_code": "LSPU-10"}, format="json")
+        self.assertEqual(recoded.status_code, 200, recoded.data)

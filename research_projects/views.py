@@ -15,7 +15,7 @@ from .models import (
 from .serializers import (
     CollegeUnitSerializer, CooperatingAgencySerializer, EndorserChoiceSerializer, ProgramSerializer, ReiThrustSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
     ProjectTeamMemberSerializer, StudySerializer,
-    TargetBeneficiarySerializer, WorkPlanMilestoneSerializer, ensure_registrant_in_scope,
+    TargetBeneficiarySerializer, WorkPlanMilestoneSerializer, can_edit_registration, ensure_registrant_in_scope,
 )
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -211,6 +211,8 @@ class ProjectChildDetailView(ProjectVisibleMixin, generics.RetrieveUpdateDestroy
 
     def perform_destroy(self, instance):
         ensure_registrant_in_scope(self.get_serializer(), instance.project)
+        if not can_edit_registration(self.request.user, instance.project):
+            self.permission_denied(self.request, message="Only the System Admin or the project's Project Leader can edit a registered project.")
         instance.delete()
 
     def get_permissions(self):
