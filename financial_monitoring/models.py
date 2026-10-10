@@ -38,6 +38,8 @@ class BudgetRealignment(models.Model):
     Client 2026-10-08: every tier waits for the Finance/Budget Officer; the BOR
     tier also records the Board of Regents resolution number. "implemented" is
     only on older rows from when <=33% applied immediately.
+    Client 2026-10-10: a request can hold several realignments submitted at once
+    (same `batch`); each one is still reviewed on its own.
     """
 
     TIER_CHOICES = (
@@ -75,6 +77,8 @@ class BudgetRealignment(models.Model):
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
     bor_resolution_number = models.CharField(max_length=100, blank=True)
+    # Groups the realignments submitted together in one request (null on rows from before 2026-10-10).
+    batch = models.UUIDField(null=True, blank=True, editable=False, db_index=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 

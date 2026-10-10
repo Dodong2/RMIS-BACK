@@ -21,6 +21,7 @@ PROCUREMENT_STATUS_ROLES = ["system_admin", "procurement_officer_lib"]
 MINOR_TIER_MAX_PCT = 33
 MAJOR_TIER_MAX_PCT = 100
 REALIGNMENT_MIN_LEAD_DAYS = 60  # "at least two (2) months before the end of the project"
+PENDING_STATUSES = ("pending_approval", "pending_bor")
 
 
 def line_item_balance(line_item, exclude_realignment_pk=None):
@@ -86,9 +87,9 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
         fields = [
             "id", "from_line_item", "to_line_item", "new_item_category", "new_item_description",
             "amount", "tier", "status", "justification", "requested_by",
-            "reviewed_by", "reviewed_by_name", "reviewed_at", "bor_resolution_number", "created_at",
+            "reviewed_by", "reviewed_by_name", "reviewed_at", "bor_resolution_number", "batch", "created_at",
         ]
-        read_only_fields = ["requested_by", "reviewed_by", "reviewed_at", "bor_resolution_number"]
+        read_only_fields = ["requested_by", "reviewed_by", "reviewed_at", "bor_resolution_number", "batch"]
 
     def validate(self, attrs):
         from_item = attrs.get("from_line_item", getattr(self.instance, "from_line_item", None))
@@ -121,14 +122,13 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
                     "before the project's target end date."
                 )
 
-        already_requested = BudgetRealignment.objects.filter(
-            from_line_item__budget__project=project, created_at__year=timezone.localdate().year,
-        ).exclude(status="rejected")
-        if self.instance:
-            already_requested = already_requested.exclude(pk=self.instance.pk)
-        if already_requested.exists():
+        # Client 2026-10-10: no yearly limit, but only one open request at a time.
+        if BudgetRealignment.objects.filter(
+            from_line_item__budget__project=project, status__in=PENDING_STATUSES,
+        ).exists():
             raise serializers.ValidationError(
-                "This project has already requested a budget realignment this calendar year."
+                "This project still has a pending realignment request. "
+                "Wait for the Budget Officer's decision before submitting another."
             )
 
         available = line_item_balance(from_item)["available"]

@@ -1,7 +1,12 @@
+import uuid
+from collections import defaultdict
 from datetime import timedelta
+from decimal import Decimal
 
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -72,8 +77,34 @@ class RealignmentListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
             return [HasRole("financial.request_realignment")]
         return [permissions.IsAuthenticated()]
 
-    def perform_create(self, serializer):
-        serializer.save(requested_by=self.request.user)
+    def create(self, request, *args, **kwargs):
+        """
+        Accepts one realignment or a list of them (client 2026-10-10: bulk request,
+        one submission). A list is saved all-or-nothing under one batch id.
+        """
+        many = isinstance(request.data, list)
+        serializer = self.get_serializer(data=request.data, many=many)
+        serializer.is_valid(raise_exception=True)
+        rows = serializer.validated_data if many else [serializer.validated_data]
+        if not rows:
+            raise ValidationError("Add at least one realignment.")
+        if len({row["from_line_item"].budget_id for row in rows}) > 1:
+            raise ValidationError("All realignments in one request must belong to the same budget.")
+
+        # Each row was checked against its source's balance alone; rows sharing a source must fit together.
+        per_source = defaultdict(Decimal)
+        for row in rows:
+            per_source[row["from_line_item"]] += row["amount"]
+        for item, total in per_source.items():
+            available = line_item_balance(item)["available"]
+            if total > available:
+                raise ValidationError(
+                    f"Realignments from '{item.description}' total {total}, more than its available balance ({available})."
+                )
+
+        with transaction.atomic():
+            serializer.save(requested_by=request.user, batch=uuid.uuid4())
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class RealignmentDetailView(BudgetScopedMixin, generics.RetrieveAPIView):
