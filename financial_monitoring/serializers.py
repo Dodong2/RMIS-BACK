@@ -113,6 +113,13 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("from_line_item and to_line_item must belong to the same budget.")
         if to_item and to_item.pk == from_item.pk:
             raise serializers.ValidationError("from_line_item and to_line_item must be different.")
+        # Client 2026-10-10: internal (within class) realignment only, e.g. MOOE -> MOOE.
+        target_category = to_item.category if to_item else new_category
+        if target_category and target_category != from_item.category:
+            raise serializers.ValidationError(
+                f"Realignment must stay within the same class: the source item is "
+                f"{from_item.get_category_display()}, so the destination must be too."
+            )
 
         if project.target_end_date:
             deadline = project.target_end_date - timedelta(days=REALIGNMENT_MIN_LEAD_DAYS)

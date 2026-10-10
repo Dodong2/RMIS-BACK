@@ -17,6 +17,7 @@ class BulkRealignmentTests(RMISTestCase):
         self.travel = LineItem.objects.create(budget=budget, category="mooe", description="Travel", amount=10000)
         self.seminar = LineItem.objects.create(budget=budget, category="mooe", description="Seminar", amount=10000)
         self.supplies = LineItem.objects.create(budget=budget, category="mooe", description="Supplies", amount=10000)
+        self.equipment = LineItem.objects.create(budget=budget, category="co", description="Equipment", amount=10000)
         self.client = self.client_for(self.leader)
 
     def row(self, source, target, amount):
@@ -61,3 +62,13 @@ class BulkRealignmentTests(RMISTestCase):
 
     def test_empty_list_is_rejected(self):
         self.assertEqual(self.client.post(URL, [], format="json").status_code, 400)
+
+    def test_realignment_must_stay_within_the_same_class(self):
+        response = self.client.post(URL, [self.row(self.travel, self.equipment, 1000)], format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("same class", str(response.data))
+
+        new_item = {"from_line_item": self.travel.id, "new_item_category": "co", "new_item_description": "Laptop", "amount": "1000", "justification": "Need it"}
+        self.assertEqual(self.client.post(URL, [new_item], format="json").status_code, 400)
+        new_item["new_item_category"] = "mooe"
+        self.assertEqual(self.client.post(URL, [new_item], format="json").status_code, 201)
