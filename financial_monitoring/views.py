@@ -137,7 +137,6 @@ class RealignmentReviewView(APIView):
         realignment = review_realignment(
             realignment, request.user,
             serializer.validated_data["decision"],
-            serializer.validated_data.get("bor_resolution_number", ""),
         )
         return Response(BudgetRealignmentSerializer(realignment).data)
 

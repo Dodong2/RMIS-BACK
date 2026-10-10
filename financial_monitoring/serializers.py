@@ -74,7 +74,6 @@ class DisbursementSerializer(serializers.ModelSerializer):
 
 class RealignmentReviewSerializer(serializers.Serializer):
     decision = serializers.ChoiceField(choices=["approved", "rejected"])
-    bor_resolution_number = serializers.CharField(required=False, allow_blank=True)
 
 
 class BudgetRealignmentSerializer(serializers.ModelSerializer):
@@ -157,16 +156,14 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
         return BudgetRealignment.objects.create(**validated_data)
 
 
-def review_realignment(realignment, reviewer, decision, bor_resolution_number=""):
+def review_realignment(realignment, reviewer, decision):
     """Approve/reject a pending realignment. Caller must have checked it's still pending."""
     with transaction.atomic():
         if decision == "rejected":
             realignment.status = "rejected"
         elif realignment.tier != "bor":
             realignment.status = "approved"
-        else:  # bor
-            if not bor_resolution_number:
-                raise serializers.ValidationError({"bor_resolution_number": "Required to record Board of Regents approval."})
+        else:  # bor; client 2026-10-10: no BOR resolution no. needed, the budget is already approved
             if not realignment.to_line_item_id:
                 realignment.to_line_item = LineItem.objects.create(
                     budget=realignment.from_line_item.budget,
@@ -174,11 +171,10 @@ def review_realignment(realignment, reviewer, decision, bor_resolution_number=""
                     description=realignment.new_item_description,
                     amount=realignment.amount,
                 )
-            realignment.bor_resolution_number = bor_resolution_number
             realignment.status = "bor_approved"
         realignment.reviewed_by = reviewer
         realignment.reviewed_at = timezone.now()
-        realignment.save(update_fields=["status", "to_line_item", "bor_resolution_number", "reviewed_by", "reviewed_at"])
+        realignment.save(update_fields=["status", "to_line_item", "reviewed_by", "reviewed_at"])
     return realignment
 
 
