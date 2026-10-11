@@ -204,23 +204,37 @@ class ManualRegistrationTests(RMISTestCase):
         self.assertFalse(LineItemBudget.objects.exists())
 
     def test_line_item_total_must_equal_qty_times_unit_cost(self):
-        admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
+        leader = self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
-        budget = self.client_for(admin).post("/api/budget/budgets/", {"project": project.id}, format="json").data
+        budget = self.client_for(leader).post("/api/budget/budgets/", {"project": project.id}, format="json").data
         row = {"budget": budget["id"], "category": "mooe", "description": "Snacks", "unit": "pax", "quantity": "30", "unit_cost": "85.50"}
 
-        wrong = self.client_for(admin).post("/api/budget/line-items/", {**row, "amount": "2500"}, format="json")
-        right = self.client_for(admin).post("/api/budget/line-items/", {**row, "amount": "2565"}, format="json")
+        wrong = self.client_for(leader).post("/api/budget/line-items/", {**row, "amount": "2500"}, format="json")
+        right = self.client_for(leader).post("/api/budget/line-items/", {**row, "amount": "2565"}, format="json")
 
         self.assertEqual(wrong.status_code, 400)
         self.assertEqual(right.status_code, 201, right.data)
 
-    def test_line_item_keeps_its_justification(self):
-        admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
+    def test_budget_reviewers_cannot_encode_line_items(self):
+        """Client 2026-10-11: finance_budget and system_admin only certify/approve; the project leader encodes the LIB."""
+        leader = self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
-        budget = self.client_for(admin).post("/api/budget/budgets/", {"project": project.id}, format="json").data
+        budget = self.client_for(leader).post("/api/budget/budgets/", {"project": project.id}, format="json").data
+        row = {"budget": budget["id"], "category": "mooe", "description": "Travel", "unit": "lot", "quantity": "1", "unit_cost": "100"}
+        item = self.client_for(leader).post("/api/budget/line-items/", row, format="json").data
 
-        response = self.client_for(admin).post("/api/budget/line-items/", {
+        for role in ("finance_budget", "system_admin"):
+            reviewer = self.client_for(self.make_user(role))
+            self.assertEqual(reviewer.post("/api/budget/budgets/", {"project": project.id}, format="json").status_code, 403)
+            self.assertEqual(reviewer.post("/api/budget/line-items/", row, format="json").status_code, 403)
+            self.assertEqual(reviewer.patch(f"/api/budget/line-items/{item['id']}/", {"description": "X"}, format="json").status_code, 403)
+
+    def test_line_item_keeps_its_justification(self):
+        leader = self.make_user("project_leader")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
+        budget = self.client_for(leader).post("/api/budget/budgets/", {"project": project.id}, format="json").data
+
+        response = self.client_for(leader).post("/api/budget/line-items/", {
             "budget": budget["id"], "category": "ps", "description": "Honorarium", "unit": "month", "quantity": "18",
             "unit_cost": "8000", "amount": "144000", "justification": "PI honorarium.",
         }, format="json")
@@ -229,11 +243,11 @@ class ManualRegistrationTests(RMISTestCase):
         self.assertEqual(response.data["justification"], "PI honorarium.")
 
     def test_line_item_quarters_must_add_up_to_the_amount(self):
-        admin, leader = self.make_user("system_admin"), self.make_user("project_leader")
+        leader = self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
-        budget = self.client_for(admin).post("/api/budget/budgets/", {"project": project.id}, format="json").data
+        budget = self.client_for(leader).post("/api/budget/budgets/", {"project": project.id}, format="json").data
 
-        response = self.client_for(admin).post("/api/budget/line-items/", {
+        response = self.client_for(leader).post("/api/budget/line-items/", {
             "budget": budget["id"], "category": "mooe", "description": "Travel", "amount": "100",
             "q1_amount": "30", "q2_amount": "30",
         }, format="json")

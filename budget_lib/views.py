@@ -9,8 +9,9 @@ from .serializers import LineItemBudgetSerializer, LineItemSerializer, certify_b
 
 # Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
 # ensure_in_scope. Certification stays with the Budget Officer (budget.certify).
+# Client 2026-10-11: finance_budget and system_admin only certify/approve, they don't add or edit line items.
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-MANAGE_ROLES = ["system_admin", "finance_budget", "procurement_officer_lib", "program_leader", "project_leader"]
+MANAGE_ROLES = ["procurement_officer_lib", "program_leader", "project_leader"]
 
 
 class BudgetListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
