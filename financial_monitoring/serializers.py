@@ -10,7 +10,8 @@ from accounts.permissions import ensure_in_scope
 from .models import APPLIED_STATUSES, BudgetRealignment, Disbursement, ProcurementRequest
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-REALIGNMENT_REQUEST_ROLES = ["system_admin", "project_leader"]
+# Client 2026-10-11: system_admin only approves, so only the project leader files realignments.
+REALIGNMENT_REQUEST_ROLES = ["project_leader"]
 # Client 2026-10-08: the Finance/Budget Officer approves realignments; system_admin can too (for testing).
 REALIGNMENT_MAJOR_REVIEW_ROLES = ["system_admin", "finance_budget"]
 REALIGNMENT_BOR_REVIEW_ROLES = ["system_admin", "finance_budget"]

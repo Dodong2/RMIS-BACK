@@ -60,6 +60,12 @@ class BulkRealignmentTests(RMISTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(BudgetRealignment.objects.exists())
 
+    def test_reviewers_cannot_file_a_request(self):
+        """Client 2026-10-11: finance_budget and system_admin only approve."""
+        for role in ("finance_budget", "system_admin"):
+            response = self.client_for(self.make_user(role)).post(URL, [self.row(self.travel, self.seminar, 1000)], format="json")
+            self.assertEqual(response.status_code, 403)
+
     def test_empty_list_is_rejected(self):
         self.assertEqual(self.client.post(URL, [], format="json").status_code, 400)
 
