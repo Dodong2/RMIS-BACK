@@ -220,8 +220,10 @@ class ManualRegistrationTests(RMISTestCase):
         leader = self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
         budget = self.client_for(leader).post("/api/budget/budgets/", {"project": project.id}, format="json").data
-        row = {"budget": budget["id"], "category": "mooe", "description": "Travel", "unit": "lot", "quantity": "1", "unit_cost": "100"}
-        item = self.client_for(leader).post("/api/budget/line-items/", row, format="json").data
+        row = {"budget": budget["id"], "category": "mooe", "description": "Travel", "unit": "lot", "quantity": "1", "unit_cost": "100", "amount": "100"}
+        created = self.client_for(leader).post("/api/budget/line-items/", row, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        item = created.data
 
         for role in ("finance_budget", "system_admin"):
             reviewer = self.client_for(self.make_user(role))
