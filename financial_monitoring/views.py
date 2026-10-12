@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from accounts.permissions import BudgetScopedMixin, HasRole, role_can, scoped_projects
 from budget_lib.models import LineItemBudget
+from config.concurrency import idempotent, lock
 from .models import PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, BudgetRealignment, Disbursement, ProcurementRequest
 from .serializers import (
     BudgetRealignmentSerializer,
@@ -20,6 +21,7 @@ from .serializers import (
     ProcurementStatusSerializer,
     RealignmentReviewSerializer,
     line_item_balance,
+    uncommitted_balance,
     post_procurement_disbursement,
     review_realignment,
 )
@@ -51,6 +53,10 @@ class DisbursementListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
             return [HasRole("financial.record_disbursement")]
         return [permissions.IsAuthenticated()]
 
+    @idempotent
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         serializer.save(recorded_by=self.request.user)
 
@@ -78,6 +84,7 @@ class RealignmentListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
             return [HasRole("financial.request_realignment")]
         return [permissions.IsAuthenticated()]
 
+    @idempotent
     def create(self, request, *args, **kwargs):
         """
         Accepts one realignment or a list of them (client 2026-10-10: bulk request,
@@ -97,14 +104,13 @@ class RealignmentListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
         for row in rows:
             per_source[row["from_line_item"]] += row["amount"]
         for item, total in per_source.items():
-            available = line_item_balance(item)["available"]
+            available = uncommitted_balance(item)
             if total > available:
                 raise ValidationError(
                     f"Realignments from '{item.description}' total {total}, more than its available balance ({available})."
                 )
 
-        with transaction.atomic():
-            serializer.save(requested_by=request.user, batch=uuid.uuid4())
+        serializer.save(requested_by=request.user, batch=uuid.uuid4())
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -124,8 +130,10 @@ class RealignmentReviewView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, pk):
-        realignment = generics.get_object_or_404(BudgetRealignment, pk=pk)
+        # Locked so a double-click or a second reviewer waits, then sees it is no longer pending.
+        realignment = lock(BudgetRealignment.objects.all(), pk=pk)
         if realignment.status not in ("pending_approval", "pending_bor"):
             return Response({"detail": "This realignment is not awaiting review."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -166,6 +174,10 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
             return [HasRole("financial.request_procurement")]
         return [permissions.IsAuthenticated()]
 
+    @idempotent
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         serializer.save(requested_by=self.request.user)
 
@@ -175,8 +187,9 @@ class ProcurementReceiveView(APIView):
 
     permission_classes = [HasRole("financial.update_procurement")]
 
+    @transaction.atomic
     def post(self, request, pk):
-        procurement = generics.get_object_or_404(ProcurementRequest, pk=pk)
+        procurement = lock(ProcurementRequest.objects.all(), pk=pk)
         if procurement.status != "requested":
             return Response({"detail": "Only a submitted request can be marked received."}, status=status.HTTP_400_BAD_REQUEST)
         procurement.status = "under_review"
@@ -191,18 +204,19 @@ class ProcurementStatusView(APIView):
 
     permission_classes = [HasRole("financial.update_procurement")]
 
+    @transaction.atomic
     def post(self, request, pk):
-        procurement = generics.get_object_or_404(ProcurementRequest, pk=pk)
+        # Locked so two "Completed" clicks can't both pass the status check (one disbursement, then a clean 400).
+        procurement = lock(ProcurementRequest.objects.all(), pk=pk)
         serializer = ProcurementStatusSerializer(data=request.data, context={"procurement": procurement})
         serializer.is_valid(raise_exception=True)
         procurement.status = serializer.validated_data["status"]
         procurement.remarks = serializer.validated_data.get("remarks", procurement.remarks)
         procurement.updated_by = request.user
-        with transaction.atomic():
-            if procurement.status == "completed":
-                procurement.completed_at = timezone.now()
-                post_procurement_disbursement(procurement)
-            procurement.save()
+        if procurement.status == "completed":
+            procurement.completed_at = timezone.now()
+            post_procurement_disbursement(procurement)
+        procurement.save()
         return Response(ProcurementRequestSerializer(procurement).data)
 
 
@@ -214,8 +228,9 @@ class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):
     serializer_class = ProcurementRequestSerializer
     permission_classes = [HasRole("financial.request_procurement")]
 
+    @transaction.atomic
     def post(self, request, pk):
-        procurement = self.get_object()
+        procurement = lock(ProcurementRequest.objects.all(), pk=self.get_object().pk)
         if procurement.status != "returned_for_revision":
             return Response({"detail": "Only a request returned for revision can be resubmitted."}, status=status.HTTP_400_BAD_REQUEST)
         data = {k: v for k, v in request.data.items() if k in ("description", "amount")}

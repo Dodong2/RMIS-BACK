@@ -146,6 +146,11 @@ def ensure_project_leader_registers_self(serializer, lead):
 
 
 def validate_lead_concurrency(user, funding_type, queryset, exclude_pk, default_cap):
+    # Lock the leader's row: two registrations for the same leader take turns, so both can't count the old load.
+    # Callers run inside a transaction (AtomicMutationMixin / @idempotent / the importer's atomic block).
+    if user is None:
+        return
+    type(user).objects.select_for_update().get(pk=user.pk)
     qs = queryset.filter(lead=user, status="active")
     if exclude_pk:
         qs = qs.exclude(pk=exclude_pk)

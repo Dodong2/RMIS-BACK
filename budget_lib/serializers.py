@@ -29,6 +29,8 @@ class LineItemSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         budget = attrs.get("budget", getattr(self.instance, "budget", None))
         ensure_in_scope(self, budget.project)
+        # Locked (and re-read) so an item can't slip into a LIB that is being certified at the same moment.
+        budget = LineItemBudget.objects.select_for_update().get(pk=budget.pk)
         if budget.status == "certified":
             raise serializers.ValidationError("This budget is certified and can no longer be edited.")
         quarters = [attrs.get(f, getattr(self.instance, f, None)) for f in QUARTER_FIELDS]
@@ -72,6 +74,7 @@ class LineItemBudgetSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         project = validated_data["project"]
+        type(project).objects.select_for_update().get(pk=project.pk)  # one version number per project at a time
         last_version = LineItemBudget.objects.filter(project=project).order_by("-version_number").first()
         validated_data["version_number"] = (last_version.version_number + 1) if last_version else 1
         LineItemBudget.objects.filter(project=project, is_current=True).update(is_current=False)

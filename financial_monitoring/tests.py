@@ -175,3 +175,16 @@ class ProcurementTrackingTests(RMISTestCase):
             "line_item": self.item.id, "description": "Too much", "amount": "1", "fiscal_year": 2026, "quarter": 4,
         })
         self.assertEqual(response.status_code, 400)
+
+    def test_open_request_reserves_its_amount_from_manual_disbursements_and_realignments(self):
+        """2026-10-12 concurrency audit: Actual + open requests may never exceed Adjusted, whatever the order."""
+        finance = self.client_for(self.make_user("finance_budget"))
+        response = finance.post("/api/financial/disbursements/", {
+            "line_item": self.item.id, "amount": "6001", "reference_number": "OR-9", "disbursed_on": "2026-10-12",
+        })
+        self.assertEqual(response.status_code, 400)  # 4000 is reserved by the open request
+        other = LineItem.objects.create(budget=self.item.budget, category="mooe", description="Seminar", amount=1000)
+        response = self.leader_client.post("/api/financial/realignments/", [{
+            "from_line_item": self.item.id, "to_line_item": other.id, "amount": "6001", "justification": "x",
+        }], format="json")
+        self.assertEqual(response.status_code, 400)

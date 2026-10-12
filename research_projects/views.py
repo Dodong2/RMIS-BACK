@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope, role_can
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
+from config.concurrency import AtomicMutationMixin, idempotent, lock
 from . import importer
 from .models import (
     CollegeUnit, CooperatingAgency, EndorserChoice, Program, ReiThrust, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
@@ -57,7 +58,7 @@ ADMIN_CHOICES = {
 }
 
 
-class ProgramListCreateView(generics.ListCreateAPIView):
+class ProgramListCreateView(AtomicMutationMixin, generics.ListCreateAPIView):
     queryset = Program.objects.all().order_by("-created_at")
     serializer_class = ProgramSerializer
 
@@ -67,7 +68,7 @@ class ProgramListCreateView(generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class ProgramDetailView(generics.RetrieveUpdateAPIView):
+class ProgramDetailView(AtomicMutationMixin, generics.RetrieveUpdateAPIView):
     queryset = Program.objects.all()
     serializer_class = ProgramSerializer
 
@@ -82,13 +83,17 @@ class ProjectListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
     queryset = Project.objects.all().order_by("-created_at")
     serializer_class = ProjectSerializer
 
+    @idempotent  # registration: a retried submit replays the first result instead of a duplicate-code error
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
     def get_permissions(self):
         if self.request.method == "POST":
             return [HasRole("projects.register")]
         return [permissions.IsAuthenticated()]
 
 
-class ProjectDetailView(ProjectVisibleMixin, generics.RetrieveUpdateAPIView):
+class ProjectDetailView(AtomicMutationMixin, ProjectVisibleMixin, generics.RetrieveUpdateAPIView):
     project_lookup = ""
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
@@ -129,8 +134,9 @@ class ProjectLibView(APIView):
 
     permission_classes = [HasRole("projects.register")]
 
+    @idempotent
     def post(self, request, pk):
-        project = generics.get_object_or_404(Project, pk=pk)
+        project = lock(Project.objects.all(), pk=pk)  # two submits of this step can't both see "no LIB yet"
         rows = request.data.get("line_items")
         if not isinstance(rows, list) or not rows:
             return Response({"line_items": "Send at least one line item."}, status=status.HTTP_400_BAD_REQUEST)
@@ -253,7 +259,7 @@ class ProjectStatusHistoryView(ProjectVisibleMixin, generics.ListAPIView):
         return ProjectStatusHistory.objects.filter(project_id=self.kwargs["pk"]).select_related("changed_by").order_by("-changed_at", "-id")
 
 
-class StudyListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
+class StudyListCreateView(AtomicMutationMixin, ProjectVisibleMixin, generics.ListCreateAPIView):
     serializer_class = StudySerializer
 
     def get_queryset(self):
@@ -269,7 +275,7 @@ class StudyListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class StudyDetailView(ProjectVisibleMixin, generics.RetrieveUpdateAPIView):
+class StudyDetailView(AtomicMutationMixin, ProjectVisibleMixin, generics.RetrieveUpdateAPIView):
     queryset = Study.objects.all()
     serializer_class = StudySerializer
 

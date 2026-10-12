@@ -1,9 +1,11 @@
+from django.db import transaction
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import BudgetScopedMixin, HasRole
+from config.concurrency import lock
 from .models import LineItem, LineItemBudget
 from .serializers import LineItemBudgetSerializer, LineItemSerializer, certify_budget
 
@@ -16,6 +18,10 @@ MANAGE_ROLES = ["procurement_officer_lib", "program_leader", "project_leader"]
 
 class BudgetListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
     serializer_class = LineItemBudgetSerializer
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = LineItemBudget.objects.select_related("project").order_by("-created_at")
@@ -39,6 +45,10 @@ class BudgetDetailView(BudgetScopedMixin, generics.RetrieveAPIView):
 class LineItemListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
     project_lookup = "budget__project"
     serializer_class = LineItemSerializer
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = LineItem.objects.all().select_related("budget__project").order_by("category", "id")
@@ -69,8 +79,16 @@ class LineItemDetailView(BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIVie
             return [HasRole("budget.manage")]
         return [permissions.IsAuthenticated()]
 
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
     def perform_destroy(self, instance):
-        if instance.budget.status == "certified":
+        if lock(LineItemBudget.objects.all(), pk=instance.budget_id).status == "certified":
             raise ValidationError("This budget is certified and can no longer be edited.")
         instance.delete()
 
@@ -78,8 +96,9 @@ class LineItemDetailView(BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIVie
 class CertifyBudgetView(APIView):
     permission_classes = [HasRole("budget.certify")]
 
+    @transaction.atomic
     def post(self, request, pk):
-        budget = generics.get_object_or_404(LineItemBudget, pk=pk)
+        budget = lock(LineItemBudget.objects.all(), pk=pk)
         if budget.status == "certified":
             return Response({"detail": "This budget is already certified."}, status=status.HTTP_400_BAD_REQUEST)
         return Response(LineItemBudgetSerializer(certify_budget(budget, request.user)).data)

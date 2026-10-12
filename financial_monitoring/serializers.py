@@ -7,6 +7,8 @@ from rest_framework import serializers
 
 from budget_lib.models import LineItem
 from accounts.permissions import ensure_in_scope
+from budget_lib.models import LineItemBudget
+from config.concurrency import lock_line_items
 from .models import APPLIED_STATUSES, PROCUREMENT_CLOSED_STATUSES, BudgetRealignment, Disbursement, ProcurementRequest
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
@@ -45,6 +47,19 @@ def line_item_balance(line_item, exclude_realignment_pk=None):
     }
 
 
+def uncommitted_balance(line_item, exclude_procurement_pk=None):
+    """
+    What can still be spent or moved: Available minus open procurement requests, which already reserve their amount.
+    Every write that uses a line item's money checks this one figure (under the item's row lock), so
+    Actual + open requests never exceeds Adjusted.
+    """
+    open_requests = line_item.procurement_requests.exclude(status__in=PROCUREMENT_CLOSED_STATUSES)
+    if exclude_procurement_pk:
+        open_requests = open_requests.exclude(pk=exclude_procurement_pk)
+    reserved = open_requests.aggregate(total=Sum("amount"))["total"] or 0
+    return line_item_balance(line_item)["available"] - reserved
+
+
 class DisbursementSerializer(serializers.ModelSerializer):
     funding_source = serializers.CharField(source="line_item.funding_source", read_only=True)
 
@@ -64,8 +79,8 @@ class DisbursementSerializer(serializers.ModelSerializer):
         amount = attrs.get("amount", getattr(self.instance, "amount", None))
         if line_item.budget.status != "certified":
             raise serializers.ValidationError("Disbursements can only be recorded against a certified budget.")
-        balance = line_item_balance(line_item)
-        available = balance["available"] + (self.instance.amount if self.instance else 0)
+        lock_line_items(line_item)  # held until commit: no other spend on this item can pass the check meanwhile
+        available = uncommitted_balance(line_item) + (self.instance.amount if self.instance else 0)
         if amount > available:
             raise serializers.ValidationError(
                 f"Amount {amount} exceeds the available balance ({available}) for this line item."
@@ -125,6 +140,9 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
         project = from_item.budget.project
         if from_item.budget.status != "certified":
             raise serializers.ValidationError("Realignments can only be requested against a certified budget.")
+        # Budget first, then items in id order: every realignment write takes locks in this same order.
+        LineItemBudget.objects.select_for_update().get(pk=from_item.budget_id)
+        lock_line_items(from_item, to_item)
         if to_item and to_item.budget_id != from_item.budget_id:
             raise serializers.ValidationError("from_line_item and to_line_item must belong to the same budget.")
         if to_item and to_item.pk == from_item.pk:
@@ -154,7 +172,7 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
                 "Wait for the Budget Officer's decision before submitting another."
             )
 
-        available = line_item_balance(from_item)["available"]
+        available = uncommitted_balance(from_item)
         if amount > available:
             raise serializers.ValidationError(
                 f"Amount {amount} exceeds the available balance ({available}) on the source line item."
@@ -174,8 +192,17 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
 
 
 def review_realignment(realignment, reviewer, decision):
-    """Approve/reject a pending realignment. Caller must have checked it's still pending."""
+    """Approve/reject a pending realignment. Caller must hold its row lock and have checked it's still pending."""
     with transaction.atomic():
+        if decision != "rejected":
+            LineItemBudget.objects.select_for_update().get(pk=realignment.from_line_item.budget_id)
+            lock_line_items(realignment.from_line_item, realignment.to_line_item)
+            # Money may have been spent from the source since the request was filed.
+            available = uncommitted_balance(realignment.from_line_item)
+            if realignment.amount > available:
+                raise serializers.ValidationError(
+                    f"The source item now has only {available} available, less than this realignment ({realignment.amount})."
+                )
         if decision == "rejected":
             realignment.status = "rejected"
         elif realignment.tier != "bor":
@@ -217,11 +244,8 @@ class ProcurementRequestSerializer(serializers.ModelSerializer):
         ensure_in_scope(self, line_item.budget.project)
         if line_item.budget.status != "certified":
             raise serializers.ValidationError("Procurement can only be requested against a certified budget.")
-        open_requests = line_item.procurement_requests.exclude(status__in=PROCUREMENT_CLOSED_STATUSES)
-        if self.instance:
-            open_requests = open_requests.exclude(pk=self.instance.pk)
-        committed = open_requests.aggregate(total=Sum("amount"))["total"] or 0
-        available = line_item_balance(line_item)["available"] - committed
+        lock_line_items(line_item)  # held until commit: no other spend on this item can pass the check meanwhile
+        available = uncommitted_balance(line_item, exclude_procurement_pk=self.instance.pk if self.instance else None)
         if amount > available:
             raise serializers.ValidationError(
                 f"Amount {amount} exceeds what is still available on this line item ({available})."

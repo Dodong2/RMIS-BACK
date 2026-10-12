@@ -130,3 +130,19 @@ def idempotent(handler):
                 type(claim).objects.filter(pk=claim.pk, state="in_progress").delete()
 
     return wrapper
+
+
+class AtomicMutationMixin:
+    """Generic views: run create/update/destroy in one transaction, so row locks taken in validate() hold until save."""
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
