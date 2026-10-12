@@ -21,8 +21,9 @@ Migrations: `python manage.py makemigrations <app> && python manage.py migrate`
 - Role codes are fixed (12 total, seeded via `accounts/management/commands/seed_roles.py`): `system_admin, vprei, drd, riuh, crc_chair, finance_budget, procurement_officer_lib, program_leader, project_leader, study_leader, project_staff, university_admin`. Don't invent new codes without checking this file first.
 - New user-facing model fields should be checked against `RMIS_Complete_Module_Structure_FORApproval.docx` and the R&D Manual (both in the `RMIS chap1` folder, add with `/add-dir` when needed) before naming — the client's terminology (e.g. "LSPU Faculty Research Number" for project code) should be preserved.
 - Registration/confirmation email logic lives in `accounts/emails.py` using Brevo's REST API directly (no Django email backend). Reuse `send_brevo_email()`.
-- No Redis, no Celery — not needed yet. Don't add without discussing first.
+- No Redis, no Celery — not needed yet. Don't add without discussing first. (2026-10-12: Carl is planning Django Channels + Redis for real-time notify-then-refetch; not started.)
 - Keep serializers simple; validation logic (like leader-concurrency checks) belongs in the serializer's `validate()`, not the view.
+- Concurrency (2026-10-12, `config/concurrency.py`, design in `tasks/client-2026-10-12/concurrency-plan.md`): any write that checks state/balance/caps and then saves must run in `transaction.atomic()` and re-read the checked row with `lock()` / `lock_line_items()` (budget row before line items, line items in id order). Generic views use `AtomicMutationMixin`; money/registration creates use `@idempotent` (Idempotency-Key). Every spend checks `uncommitted_balance()`. Tests for these paths: `ConcurrencyTestCase` (real threads, autocommit) — `RMISTestCase` can't catch a missing transaction. Never run two `manage.py test --keepdb` processes at once (same test DB).
 
 ## Known simplifications (intentional, don't "fix" without asking)
 - JWT returned in response body, stored in frontend localStorage — not httpOnly cookies. Documented trade-off for cross-domain (Vercel/Netlify ↔ Render) simplicity.
