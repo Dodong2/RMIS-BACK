@@ -1,4 +1,5 @@
 from django.contrib.auth.models import AbstractUser
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 
 
@@ -117,3 +118,27 @@ class TemporaryReplacement(models.Model):
 
     def __str__(self):
         return f"{self.replacement} acting for {self.suspended_user} ({self.start_date} to {self.end_date})"
+
+
+class IdempotencyKey(models.Model):
+    """
+    One client intent behind an Idempotency-Key header (config/concurrency.py). The unique (user, key) INSERT is the
+    claim; `response_*` is stored in the same transaction as the work, so "succeeded" never outlives a rollback.
+    """
+
+    STATE_CHOICES = (("in_progress", "In progress"), ("succeeded", "Succeeded"))
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="idempotency_keys")
+    key = models.CharField(max_length=64)
+    endpoint = models.CharField(max_length=255, help_text="METHOD /path the key was first used on")
+    request_hash = models.CharField(max_length=64)
+    state = models.CharField(max_length=20, choices=STATE_CHOICES, default="in_progress")
+    response_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    response_body = models.JSONField(null=True, blank=True, encoder=DjangoJSONEncoder)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "key"], name="unique_idempotency_key_per_user")]
+
+    def __str__(self):
+        return f"{self.key} ({self.state})"

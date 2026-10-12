@@ -155,6 +155,8 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    # Concurrent-write conflicts (unique race, deadlock) become 409 instead of 500 (config/concurrency.py).
+    "EXCEPTION_HANDLER": "config.concurrency.conflict_exception_handler",
 }
 
 BREVO_API_KEY = env("BREVO_API_KEY")
