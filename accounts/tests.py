@@ -30,7 +30,8 @@ class SeedRolesTests(TestCase):
         call_command("seed_roles", stdout=open("/dev/null", "w"))
 
         admin_codes = set(RolePermission.objects.filter(role__code="system_admin").values_list("permission__code", flat=True))
-        self.assertEqual(admin_codes, set(PERMISSIONS))
+        # Client 2026-10-11 (accounts 0016/0017): system_admin only approves, so it doesn't encode LIBs or file realignments.
+        self.assertEqual(admin_codes, set(PERMISSIONS) - {"budget.manage", "financial.request_realignment"})
 
 
 class RegistrationTests(RMISTestCase):
