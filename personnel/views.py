@@ -42,6 +42,7 @@ class ManageWritesMixin:
 class LeaderAssignmentView(APIView):
     permission_classes = [HasRole("personnel.manage")]
 
+    @transaction.atomic  # the leader-load check locks the leader's row until the new lead is saved
     def post(self, request):
         serializer = LeaderAssignmentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

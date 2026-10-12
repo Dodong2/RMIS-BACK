@@ -119,11 +119,12 @@ def idempotent(handler):
         try:
             with transaction.atomic():
                 response = handler(view, request, *args, **kwargs)
-                if 200 <= response.status_code < 300:
+                ok = 200 <= response.status_code < 300
+                if ok:
                     type(claim).objects.filter(pk=claim.pk).update(
                         state="succeeded", response_status=response.status_code, response_body=response.data,
                     )
-                    succeeded = True
+            succeeded = ok  # only once the commit itself went through
             return response
         finally:
             if not succeeded:  # nothing committed for this intent: free the key so a corrected resubmit can use it
