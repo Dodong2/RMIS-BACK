@@ -217,3 +217,34 @@ class MilestoneTaskTests(RMISTestCase):
         titles = [t["title"] for t in self.client.get("/api/personnel/tasks/", {"milestone": self.milestone.pk}).data]
 
         self.assertEqual(titles, ["Survey"])
+
+
+class PersonnelTransitionsHappenOnceTests(RMISTestCase):
+    """2026-10-12 concurrency audit: a repeated click changes nothing (row lock + state check)."""
+
+    def setUp(self):
+        super().setUp()
+        from research_projects.models import Project
+        self.leader, self.staff, self.incoming = self.make_user("project_leader"), self.make_user("project_staff"), self.make_user("project_staff")
+        self.project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader)
+        self.admin = self.client_for(self.make_user("system_admin"))
+
+    def test_completing_a_staff_change_twice_creates_one_new_assignment(self):
+        from personnel.models import PersonnelChange, ProjectAssignment, PropertyClearance
+        old = ProjectAssignment.objects.create(user=self.staff, project=self.project, start_date=datetime.date(2026, 1, 1))
+        change = PersonnelChange.objects.create(change_type="staff", assignment=old, project=self.project, outgoing=self.staff,
+                                                incoming=self.incoming, reason="Transfer", status="cleared", initiated_by=self.leader)
+        PropertyClearance.objects.create(change=change)
+        url = f"/api/personnel/changes/{change.id}/complete/"
+        self.assertEqual(self.admin.post(url).status_code, 200)
+        self.assertEqual(self.admin.post(url).status_code, 400)
+        self.assertEqual(ProjectAssignment.objects.filter(user=self.incoming).count(), 1)
+
+    def test_task_review_is_decided_once(self):
+        task = Task.objects.create(project=self.project, title="Survey", assignee=self.staff, assigned_by=self.leader,
+                                   due_date=datetime.date(2026, 12, 31), status="for_review")
+        url = f"/api/personnel/tasks/{task.id}/review/"
+        self.assertEqual(self.admin.post(url, {"action": "approve"}).status_code, 200)
+        self.assertEqual(self.admin.post(url, {"action": "return"}).status_code, 400)
+        task.refresh_from_db()
+        self.assertEqual(task.status, "done")

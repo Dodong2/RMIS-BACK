@@ -1,4 +1,6 @@
 from pathlib import Path
+
+from corsheaders.defaults import default_headers
 from datetime import timedelta
 import environ
 
@@ -180,6 +182,8 @@ SIMPLE_JWT = {
 # Exact-string match incl. scheme, no trailing slash:
 # CORS_ALLOWED_ORIGINS=http://localhost:5173,https://rmis.netlify.app
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+# The frontend sends Idempotency-Key on create forms (config/concurrency.py); a cross-origin preflight must allow it.
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 
 SUPABASE_URL = env("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = env("SUPABASE_PUBLISHABLE_KEY")

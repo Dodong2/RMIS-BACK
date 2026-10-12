@@ -102,3 +102,17 @@ class ConflictHandlerTests(RMISTestCase):
     def test_handler_leaves_other_integrity_errors_alone(self):
         from config.concurrency import conflict_exception_handler
         self.assertIsNone(conflict_exception_handler(IntegrityError("not null"), {}))
+
+
+class AssignRoleOnceTests(RMISTestCase):
+    def test_confirming_a_registration_twice_sends_one_email(self):
+        admin = self.client_for(self.make_user("system_admin"))
+        pending = self.make_user(None)
+        role = Role.objects.get(code="project_leader")
+        url = f"/api/admin/pending-users/{pending.id}/assign-role/"
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(admin.patch(url, {"role_id": role.id}).status_code, 200)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(admin.patch(url, {"role_id": role.id}).status_code, 400)
+        self.assertEqual(self.brevo_post.call_count, 1)

@@ -92,9 +92,10 @@ class AdminConfirmationTests(RMISTestCase):
         pending = self.make_user(None, email="pending@lspu.test", is_active=False)
         role = Role.objects.get(code="project_leader")
 
-        response = self.client_for(admin).patch(
-            f"/api/admin/pending-users/{pending.id}/assign-role/", {"role_id": role.id}, format="json"
-        )
+        with self.captureOnCommitCallbacks(execute=True):  # the e-mail goes out only after the approval commits
+            response = self.client_for(admin).patch(
+                f"/api/admin/pending-users/{pending.id}/assign-role/", {"role_id": role.id}, format="json"
+            )
 
         self.assertEqual(response.status_code, 200)
         pending.refresh_from_db()

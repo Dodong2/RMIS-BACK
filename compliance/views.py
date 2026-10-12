@@ -1,9 +1,11 @@
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import HasRole, role_can
+from config.concurrency import lock
 from .models import (
     ComplianceRequirement,
     AIUseDeclaration,
@@ -136,8 +138,11 @@ class VerifyRecordView(APIView):
     model = None
     serializer_class = None
 
+    @transaction.atomic
     def post(self, request, pk):
-        record = generics.get_object_or_404(self.model, pk=pk)
+        record = lock(self.model.objects.all(), pk=pk)
+        if record.verified_at:
+            return Response({"detail": "This record is already verified."}, status=400)
         record.verified_by, record.verified_at = request.user, timezone.now()
         record.save(update_fields=["verified_by", "verified_at"])
         return Response(self.serializer_class(record).data)
@@ -174,8 +179,9 @@ class ComplianceRequirementSubmitView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, pk):
-        requirement = generics.get_object_or_404(ComplianceRequirement, pk=pk)
+        requirement = lock(ComplianceRequirement.objects.all(), pk=pk)
         if requirement.responsible_id != request.user.id and not role_can(request.user, "compliance.encode"):
             return Response({"detail": "Only the responsible person can submit this requirement."}, status=403)
         if requirement.status not in ("pending", "returned"):
@@ -191,8 +197,9 @@ class ComplianceRequirementReviewView(APIView):
 
     permission_classes = [HasRole("compliance.manage")]
 
+    @transaction.atomic
     def post(self, request, pk):
-        requirement = generics.get_object_or_404(ComplianceRequirement, pk=pk)
+        requirement = lock(ComplianceRequirement.objects.all(), pk=pk)
         decision = request.data.get("status")
         if decision not in ("compliant", "returned", "non_compliant"):
             return Response({"status": "must be 'compliant', 'returned', or 'non_compliant'."}, status=400)

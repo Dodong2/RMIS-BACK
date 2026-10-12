@@ -1,5 +1,6 @@
 import requests as http
 from django.conf import settings
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils.crypto import get_random_string
 from rest_framework import generics
@@ -14,6 +15,7 @@ from .serializers import (
     UserProfileSerializer, UserScopeSerializer,
 )
 from .permissions import HasRole
+from config.concurrency import lock
 from .emails import notify_admins_new_registration, send_role_confirmation_email
 
 
@@ -153,17 +155,21 @@ class UsersListView(generics.ListAPIView):
 class AssignRoleView(APIView):
     permission_classes = [HasRole("accounts.manage_users")]
 
+    @transaction.atomic
     def patch(self, request, user_id):
         role_id = request.data.get("role_id")
         role = get_object_or_404(Role, id=role_id)
-        user = get_object_or_404(User, id=user_id)
+        # Locked and pending-only: confirming twice (double click, two admins) can't send two e-mails.
+        user = lock(User.objects.all(), id=user_id)
+        if not user.is_pending_role:
+            return Response({"detail": "This registration was already confirmed."}, status=400)
 
         user.role = role
         user.is_pending_role = False
         user.is_active = True
         user.save()
 
-        send_role_confirmation_email(user)
+        transaction.on_commit(lambda: send_role_confirmation_email(user))  # only once the approval is saved
 
         return Response({"detail": "Role assigned and confirmation sent."})
     
@@ -177,10 +183,10 @@ class UpdateUserRoleView(APIView):
             return Response({"detail": "role_id is required."}, status=400)
  
         role = get_object_or_404(Role, id=role_id)
-        user = get_object_or_404(User, id=user_id, is_pending_role=False)
- 
-        user.role = role
-        user.save()
+        with transaction.atomic():
+            user = lock(User.objects.all(), id=user_id, is_pending_role=False)
+            user.role = role
+            user.save(update_fields=["role"])
  
         return Response({"detail": "Role updated."})
  
@@ -190,8 +196,9 @@ class ToggleUserActiveView(APIView):
 
     permission_classes = [HasRole("accounts.manage_users")]
 
+    @transaction.atomic
     def patch(self, request, user_id):
-        user = get_object_or_404(User, id=user_id, is_pending_role=False)
+        user = lock(User.objects.all(), id=user_id, is_pending_role=False)
         if user.account_status == "deactivated":
             return Response({"detail": "Account is deactivated and can't be reactivated."}, status=400)
         user.account_status = "suspended" if user.is_active else "active"
@@ -230,8 +237,9 @@ class UserAccountStatusView(APIView):
 
     permission_classes = [HasRole("accounts.manage_users")]
 
+    @transaction.atomic
     def post(self, request, user_id):
-        user = get_object_or_404(User, id=user_id, is_pending_role=False)
+        user = lock(User.objects.all(), id=user_id, is_pending_role=False)
         action = request.data.get("action")
         if action not in ("suspend", "reactivate", "deactivate"):
             return Response({"action": "must be 'suspend', 'reactivate', or 'deactivate'."}, status=400)
@@ -364,9 +372,12 @@ class TemporaryReplacementEndView(APIView):
     permission_classes = [HasRole("accounts.manage_users")]
 
     def post(self, request, pk):
+        with transaction.atomic():
+            return self._end(lock(TemporaryReplacement.objects.all(), pk=pk))
+
+    def _end(self, replacement):
         from django.utils import timezone
 
-        replacement = get_object_or_404(TemporaryReplacement, pk=pk)
         if replacement.ended_at:
             return Response({"detail": "This replacement has already ended."}, status=400)
         replacement.ended_at = timezone.now()

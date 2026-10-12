@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -5,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import HasRole, role_can
+from config.concurrency import lock
 from research_projects.models import Project
 
 from .models import (
@@ -69,10 +71,13 @@ class TerminalReportListCreateView(RoleWritesMixin, ProjectScopedMixin, generics
 class TerminalReportCertifyView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, pk):
         if not role_can(request.user, "monitoring.certify_terminal"):
             return Response({"detail": "Only RIUH/system_admin may certify a terminal report."}, status=status.HTTP_403_FORBIDDEN)
-        report = get_object_or_404(TerminalReport, pk=pk)
+        report = lock(TerminalReport.objects.all(), pk=pk)
+        if report.is_certified:
+            return Response({"detail": "This terminal report is already certified."}, status=status.HTTP_400_BAD_REQUEST)
         report.is_certified = True
         report.certified_by = request.user
         report.certified_at = timezone.now()
@@ -112,14 +117,19 @@ class RenewalApplicationDecideView(APIView):
     def post(self, request, pk):
         if not role_can(request.user, "monitoring.decide_renewal"):
             return Response({"detail": "Only RIUH/DRD/VPREI/system_admin may decide a renewal application."}, status=status.HTTP_403_FORBIDDEN)
-        application = get_object_or_404(RenewalApplication, pk=pk)
         status_value = request.data.get("status")
         if status_value not in ("approved", "denied"):
             return Response({"status": "must be 'approved' or 'denied'."}, status=status.HTTP_400_BAD_REQUEST)
-        application.status = status_value
-        application.decided_by = request.user
-        application.decided_at = timezone.now()
-        application.save()
+        with transaction.atomic():
+            # Locked, and decided once: a second officer's conflicting decision can't silently overwrite the first.
+            application = lock(RenewalApplication.objects.all(), pk=pk)
+            if application.status != "pending":
+                return Response({"detail": f"This application was already {application.status}."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            application.status = status_value
+            application.decided_by = request.user
+            application.decided_at = timezone.now()
+            application.save()
         return Response(RenewalApplicationSerializer(application).data)
 
 
@@ -170,8 +180,9 @@ class ExtensionRequestActionView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, pk):
-        extension = get_object_or_404(ExtensionRequest.objects.select_related("project"), pk=pk)
+        extension = lock(ExtensionRequest.objects.select_related("project"), pk=pk)
         action = request.data.get("action")
         allowed = {
             "endorse": "monitoring.endorse_extension",

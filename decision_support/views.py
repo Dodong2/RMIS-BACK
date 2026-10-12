@@ -1,9 +1,11 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import HasRole, role_can
+from config.concurrency import lock
 from research_projects.models import Project
 
 from . import services
@@ -52,26 +54,31 @@ class AHPComparisonSubmitView(APIView):
             return Response(
                 {"detail": "Only DRD/VPREI/system_admin may submit AHP comparisons."}, status=status.HTTP_403_FORBIDDEN
             )
-        run = get_object_or_404(AHPMatrixRun, pk=pk)
-        if run.status == "finalized":
-            return Response({"detail": "This AHP run is already finalized."}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            # Locked so comparisons can't be written into a run that is being finalized at the same moment.
+            run = lock(AHPMatrixRun.objects.all(), pk=pk)
+            if run.status == "finalized":
+                return Response({"detail": "This AHP run is already finalized."}, status=status.HTTP_400_BAD_REQUEST)
 
-        criteria_ids = set(run.criteria.values_list("id", flat=True))
-        created = []
-        for item in request.data.get("comparisons", []):
-            row_id, col_id, value = item["criterion_row"], item["criterion_col"], float(item["value"])
-            if row_id not in criteria_ids or col_id not in criteria_ids:
-                return Response(
-                    {"detail": f"Criteria {row_id}/{col_id} are not part of this run."}, status=status.HTTP_400_BAD_REQUEST
-                )
-            if row_id == col_id:
-                continue
-            if row_id > col_id:
-                row_id, col_id, value = col_id, row_id, 1.0 / value
-            obj, _ = AHPPairwiseComparison.objects.update_or_create(
-                run=run, criterion_row_id=row_id, criterion_col_id=col_id, defaults={"value": value}
-            )
-            created.append(obj)
+            criteria_ids = set(run.criteria.values_list("id", flat=True))
+            pairs = []
+            for item in request.data.get("comparisons", []):
+                row_id, col_id, value = item["criterion_row"], item["criterion_col"], float(item["value"])
+                if row_id not in criteria_ids or col_id not in criteria_ids:
+                    return Response(  # checked before any write, so a bad pair saves nothing
+                        {"detail": f"Criteria {row_id}/{col_id} are not part of this run."}, status=status.HTTP_400_BAD_REQUEST
+                    )
+                if row_id == col_id:
+                    continue
+                if row_id > col_id:
+                    row_id, col_id, value = col_id, row_id, 1.0 / value
+                pairs.append((row_id, col_id, value))
+            created = [
+                AHPPairwiseComparison.objects.update_or_create(
+                    run=run, criterion_row_id=row_id, criterion_col_id=col_id, defaults={"value": value}
+                )[0]
+                for row_id, col_id, value in pairs
+            ]
         return Response(AHPPairwiseComparisonSerializer(created, many=True).data, status=status.HTTP_201_CREATED)
 
 
@@ -83,7 +90,13 @@ class AHPMatrixRunFinalizeView(APIView):
             return Response(
                 {"detail": "Only DRD/VPREI/system_admin may finalize an AHP run."}, status=status.HTTP_403_FORBIDDEN
             )
-        run = get_object_or_404(AHPMatrixRun, pk=pk)
+        with transaction.atomic():
+            return self._finalize(lock(AHPMatrixRun.objects.all(), pk=pk))
+
+    def _finalize(self, run):
+        # Finalized weights are cited by recommendation runs, so they are computed once and never overwritten.
+        if run.status != "draft":
+            return Response({"detail": "This AHP run is already finalized."}, status=status.HTTP_400_BAD_REQUEST)
         criteria_ids = list(run.criteria.values_list("id", flat=True))
         n = len(criteria_ids)
         expected_pairs = n * (n - 1) // 2

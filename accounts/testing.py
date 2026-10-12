@@ -65,6 +65,10 @@ class ConcurrencyTestCase(TestHelpers, TransactionTestCase):
     the second waits and re-reads.
     """
 
+    # TransactionTestCase empties every table after each test; this puts the migration-seeded rows back, so the
+    # kept (--keepdb) test database stays complete for the TestCase suites that run after it.
+    serialized_rollback = True
+
     def setUp(self):
         call_command("seed_roles", stdout=open("/dev/null", "w"))
         super().setUp()

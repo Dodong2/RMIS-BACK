@@ -1,6 +1,7 @@
 import logging
 from datetime import date
 
+from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -10,6 +11,7 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.permissions import HasRole, role_can
+from config.concurrency import AtomicMutationMixin, lock
 from research_projects.models import Project
 from . import notifications
 from .models import PersonnelChange, ProjectAssignment, StaffProfile, Task, TaskDeliverable, TaskUpdate
@@ -227,8 +229,9 @@ class TaskReviewView(APIView):
 
     permission_classes = [HasRole("personnel.assign_tasks")]
 
+    @transaction.atomic
     def post(self, request, pk):
-        task = generics.get_object_or_404(Task, pk=pk)
+        task = lock(Task.objects.all(), pk=pk)  # a double click waits, then sees it is no longer For Review
         action = request.data.get("action")
         if action not in ("approve", "return"):
             return Response({"action": "must be 'approve' or 'return'."}, status=status.HTTP_400_BAD_REQUEST)
@@ -304,7 +307,7 @@ class CollaborationView(APIView):
         return Response(rows)
 
 
-class PersonnelChangeListCreateView(ManageWritesMixin, generics.ListCreateAPIView):
+class PersonnelChangeListCreateView(AtomicMutationMixin, ManageWritesMixin, generics.ListCreateAPIView):
     queryset = PersonnelChange.objects.select_related("clearance").order_by("-created_at")
     serializer_class = PersonnelChangeSerializer
 
@@ -320,8 +323,9 @@ class ClearanceView(APIView):
 
     permission_classes = [HasRole("personnel.clearance")]
 
+    @transaction.atomic
     def patch(self, request, pk):
-        change = generics.get_object_or_404(PersonnelChange.objects.select_related("clearance"), pk=pk)
+        change = lock(PersonnelChange.objects.all(), pk=pk)
         if change.status in ("cleared", "completed"):
             return Response({"detail": "Clearance is already signed off."}, status=status.HTTP_400_BAD_REQUEST)
         clearance = change.clearance
@@ -345,8 +349,10 @@ class ClearanceView(APIView):
 class CompleteChangeView(APIView):
     permission_classes = [HasRole("personnel.manage")]
 
+    @transaction.atomic
     def post(self, request, pk):
-        change = generics.get_object_or_404(PersonnelChange, pk=pk)
+        # Locked: completing twice would end the old assignment and create the new one twice.
+        change = lock(PersonnelChange.objects.all(), pk=pk)
         if change.status != "cleared":
             return Response({"detail": "Property clearance must be signed off before completing."}, status=status.HTTP_400_BAD_REQUEST)
         return Response(PersonnelChangeSerializer(complete_change(change)).data)

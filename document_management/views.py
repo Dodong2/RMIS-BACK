@@ -1,9 +1,11 @@
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import HasRole, acting_for, role_can, visible_documents, visible_projects
+from config.concurrency import lock
 from research_projects.models import Project
 from .models import Document, DocumentShare
 from .serializers import DocumentListSerializer, DocumentSerializer, DocumentShareSerializer, StagedUploadSerializer, store_generated_document
@@ -89,8 +91,11 @@ class DocumentReviewView(APIView):
 
     permission_classes = [HasRole("documents.manage")]
 
+    @transaction.atomic
     def post(self, request, pk):
-        document = generics.get_object_or_404(visible_documents(request.user, Document.objects.all()), pk=pk)
+        # Re-review stays allowed (returned documents come back), but two reviewers take turns on the row.
+        visible = generics.get_object_or_404(visible_documents(request.user, Document.objects.all()), pk=pk)
+        document = lock(Document.objects.all(), pk=visible.pk)  # the visibility query uses DISTINCT, which can't lock
         review_status = request.data.get("review_status")
         if review_status not in ("approved", "returned"):
             return Response({"review_status": "must be 'approved' or 'returned'."}, status=status.HTTP_400_BAD_REQUEST)
