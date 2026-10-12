@@ -140,6 +140,7 @@ class ProcurementTrackingTests(RMISTestCase):
         self.assertEqual(response.data["status"], "requested")
         self.assertIsNone(response.data["received_by"])
         self.assertEqual(response.data["amount"], "9000.00")
+        self.assertEqual(response.data["remarks"], "")
 
     def test_resubmit_only_when_returned_and_within_balance(self):
         self.assertEqual(self.leader_client.post(f"{PR_URL}{self.pr.id}/resubmit/", {"description": "x"}).status_code, 400)

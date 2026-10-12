@@ -215,9 +215,9 @@ class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):
         procurement = self.get_object()
         if procurement.status != "returned_for_revision":
             return Response({"detail": "Only a request returned for revision can be resubmitted."}, status=status.HTTP_400_BAD_REQUEST)
-        serializer = self.get_serializer(
-            procurement, data={k: v for k, v in request.data.items() if k in ("description", "amount", "remarks")}, partial=True,
-        )
+        data = {k: v for k, v in request.data.items() if k in ("description", "amount")}
+        data["remarks"] = request.data.get("remarks", "")  # the leader's note replaces the Procurement Office's return reason
+        serializer = self.get_serializer(procurement, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save(status="requested", received_by=None, received_at=None)
         return Response(serializer.data)
