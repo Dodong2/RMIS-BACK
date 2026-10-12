@@ -20,6 +20,7 @@ from .serializers import (
     ProcurementStatusSerializer,
     RealignmentReviewSerializer,
     line_item_balance,
+    post_procurement_disbursement,
     review_realignment,
 )
 
@@ -197,9 +198,11 @@ class ProcurementStatusView(APIView):
         procurement.status = serializer.validated_data["status"]
         procurement.remarks = serializer.validated_data.get("remarks", procurement.remarks)
         procurement.updated_by = request.user
-        if procurement.status == "completed":
-            procurement.completed_at = timezone.now()
-        procurement.save()
+        with transaction.atomic():
+            if procurement.status == "completed":
+                procurement.completed_at = timezone.now()
+                post_procurement_disbursement(procurement)
+            procurement.save()
         return Response(ProcurementRequestSerializer(procurement).data)
 
 

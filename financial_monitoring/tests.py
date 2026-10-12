@@ -1,6 +1,6 @@
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
-from financial_monitoring.models import BudgetRealignment, ProcurementRequest
+from financial_monitoring.models import BudgetRealignment, Disbursement, ProcurementRequest
 from research_projects.models import Project
 
 URL = "/api/financial/realignments/"
@@ -147,3 +147,31 @@ class ProcurementTrackingTests(RMISTestCase):
         self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
         self.status("returned_for_revision", "Too high")
         self.assertEqual(self.leader_client.post(f"{PR_URL}{self.pr.id}/resubmit/", {"amount": "10001"}).status_code, 400)
+
+    def test_completed_request_is_posted_as_a_disbursement(self):
+        """Client 2026-10-12: completing a request moves the project's Actual and Available."""
+        self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
+        self.status("ready_for_release")
+        self.assertFalse(Disbursement.objects.exists())
+
+        self.assertEqual(self.status("completed").status_code, 200)
+        disbursement = Disbursement.objects.get()
+        self.assertEqual((disbursement.line_item, disbursement.amount), (self.item, 4000))
+        self.assertEqual(disbursement.procurement_request, self.pr)
+        self.assertEqual(disbursement.reference_number, f"PR-{self.pr.id:04d}")
+        self.assertEqual(disbursement.recorded_by, self.officer)
+
+        summary = self.leader_client.get(f"/api/financial/budgets/{self.item.budget_id}/summary/").data
+        self.assertEqual((summary["totals"]["actual"], summary["totals"]["available"]), (4000, 6000))
+        ledger = self.leader_client.get("/api/financial/disbursements/", {"budget": self.item.budget_id}).data
+        self.assertEqual(ledger[0]["procurement_request"], self.pr.id)
+
+        # The released money no longer counts as an open request, so a new one can use the rest.
+        response = self.leader_client.post(PR_URL, {
+            "line_item": self.item.id, "description": "More", "amount": "6000", "fiscal_year": 2026, "quarter": 4,
+        })
+        self.assertEqual(response.status_code, 201, response.data)
+        response = self.leader_client.post(PR_URL, {
+            "line_item": self.item.id, "description": "Too much", "amount": "1", "fiscal_year": 2026, "quarter": 4,
+        })
+        self.assertEqual(response.status_code, 400)

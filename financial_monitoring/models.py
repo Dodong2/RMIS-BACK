@@ -26,6 +26,10 @@ class Disbursement(models.Model):
     recorded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="disbursements_recorded"
     )
+    # Client 2026-10-12: set when the Procurement Office completes a request (null = recorded manually).
+    procurement_request = models.OneToOneField(
+        "ProcurementRequest", on_delete=models.PROTECT, null=True, blank=True, related_name="disbursement"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

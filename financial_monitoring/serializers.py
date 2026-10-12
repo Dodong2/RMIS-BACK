@@ -52,9 +52,9 @@ class DisbursementSerializer(serializers.ModelSerializer):
         model = Disbursement
         fields = [
             "id", "line_item", "amount", "reference_number", "description", "payee", "supporting_document",
-            "funding_source", "disbursed_on", "recorded_by", "created_at",
+            "funding_source", "disbursed_on", "recorded_by", "procurement_request", "created_at",
         ]
-        read_only_fields = ["recorded_by"]
+        read_only_fields = ["recorded_by", "procurement_request"]
 
     def validate(self, attrs):
         line_item = attrs.get("line_item", getattr(self.instance, "line_item", None))
@@ -71,6 +71,22 @@ class DisbursementSerializer(serializers.ModelSerializer):
                 f"Amount {amount} exceeds the available balance ({available}) for this line item."
             )
         return attrs
+
+
+def post_procurement_disbursement(procurement):
+    """
+    Client 2026-10-12: a Completed procurement request is the fund release (LSPU has no separate
+    Disbursement office), so it is posted as the project's Actual for the full request amount.
+    """
+    return Disbursement.objects.create(
+        line_item=procurement.line_item,
+        amount=procurement.amount,
+        reference_number=f"PR-{procurement.pk:04d}",
+        description=procurement.description[:300],
+        disbursed_on=timezone.localdate(procurement.completed_at),
+        recorded_by=procurement.updated_by,
+        procurement_request=procurement,
+    )
 
 
 class RealignmentReviewSerializer(serializers.Serializer):
