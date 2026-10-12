@@ -6,7 +6,7 @@ from accounts.permissions import scoped_projects
 from compliance.models import (
     AIUseDeclaration, ConflictOfInterestDisclosure, EthicsReviewReference, MisconductCaseReference, SimilarityCheckRecord,
 )
-from financial_monitoring.models import ProcurementRequest
+from financial_monitoring.models import PROCUREMENT_CLOSED_STATUSES, ProcurementRequest
 from financial_monitoring.serializers import line_item_balance
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
 from outputs.serializers import ExpectedOutputSerializer
@@ -80,16 +80,16 @@ def financial_report(user, campus=None, funding_type=None):
                 for key, value in line_item_balance(item).items():
                     totals[key] += value
         procurement = ProcurementRequest.objects.filter(line_item__budget__project=p).aggregate(
-            requested=Count("id", filter=Q(status="requested")),
-            processing=Count("id", filter=Q(status="processing")),
-            released=Count("id", filter=Q(status="released")),
+            submitted=Count("id", filter=Q(status="requested")),
+            in_progress=Count("id", filter=~Q(status__in=("requested", *PROCUREMENT_CLOSED_STATUSES))),
+            completed=Count("id", filter=Q(status="completed")),
         )
         rows.append({
             "project_code": p.project_code, "title": p.title, "funding_type": p.funding_type, "campus": p.campus,
             "budget_status": budget.status if budget else "none", **totals,
             "utilization_pct": round(float(totals["actual"]) / float(totals["adjusted"]) * 100, 2) if totals["adjusted"] else "",
-            "procurement_requested": procurement["requested"], "procurement_processing": procurement["processing"],
-            "procurement_released": procurement["released"],
+            "procurement_submitted": procurement["submitted"], "procurement_in_progress": procurement["in_progress"],
+            "procurement_completed": procurement["completed"],
         })
     return rows
 

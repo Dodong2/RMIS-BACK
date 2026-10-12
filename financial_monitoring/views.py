@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from accounts.permissions import BudgetScopedMixin, HasRole, role_can, scoped_projects
 from budget_lib.models import LineItemBudget
-from .models import PROCUREMENT_DELAY_DAYS, BudgetRealignment, Disbursement, ProcurementRequest
+from .models import PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, BudgetRealignment, Disbursement, ProcurementRequest
 from .serializers import (
     BudgetRealignmentSerializer,
     DisbursementSerializer,
@@ -155,7 +155,9 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
                 qs = qs.filter(**{param: params[param]})
         if params.get("overdue") == "true":
             cutoff = timezone.now() - timedelta(days=PROCUREMENT_DELAY_DAYS)
-            qs = qs.filter(status__in=("requested", "processing"), requested_at__lt=cutoff)
+            qs = qs.exclude(status__in=PROCUREMENT_CLOSED_STATUSES).filter(requested_at__lt=cutoff)
+        if params.get("active") == "true":
+            qs = qs.exclude(status__in=PROCUREMENT_CLOSED_STATUSES)
         return qs
 
     def get_permissions(self):
@@ -167,8 +169,24 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
         serializer.save(requested_by=self.request.user)
 
 
+class ProcurementReceiveView(APIView):
+    """Client 2026-10-12: the Procurement Officer marks a submitted request Received -> Under Review."""
+
+    permission_classes = [HasRole("financial.update_procurement")]
+
+    def post(self, request, pk):
+        procurement = generics.get_object_or_404(ProcurementRequest, pk=pk)
+        if procurement.status != "requested":
+            return Response({"detail": "Only a submitted request can be marked received."}, status=status.HTTP_400_BAD_REQUEST)
+        procurement.status = "under_review"
+        procurement.received_by = procurement.updated_by = request.user
+        procurement.received_at = timezone.now()
+        procurement.save()
+        return Response(ProcurementRequestSerializer(procurement).data)
+
+
 class ProcurementStatusView(APIView):
-    """Procurement Office moves a request Requested -> Processing -> Released (or Cancelled)."""
+    """After Received, the Procurement Office picks the next status until Completed."""
 
     permission_classes = [HasRole("financial.update_procurement")]
 
@@ -179,12 +197,30 @@ class ProcurementStatusView(APIView):
         procurement.status = serializer.validated_data["status"]
         procurement.remarks = serializer.validated_data.get("remarks", procurement.remarks)
         procurement.updated_by = request.user
-        if procurement.status == "processing":
-            procurement.processing_at = timezone.now()
-        elif procurement.status == "released":
-            procurement.released_at = timezone.now()
+        if procurement.status == "completed":
+            procurement.completed_at = timezone.now()
         procurement.save()
         return Response(ProcurementRequestSerializer(procurement).data)
+
+
+class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):
+    """The leader edits a request Returned for Revision and sends it back as Request Submitted."""
+
+    project_lookup = "line_item__budget__project"
+    queryset = ProcurementRequest.objects.select_related("line_item__budget")
+    serializer_class = ProcurementRequestSerializer
+    permission_classes = [HasRole("financial.request_procurement")]
+
+    def post(self, request, pk):
+        procurement = self.get_object()
+        if procurement.status != "returned_for_revision":
+            return Response({"detail": "Only a request returned for revision can be resubmitted."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = self.get_serializer(
+            procurement, data={k: v for k, v in request.data.items() if k in ("description", "amount", "remarks")}, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save(status="requested", received_by=None, received_at=None)
+        return Response(serializer.data)
 
 
 class BudgetSummaryView(APIView):

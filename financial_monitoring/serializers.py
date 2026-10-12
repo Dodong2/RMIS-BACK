@@ -7,7 +7,7 @@ from rest_framework import serializers
 
 from budget_lib.models import LineItem
 from accounts.permissions import ensure_in_scope
-from .models import APPLIED_STATUSES, BudgetRealignment, Disbursement, ProcurementRequest
+from .models import APPLIED_STATUSES, PROCUREMENT_CLOSED_STATUSES, BudgetRealignment, Disbursement, ProcurementRequest
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 # Client 2026-10-11: system_admin only approves, so only the project leader files realignments.
@@ -182,39 +182,54 @@ def review_realignment(realignment, reviewer, decision):
 class ProcurementRequestSerializer(serializers.ModelSerializer):
     project = serializers.IntegerField(source="line_item.budget.project_id", read_only=True)
     routed_to = serializers.CharField(read_only=True)
+    requested_by_name = serializers.CharField(source="requested_by.display_name", read_only=True)
+    received_by_name = serializers.CharField(source="received_by.display_name", read_only=True, default=None)
+    received_by_role = serializers.CharField(source="received_by.role.name", read_only=True, default=None)
 
     class Meta:
         model = ProcurementRequest
         fields = [
             "id", "project", "line_item", "description", "amount", "fiscal_year", "quarter", "routed_to",
-            "status", "remarks", "requested_by", "requested_at", "processing_at", "released_at", "updated_by",
+            "status", "remarks", "requested_by", "requested_by_name", "requested_at",
+            "received_by", "received_by_name", "received_by_role", "received_at", "completed_at", "updated_by",
         ]
-        read_only_fields = ["status", "requested_by", "requested_at", "processing_at", "released_at", "updated_by"]
+        read_only_fields = ["status", "requested_by", "requested_at", "received_by", "received_at", "completed_at", "updated_by"]
 
     def validate(self, attrs):
-        line_item = attrs["line_item"]
+        line_item = attrs.get("line_item", getattr(self.instance, "line_item", None))
+        amount = attrs.get("amount", getattr(self.instance, "amount", None))
         ensure_in_scope(self, line_item.budget.project)
         if line_item.budget.status != "certified":
             raise serializers.ValidationError("Procurement can only be requested against a certified budget.")
-        open_requests = line_item.procurement_requests.exclude(status__in=("released", "cancelled"))
+        open_requests = line_item.procurement_requests.exclude(status__in=PROCUREMENT_CLOSED_STATUSES)
+        if self.instance:
+            open_requests = open_requests.exclude(pk=self.instance.pk)
         committed = open_requests.aggregate(total=Sum("amount"))["total"] or 0
         available = line_item_balance(line_item)["available"] - committed
-        if attrs["amount"] > available:
+        if amount > available:
             raise serializers.ValidationError(
-                f"Amount {attrs['amount']} exceeds what is still available on this line item ({available})."
+                f"Amount {amount} exceeds what is still available on this line item ({available})."
             )
         return attrs
 
 
-PROCUREMENT_TRANSITIONS = {"requested": ("processing", "cancelled"), "processing": ("released", "cancelled")}
+# Client 2026-10-12: after Received, the Procurement Officer picks any of these (Completed closes the request).
+PROCUREMENT_UPDATE_STATUSES = [
+    "returned_for_revision", "for_procurement", "procurement_in_progress", "order_placed",
+    "awaiting_delivery", "delivered", "ready_for_release", "completed",
+]
 
 
 class ProcurementStatusSerializer(serializers.Serializer):
-    status = serializers.ChoiceField(choices=["processing", "released", "cancelled"])
+    status = serializers.ChoiceField(choices=PROCUREMENT_UPDATE_STATUSES)
     remarks = serializers.CharField(required=False, allow_blank=True)
 
-    def validate_status(self, value):
+    def validate(self, attrs):
         current = self.context["procurement"].status
-        if value not in PROCUREMENT_TRANSITIONS.get(current, ()):
-            raise serializers.ValidationError(f"Cannot move a '{current}' request to '{value}'.")
-        return value
+        if current in ("requested", "returned_for_revision") or current in PROCUREMENT_CLOSED_STATUSES:
+            raise serializers.ValidationError(f"A request that is '{current}' can't be updated here.")
+        if attrs["status"] == current:
+            raise serializers.ValidationError("The request already has this status.")
+        if attrs["status"] == "returned_for_revision" and not attrs.get("remarks", "").strip():
+            raise serializers.ValidationError({"remarks": "Remarks are required when returning a request for revision."})
+        return attrs

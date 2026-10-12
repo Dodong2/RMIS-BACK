@@ -5,7 +5,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from compliance.models import AI_CONTENT_THRESHOLD, AIUseDeclaration, SimilarityCheckRecord
-from financial_monitoring.models import PROCUREMENT_DELAY_DAYS, BudgetRealignment, ProcurementRequest
+from financial_monitoring.models import PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, BudgetRealignment, ProcurementRequest
 from forecasting.models import ForecastRun
 
 from .models import ExtensionRequest
@@ -21,9 +21,9 @@ def compute_indicators(project):
     latest_forecast = ForecastRun.objects.filter(project=project, status="success").order_by("-run_at").first()
     latest_sync = project.budget_office_records.select_related("source").order_by("-source__uploaded_at").first()
     delayed_procurement = ProcurementRequest.objects.filter(
-        line_item__budget__project=project, status__in=("requested", "processing"),
+        line_item__budget__project=project,
         requested_at__lt=timezone.now() - timedelta(days=PROCUREMENT_DELAY_DAYS),
-    ).count()
+    ).exclude(status__in=PROCUREMENT_CLOSED_STATUSES).count()
     similarity = SimilarityCheckRecord.objects.filter(project=project)
     outputs_target = sum(e.target_count for e in project.expected_outputs.all())
 

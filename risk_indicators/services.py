@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from financial_monitoring.models import PROCUREMENT_DELAY_DAYS, ProcurementRequest
+from financial_monitoring.models import PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, ProcurementRequest
 from forecasting.models import ForecastRun
 from monitoring.serializers import compute_budget_used_pct, compute_deliverables_pct, compute_escalation_status
 from personnel.models import PersonnelChange
@@ -96,8 +96,8 @@ def _procurement_delay(project):
     # Consultation findings: delayed procurement -> escalation. 3x3 (Medium) is an engineering default.
     cutoff = timezone.now() - timedelta(days=PROCUREMENT_DELAY_DAYS)
     delayed = ProcurementRequest.objects.filter(
-        line_item__budget__project=project, status__in=("requested", "processing"), requested_at__lt=cutoff,
-    ).count()
+        line_item__budget__project=project, requested_at__lt=cutoff,
+    ).exclude(status__in=PROCUREMENT_CLOSED_STATUSES).count()
     return _scored(delayed > 0, 3, 3, delayed_requests=delayed, delay_days=PROCUREMENT_DELAY_DAYS)
 
 

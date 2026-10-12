@@ -1,6 +1,6 @@
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
-from financial_monitoring.models import BudgetRealignment
+from financial_monitoring.models import BudgetRealignment, ProcurementRequest
 from research_projects.models import Project
 
 URL = "/api/financial/realignments/"
@@ -78,3 +78,71 @@ class BulkRealignmentTests(RMISTestCase):
         self.assertEqual(self.client.post(URL, [new_item], format="json").status_code, 400)
         new_item["new_item_category"] = "mooe"
         self.assertEqual(self.client.post(URL, [new_item], format="json").status_code, 201)
+
+
+PR_URL = "/api/financial/procurement-requests/"
+
+
+class ProcurementTrackingTests(RMISTestCase):
+    """Client 2026-10-12: Request Submitted -> Received (Under Review) -> officer-picked statuses -> Completed."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader)
+        budget = LineItemBudget.objects.create(project=project, version_number=1, status="certified")
+        self.item = LineItem.objects.create(budget=budget, category="mooe", description="Supplies", amount=10000)
+        self.leader_client = self.client_for(self.leader)
+        self.officer = self.make_user("procurement_officer_lib", first_name="Ana", last_name="Cruz")
+        self.officer_client = self.client_for(self.officer)
+        response = self.leader_client.post(PR_URL, {
+            "line_item": self.item.id, "description": "Reagents", "amount": "4000", "fiscal_year": 2026, "quarter": 4,
+        })
+        self.assertEqual(response.status_code, 201, response.data)
+        self.pr = ProcurementRequest.objects.get()
+
+    def status(self, new_status, remarks=None):
+        payload = {"status": new_status, **({"remarks": remarks} if remarks is not None else {})}
+        return self.officer_client.post(f"{PR_URL}{self.pr.id}/status/", payload)
+
+    def test_new_request_is_submitted_and_must_be_received_first(self):
+        self.assertEqual(self.pr.status, "requested")
+        self.assertEqual(self.status("for_procurement").status_code, 400)
+
+        response = self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "under_review")
+        self.assertEqual(response.data["received_by_name"], "Ana Cruz")
+        self.assertEqual(self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/").status_code, 400)
+
+    def test_leader_cannot_receive_or_update(self):
+        self.assertEqual(self.leader_client.post(f"{PR_URL}{self.pr.id}/receive/").status_code, 403)
+        self.assertEqual(self.leader_client.post(f"{PR_URL}{self.pr.id}/status/", {"status": "completed"}).status_code, 403)
+
+    def test_officer_picks_statuses_until_completed(self):
+        self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
+        for step in ("for_procurement", "order_placed", "delivered", "completed"):
+            self.assertEqual(self.status(step).status_code, 200, step)
+        self.pr.refresh_from_db()
+        self.assertIsNotNone(self.pr.completed_at)
+        self.assertEqual(self.status("delivered").status_code, 400)
+        self.assertEqual(len(self.officer_client.get(PR_URL, {"active": "true"}).data), 0)
+        self.assertEqual(self.leader_client.get(PR_URL).data[0]["status"], "completed")
+
+    def test_return_for_revision_needs_remarks_and_leader_resubmits(self):
+        self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
+        self.assertEqual(self.status("returned_for_revision", "").status_code, 400)
+        self.assertEqual(self.status("returned_for_revision", "Attach a quotation").status_code, 200)
+        self.assertEqual(self.status("for_procurement").status_code, 400)
+
+        response = self.leader_client.post(f"{PR_URL}{self.pr.id}/resubmit/", {"description": "Reagents (quoted)", "amount": "9000"})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "requested")
+        self.assertIsNone(response.data["received_by"])
+        self.assertEqual(response.data["amount"], "9000.00")
+
+    def test_resubmit_only_when_returned_and_within_balance(self):
+        self.assertEqual(self.leader_client.post(f"{PR_URL}{self.pr.id}/resubmit/", {"description": "x"}).status_code, 400)
+        self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
+        self.status("returned_for_revision", "Too high")
+        self.assertEqual(self.leader_client.post(f"{PR_URL}{self.pr.id}/resubmit/", {"amount": "10001"}).status_code, 400)
