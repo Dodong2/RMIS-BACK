@@ -204,3 +204,68 @@ class EvaluationScore(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["evaluation", "criterion"], name="unique_evaluation_criterion_score"),
         ]
+
+
+class QuarterlyProgressReport(models.Model):
+    """R&D Quarterly Progress Report (client 2026-10-14, new_feat.png / R&D.png; prototype QuarterlyReports.tsx).
+    An addition to the Manual's monthly/midterm reports, not a replacement. The Project Leader prepares it from the
+    work plan and the posted ledger; RIUH / CRC Chair review and endorse; DRD / VPREI approve (Structure Module 9,
+    Clarification 1a-1c). Accomplishment and issue rows are JSON lists, like MidtermReport.objective_accomplishments."""
+
+    STATUS_CHOICES = (
+        ("draft", "Draft"),
+        ("submitted", "Submitted"),
+        ("under_review", "Under Review"),
+        ("returned_for_revision", "Returned for Revision"),
+        ("endorsed", "Endorsed"),
+        ("approved", "Approved"),
+    )
+    EDITABLE_STATUSES = ("draft", "returned_for_revision")
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="quarterly_reports")
+    year = models.PositiveIntegerField()
+    quarter = models.PositiveSmallIntegerField()
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="draft")
+    version = models.PositiveIntegerField(default=1, help_text="Goes up each time a returned report is resubmitted")
+    # [{objective, activity, target, actual, cumulative, target_date, actual_date, completion_pct, variance, remarks}]
+    accomplishments = models.JSONField(default=list, blank=True)
+    # [{issue, corrective_action, recommendation, responsible, target_resolution_date}]
+    issues = models.JSONField(default=list, blank=True)
+    # Budget figures for the quarter from the current LIB + disbursements; recomputed while editable, frozen on submit
+    financial_snapshot = models.JSONField(default=dict, blank=True)
+    evidence = models.ManyToManyField(Document, blank=True, related_name="quarterly_reports")
+    recommendations = models.TextField(blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="quarterly_reports_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="quarterly_reports_approved"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["project", "year", "quarter"], name="unique_project_quarterly_report"),
+        ]
+        ordering = ["-year", "-quarter", "project__project_code"]
+
+    def __str__(self):
+        return f"{self.project.project_code} Q{self.quarter} {self.year}"
+
+
+class QuarterlyReportEvent(models.Model):
+    """Audit trail of a quarterly report. Review History = the transitions that carry reviewer remarks."""
+
+    ACTION_CHOICES = (("created", "Created"), ("updated", "Updated"), ("status_transition", "Status transition"))
+
+    report = models.ForeignKey(QuarterlyProgressReport, on_delete=models.CASCADE, related_name="events")
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    from_status = models.CharField(max_length=30, blank=True)
+    to_status = models.CharField(max_length=30, blank=True)
+    remarks = models.TextField(blank=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="quarterly_report_events")
+    at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["at", "id"]

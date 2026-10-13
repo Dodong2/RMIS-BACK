@@ -12,6 +12,7 @@ REPORT_TYPE_CHOICES = (
     ("outputs", "Research Outputs (6Ps) Report"),
     ("accomplishment", "Monthly Accomplishment Report (Project Staff)"),
     ("proposal_form", "Research Proposal Form (SF-018)"),
+    ("quarterly_progress", "R&D Quarterly Progress Reports (approved)"),
 )
 FORMAT_CHOICES = (("csv", "CSV"), ("xlsx", "XLSX"), ("pdf", "PDF"), ("docx", "DOCX"))
 

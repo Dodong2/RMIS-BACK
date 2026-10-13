@@ -35,6 +35,7 @@ Every message: `{"type": "<event>", "id": <record id>, "project": <project id>, 
 | `monitoring.renewal.decided` | `status` | renewal approved/denied |
 | `monitoring.extension.created` | `status` | extension request submitted |
 | `monitoring.extension.updated` | `status` | extension endorsed/approved/denied |
+| `monitoring.quarterly.changed` | `status` | quarterly progress report created, edited, or moved (submit/review/return/endorse/approve) |
 | `procurement.created` | `status` | leader files a procurement request (added 2026-10-13, Carl's test) |
 | `procurement.updated` | `status` | Procurement Office receives / moves status / completes, or the leader resubmits |
 | `pong` | | reply to the browser's `{"type": "ping"}` |

@@ -31,7 +31,11 @@ class SeedRolesTests(TestCase):
 
         admin_codes = set(RolePermission.objects.filter(role__code="system_admin").values_list("permission__code", flat=True))
         # Client 2026-10-11 (accounts 0016/0017): system_admin only approves, so it doesn't encode LIBs or file realignments.
-        self.assertEqual(admin_codes, set(PERMISSIONS) - {"budget.manage", "financial.request_realignment"})
+        # 2026-10-14 (accounts 0021): quarterly reports follow Structure Module 9, which has no system_admin.
+        self.assertEqual(admin_codes, set(PERMISSIONS) - {
+            "budget.manage", "financial.request_realignment",
+            "monitoring.quarterly_prepare", "monitoring.quarterly_review", "monitoring.quarterly_approve",
+        })
 
 
 class RegistrationTests(RMISTestCase):

@@ -455,6 +455,76 @@ def accomplishment_form(user, month, projects=None):
     }
 
 
+# ---- R&D Quarterly Progress Report (client 2026-10-14, prototype QuarterlyReports.tsx export) -----------------------
+
+def _quarterly_blocks(report):
+    from monitoring import quarterly
+
+    project = report.project
+    fin = report.financial_snapshot or {}
+    start, end = quarterly.quarter_range(report.year, report.quarter)
+    reviews = [e for e in report.events.select_related("actor").order_by("at", "id")
+               if e.action == "status_transition" and e.remarks and e.to_status != "submitted"]
+    return [
+        {"kind": "header", "lines": UNIVERSITY, "title": "R&D QUARTERLY PROGRESS REPORT"},
+        {"kind": "line", "text": f"Project: {project.title} ({project.project_code})"},
+        {"kind": "line", "text": f"Period Covered: Q{report.quarter} {report.year} ({start:%B %d, %Y} to {end:%B %d, %Y})"
+                                 f" · Version {report.version}"},
+        {
+            "kind": "table",
+            "header": [],
+            "rows": [
+                ["Project Leader", _name(project.lead), "Funding Source", quarterly.funding_agency(project)],
+                ["Campus", project.campus, "College", project.college],
+                ["Approved Duration", " to ".join(f"{d:%B %d, %Y}" if d else "-" for d in (project.start_date, project.target_end_date)),
+                 "Original Budget", f"PHP {fin.get('original_budget', 0):,.2f}"],
+                ["Quarter Disbursement", f"PHP {fin.get('quarter_disbursements', 0):,.2f}",
+                 "Budget Utilization", f"{fin.get('utilization_pct', 0)}%"],
+            ],
+            "widths": [18, 32, 18, 32],
+        },
+        {"kind": "heading", "text": "Quarterly Accomplishments", "level": 2},
+        {
+            "kind": "table",
+            "header": [["Approved Objective", "Planned Activity / Milestone", "Target", "Actual this Quarter", "Cumulative",
+                        "Target Date", "Actual Date", "Completion %", "Variance", "Remarks / Delay Explanation"]],
+            "rows": [[r.get("objective", ""), r.get("activity", ""), r.get("target", ""), r.get("actual", ""),
+                      r.get("cumulative", ""), r.get("target_date", ""), r.get("actual_date", ""),
+                      f"{r.get('completion_pct', 0)}%", r.get("variance", ""), r.get("remarks", "")]
+                     for r in report.accomplishments] or [["No accomplishment rows.", "", "", "", "", "", "", "", "", ""]],
+            "widths": [13, 12, 11, 13, 10, 8, 8, 9, 6, 10],
+        },
+        {"kind": "heading", "text": "Issues and Corrective Actions", "level": 2},
+        {
+            "kind": "table",
+            "header": [["Issue", "Corrective Action", "Recommendation", "Responsible", "Target Resolution Date"]],
+            "rows": [[i.get("issue", ""), i.get("corrective_action", ""), i.get("recommendation", ""),
+                      i.get("responsible", ""), i.get("target_resolution_date", "")]
+                     for i in report.issues] or [["None reported.", "", "", "", ""]],
+            "widths": [24, 24, 22, 16, 14],
+        },
+        {"kind": "section", "heading": "Evidence and RMIS Document Links",
+         "body": "\n".join(d.file_name for d in report.evidence.all()) or "None linked.", "level": 2},
+        {"kind": "section", "heading": "Overall Recommendations", "body": report.recommendations or "None.", "level": 2},
+        {"kind": "section", "heading": "Review History", "level": 2,
+         "body": "\n".join(f"{_name(e.actor)} ({e.at:%b %d, %Y}): {e.remarks}" for e in reviews) or "No reviewer comments."},
+        {"kind": "signatures", "items": [
+            ("Prepared by:", _name(project.lead), "Project Leader"),
+            ("Approved by:", _name(report.approved_by), f"{report.approved_at:%B %d, %Y}" if report.approved_at else ""),
+        ]},
+    ]
+
+
+def quarterly_reports_form(reports):
+    """Approved R&D Quarterly Progress Reports, one per page, or None when none were given."""
+    blocks = []
+    for report in reports:
+        if blocks:
+            blocks.append({"kind": "page_break"})
+        blocks.extend(_quarterly_blocks(report))
+    return {"title": "R&D Quarterly Progress Reports", "landscape": True, "blocks": blocks} if blocks else None
+
+
 # ---- Renderers -----------------------------------------------------------------------------------------------------
 
 def _table_width(block):

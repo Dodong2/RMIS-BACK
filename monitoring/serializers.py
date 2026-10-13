@@ -5,8 +5,10 @@ from rest_framework import serializers
 from budget_lib.models import LineItem
 from financial_monitoring.models import Disbursement
 
+from . import quarterly
 from .models import (
-    EvaluationCriterion, EvaluationScore, ExtensionRequest, MidtermReport, MonthlyProgressReport, ProjectEvaluation, RenewalApplication, TerminalReport,
+    EvaluationCriterion, EvaluationScore, ExtensionRequest, MidtermReport, MonthlyProgressReport, ProjectEvaluation,
+    QuarterlyProgressReport, RenewalApplication, TerminalReport,
 )
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
@@ -17,6 +19,11 @@ RENEWAL_DECISION_ROLES = ["system_admin", "riuh", "drd", "vprei"]
 EXTENSION_REQUEST_ROLES = ["system_admin", "program_leader", "project_leader"]
 EXTENSION_ENDORSE_ROLES = ["system_admin", "drd", "crc_chair"]  # DRD, or the campus coordinator
 EXTENSION_APPROVE_ROLES = ["system_admin", "university_admin"]  # University President
+# R&D Quarterly Progress Reports (2026-10-14; Structure Module 9 + Clarification 1a/1b/1c). No system_admin: the
+# Project Leader prepares, RIUH / CRC Chair review and endorse, DRD / VPREI review and give final approval.
+QUARTERLY_PREPARE_ROLES = ["project_leader"]
+QUARTERLY_REVIEW_ROLES = ["riuh", "crc_chair", "drd", "vprei"]
+QUARTERLY_APPROVE_ROLES = ["drd", "vprei"]
 EXTENSION_MIN_LEAD_DAYS = 30  # "approved one (1) month before the expected date of project termination"
 
 
@@ -254,4 +261,110 @@ class ExtensionRequestSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Too late: an extension must be approved at least one month before termination.")
         if project.extension_requests.filter(status__in=("pending", "endorsed")).exists():
             raise serializers.ValidationError("This project already has an extension request in progress.")
+        return attrs
+
+
+class QuarterlyAccomplishmentSerializer(serializers.Serializer):
+    objective = serializers.CharField(required=False, allow_blank=True, default="")
+    activity = serializers.CharField(required=False, allow_blank=True, default="")
+    target = serializers.CharField(required=False, allow_blank=True, default="")
+    actual = serializers.CharField(required=False, allow_blank=True, default="")
+    cumulative = serializers.CharField(required=False, allow_blank=True, default="")
+    target_date = serializers.CharField(required=False, allow_blank=True, default="")
+    actual_date = serializers.CharField(required=False, allow_blank=True, default="")
+    completion_pct = serializers.IntegerField(required=False, min_value=0, max_value=100, default=0)
+    variance = serializers.CharField(required=False, allow_blank=True, default="")
+    remarks = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class QuarterlyIssueSerializer(serializers.Serializer):
+    issue = serializers.CharField(required=False, allow_blank=True, default="")
+    corrective_action = serializers.CharField(required=False, allow_blank=True, default="")
+    recommendation = serializers.CharField(required=False, allow_blank=True, default="")
+    responsible = serializers.CharField(required=False, allow_blank=True, default="")
+    target_resolution_date = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class QuarterlyProgressReportSerializer(serializers.ModelSerializer):
+    accomplishments = QuarterlyAccomplishmentSerializer(many=True, required=False)
+    issues = QuarterlyIssueSerializer(many=True, required=False)
+    period = serializers.SerializerMethodField()
+    is_overdue = serializers.SerializerMethodField()
+    project_info = serializers.SerializerMethodField()
+    evidence_files = serializers.SerializerMethodField()
+    events = serializers.SerializerMethodField()
+    review_history = serializers.SerializerMethodField()
+    approved_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuarterlyProgressReport
+        fields = [
+            "id", "project", "year", "quarter", "period", "status", "version", "is_overdue", "project_info",
+            "accomplishments", "issues", "financial_snapshot", "evidence", "evidence_files", "recommendations",
+            "created_by", "created_at", "updated_at", "submitted_at", "approved_by", "approved_by_name", "approved_at",
+            "events", "review_history",
+        ]
+        read_only_fields = [
+            "status", "version", "financial_snapshot", "created_by", "created_at", "updated_at", "submitted_at",
+            "approved_by", "approved_at",
+        ]
+
+    def get_period(self, obj):
+        return f"Q{obj.quarter} {obj.year}"
+
+    def get_is_overdue(self, obj):
+        return quarterly.is_overdue(obj)
+
+    def get_project_info(self, obj):
+        p = obj.project
+        return {
+            "code": p.project_code, "title": p.title, "leader": p.lead.display_name, "leader_id": p.lead_id,
+            "campus": p.campus, "college": p.college, "funding_agency": quarterly.funding_agency(p),
+            "start_date": p.start_date, "end_date": p.target_end_date, "objectives": quarterly.objective_list(p),
+        }
+
+    def get_evidence_files(self, obj):
+        return [{"id": d.id, "file_name": d.file_name} for d in obj.evidence.all()]
+
+    def _events(self, obj):
+        return [
+            {"action": e.action, "from_status": e.from_status, "to_status": e.to_status, "remarks": e.remarks,
+             "actor": e.actor.display_name, "at": e.at}
+            for e in obj.events.select_related("actor")
+        ]
+
+    def get_events(self, obj):
+        return self._events(obj)
+
+    def get_review_history(self, obj):
+        return [e for e in self._events(obj)
+                if e["action"] == "status_transition" and e["remarks"] and e["to_status"] != "submitted"]
+
+    def get_approved_by_name(self, obj):
+        return obj.approved_by.display_name if obj.approved_by else ""
+
+    def validate_quarter(self, value):
+        if not 1 <= value <= 4:
+            raise serializers.ValidationError("Quarter must be 1 to 4.")
+        return value
+
+    def validate(self, attrs):
+        if self.instance is None:
+            project, year, quarter = attrs["project"], attrs["year"], attrs["quarter"]
+            if quarterly.quarter_range(year, quarter)[0] > quarterly.today():
+                raise serializers.ValidationError("That quarter has not started yet.")
+            user = self.context["request"].user
+            from accounts.permissions import acting_for
+            if project.lead_id not in (user.pk, *acting_for(user)):
+                raise serializers.ValidationError({"project": "You can only create reports for projects you lead."})
+            if QuarterlyProgressReport.objects.filter(project=project, year=year, quarter=quarter).exists():
+                raise serializers.ValidationError(f"This project already has a Q{quarter} {year} report.")
+        else:
+            for field in ("project", "year", "quarter"):
+                if field in attrs and attrs[field] != getattr(self.instance, field):
+                    raise serializers.ValidationError({field: "Can't be changed after the report is created."})
+        project = attrs.get("project") or self.instance.project
+        for doc in attrs.get("evidence", []):
+            if doc.project_id != project.pk:
+                raise serializers.ValidationError({"evidence": f"'{doc.file_name}' belongs to another project."})
         return attrs
