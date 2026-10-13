@@ -26,8 +26,13 @@ class PortfolioDashboardTests(RMISTestCase):
             "campus": "San Pablo City", "total": 2, "by_status": {"active": 1, "completed": 1},
         }])
 
-    def test_project_leader_cannot_see_the_portfolio(self):
+    def test_project_leader_sees_the_portfolio(self):
         response = self.client_for(self.make_user("project_leader")).get("/api/dashboard/portfolio/")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_study_leader_cannot_see_the_portfolio(self):
+        response = self.client_for(self.make_user("study_leader")).get("/api/dashboard/portfolio/")
 
         self.assertEqual(response.status_code, 403)
 

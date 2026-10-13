@@ -12,7 +12,7 @@ from .serializers import PlanningTargetSerializer
 # dashboard.view_portfolio.
 ANALYTICS_ROLES = [
     "system_admin", "vprei", "university_admin", "drd", "crc_chair", "riuh", "finance_budget",
-    "procurement_officer_lib", "program_leader",
+    "procurement_officer_lib", "program_leader", "project_leader",
 ]
 
 
