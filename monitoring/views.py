@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 
 from accounts.permissions import HasRole, role_can
 from config.concurrency import lock
+from realtime.notify import notify, project_audience
 from research_projects.models import Project
 
 from .models import (
@@ -24,6 +25,13 @@ from .serializers import (
     TerminalReportSerializer,
     extension_deadline_passed,
 )
+
+
+def signal(event_type, record, *user_ids, **data):
+    """Real-time "this project's monitoring records changed" (realtime/notify.py), sent after commit to the monitoring
+    roles, the project lead and the given users. The browser refetches through these same endpoints."""
+    notify(project_audience(record.project, "monitoring.", *user_ids), event_type, id=record.id, project=record.project_id,
+           **data)
 
 
 class RoleWritesMixin:
@@ -49,7 +57,8 @@ class MonthlyProgressReportListCreateView(RoleWritesMixin, ProjectScopedMixin, g
     serializer_class = MonthlyProgressReportSerializer
 
     def perform_create(self, serializer):
-        serializer.save(submitted_by=self.request.user)
+        report = serializer.save(submitted_by=self.request.user)
+        signal("monitoring.report.created", report, report.submitted_by_id, kind="monthly")
 
 
 class MidtermReportListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
@@ -57,7 +66,8 @@ class MidtermReportListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.
     serializer_class = MidtermReportSerializer
 
     def perform_create(self, serializer):
-        serializer.save(submitted_by=self.request.user)
+        report = serializer.save(submitted_by=self.request.user)
+        signal("monitoring.report.created", report, report.submitted_by_id, kind="midterm")
 
 
 class TerminalReportListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
@@ -65,7 +75,8 @@ class TerminalReportListCreateView(RoleWritesMixin, ProjectScopedMixin, generics
     serializer_class = TerminalReportSerializer
 
     def perform_create(self, serializer):
-        serializer.save(submitted_by=self.request.user)
+        report = serializer.save(submitted_by=self.request.user)
+        signal("monitoring.report.created", report, report.submitted_by_id, kind="terminal")
 
 
 class TerminalReportCertifyView(APIView):
@@ -82,6 +93,7 @@ class TerminalReportCertifyView(APIView):
         report.certified_by = request.user
         report.certified_at = timezone.now()
         report.save()
+        signal("monitoring.report.certified", report, report.submitted_by_id, kind="terminal")
         return Response(TerminalReportSerializer(report).data)
 
 
@@ -89,6 +101,9 @@ class ProjectEvaluationListCreateView(RoleWritesMixin, ProjectScopedMixin, gener
     write_permission = "monitoring.evaluate"
     queryset = ProjectEvaluation.objects.all().order_by("-scheduled_date")
     serializer_class = ProjectEvaluationSerializer
+
+    def perform_create(self, serializer):
+        signal("monitoring.evaluation.changed", serializer.save())
 
 
 class ProjectEvaluationDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIView):
@@ -101,6 +116,7 @@ class ProjectEvaluationDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIVie
             serializer.save(evaluated_by=self.request.user, evaluated_at=timezone.now())
         else:
             serializer.save()
+        signal("monitoring.evaluation.changed", serializer.instance)
 
 
 class RenewalApplicationListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
@@ -108,7 +124,8 @@ class RenewalApplicationListCreateView(RoleWritesMixin, ProjectScopedMixin, gene
     serializer_class = RenewalApplicationSerializer
 
     def perform_create(self, serializer):
-        serializer.save(submitted_by=self.request.user)
+        application = serializer.save(submitted_by=self.request.user)
+        signal("monitoring.renewal.created", application, application.submitted_by_id, status=application.status)
 
 
 class RenewalApplicationDecideView(APIView):
@@ -130,6 +147,7 @@ class RenewalApplicationDecideView(APIView):
             application.decided_by = request.user
             application.decided_at = timezone.now()
             application.save()
+            signal("monitoring.renewal.decided", application, application.submitted_by_id, status=application.status)
         return Response(RenewalApplicationSerializer(application).data)
 
 
@@ -162,6 +180,7 @@ class EvaluationScoreView(RoleWritesMixin, generics.ListCreateAPIView):
         score, _ = evaluation.scores.update_or_create(
             criterion=data["criterion"], defaults={"score": data["score"], "remarks": data.get("remarks", "")},
         )
+        signal("monitoring.evaluation.changed", evaluation)
         return Response(EvaluationScoreSerializer(score).data, status=status.HTTP_201_CREATED)
 
 
@@ -172,7 +191,8 @@ class ExtensionRequestListCreateView(RoleWritesMixin, ProjectScopedMixin, generi
 
     def perform_create(self, serializer):
         project = serializer.validated_data["project"]
-        serializer.save(submitted_by=self.request.user, current_end_date=project.target_end_date)
+        extension = serializer.save(submitted_by=self.request.user, current_end_date=project.target_end_date)
+        signal("monitoring.extension.created", extension, extension.submitted_by_id, status=extension.status)
 
 
 class ExtensionRequestActionView(APIView):
@@ -212,6 +232,7 @@ class ExtensionRequestActionView(APIView):
         extension.save()
         if action == "approve":
             Project.objects.filter(pk=extension.project_id).update(target_end_date=extension.requested_end_date)
+        signal("monitoring.extension.updated", extension, extension.submitted_by_id, status=extension.status)
         return Response(ExtensionRequestSerializer(extension).data)
 
 
