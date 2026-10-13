@@ -17,7 +17,7 @@ from monitoring.models import MidtermReport, MonthlyProgressReport, TerminalRepo
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
 from outputs.serializers import compute_ip_incentive_eligible, compute_publication_incentive
 from personnel.models import Task
-from research_projects.models import Project
+from research_projects.models import CollegeUnit, Project
 
 from .models import PlanningTarget
 
@@ -97,6 +97,37 @@ def compute_output_dashboard(year=None):
         "creative_works_count": creative_works.count(),
         "total_estimated_publication_incentive": total_estimated_incentive,
         "ip_incentive_eligible_count": ip_incentive_eligible_count,
+    }
+
+
+def compute_portfolio_dashboard(campus=None):
+    """Analytics > Portfolio (client request 2026-10-13): project counts by research priority area, SDG and college.
+    Counts only, over every project, so roles whose project list is scoped (Program Leader) still see the whole
+    university portfolio."""
+    projects = _scoped_projects(campus)
+    priority_labels = dict(Project.PRIORITY_AREA_CHOICES)
+    by_priority_area = {
+        priority_labels.get(code, "Unspecified"): count
+        for code, count in projects.values_list("research_priority_area").annotate(count=Count("id"))
+    }
+    by_sdg = {}
+    for sdgs in projects.values_list("sdgs", flat=True):
+        for sdg in sdgs or []:
+            by_sdg[sdg] = by_sdg.get(sdg, 0) + 1
+    colleges = {}
+    for row in projects.exclude(college="").values("campus", "college", "status").annotate(count=Count("id")):
+        code, _, title = row["college"].partition(CollegeUnit.SEPARATOR)
+        entry = colleges.setdefault(
+            (row["campus"], row["college"]),
+            {"college": row["college"], "code": code, "title": title or code, "campus": row["campus"], "total": 0, "by_status": {}},
+        )
+        entry["total"] += row["count"]
+        entry["by_status"][row["status"]] = row["count"]
+    return {
+        "total_projects": projects.count(),
+        "by_priority_area": by_priority_area,
+        "by_sdg": by_sdg,
+        "by_college": sorted(colleges.values(), key=lambda c: (c["campus"], c["code"])),
     }
 
 

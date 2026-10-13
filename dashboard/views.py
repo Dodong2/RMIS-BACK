@@ -56,6 +56,13 @@ class OutputDashboardView(APIView):
         return Response(services.compute_output_dashboard(year=int(year) if year else None))
 
 
+class PortfolioDashboardView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response(services.compute_portfolio_dashboard(campus=request.query_params.get("campus")))
+
+
 class REIThrustAlignmentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
