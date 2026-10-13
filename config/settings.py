@@ -61,6 +61,7 @@ INSTALLED_APPS = [
 SITE_ID = 1
 
 MIDDLEWARE = [
+    "config.client_ip.CloudflareClientIPMiddleware",   # first: real client IP behind the CF tunnel (config/client_ip.py)
     "corsheaders.middleware.CorsMiddleware",   # must be near the top
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",   # serves /static/ (admin, DRF pages) without nginx
@@ -159,6 +160,9 @@ REST_FRAMEWORK = {
     ),
     # Concurrent-write conflicts (unique race, deadlock) become 409 instead of 500 (config/concurrency.py).
     "EXCEPTION_HANDLER": "config.concurrency.conflict_exception_handler",
+    # Throttling identifies clients by REMOTE_ADDR only (set from CF-Connecting-IP, config/client_ip.py), never by the
+    # client-writable X-Forwarded-For.
+    "NUM_PROXIES": 0,
 }
 
 BREVO_API_KEY = env("BREVO_API_KEY")
