@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.db.models import Avg, Count, Q, Sum
+from django.db.models.functions import TruncMonth
 
 from budget_lib.models import LineItem, LineItemBudget
 from compliance.models import (
@@ -22,17 +23,19 @@ from research_projects.models import CollegeUnit, Project
 from .models import PlanningTarget
 
 
-def _scoped_projects(campus=None, funding_type=None):
+def _scoped_projects(campus=None, funding_type=None, college=None):
     qs = Project.objects.all()
     if campus:
         qs = qs.filter(campus=campus)
+    if college:
+        qs = qs.filter(college=college)
     if funding_type:
         qs = qs.filter(funding_type=funding_type)
     return qs
 
 
-def compute_project_dashboard(campus=None, funding_type=None):
-    projects = _scoped_projects(campus, funding_type)
+def compute_project_dashboard(campus=None, funding_type=None, college=None):
+    projects = _scoped_projects(campus, funding_type, college)
     return {
         "total_projects": projects.count(),
         "by_status": dict(projects.values_list("status").annotate(count=Count("id"))),
@@ -41,8 +44,8 @@ def compute_project_dashboard(campus=None, funding_type=None):
     }
 
 
-def compute_budget_dashboard(campus=None):
-    projects = _scoped_projects(campus)
+def compute_budget_dashboard(campus=None, college=None):
+    projects = _scoped_projects(campus, college=college)
     current_budgets = LineItemBudget.objects.filter(project__in=projects, is_current=True)
     approved = LineItem.objects.filter(budget__in=current_budgets).aggregate(total=Sum("amount"))["total"] or 0
     actual = (
@@ -57,30 +60,39 @@ def compute_budget_dashboard(campus=None):
     }
 
 
-def compute_compliance_dashboard():
+def compute_compliance_dashboard(campus=None, college=None):
+    ethics = EthicsReviewReference.objects.all()
+    similarity = SimilarityCheckRecord.objects.all()
+    ai_declarations = AIUseDeclaration.objects.all()
+    coi = ConflictOfInterestDisclosure.objects.all()
+    misconduct = MisconductCaseReference.objects.all()
+    if campus or college:
+        projects = _scoped_projects(campus, college=college)
+        ethics, similarity, ai_declarations, coi, misconduct = (
+            qs.filter(project__in=projects) for qs in (ethics, similarity, ai_declarations, coi, misconduct)
+        )
     return {
-        "ethics_reviews_by_status": dict(
-            EthicsReviewReference.objects.values_list("status").annotate(count=Count("id"))
-        ),
+        "ethics_reviews_by_status": dict(ethics.values_list("status").annotate(count=Count("id"))),
         "similarity_checks": {
-            "total": SimilarityCheckRecord.objects.count(),
-            "within_threshold": SimilarityCheckRecord.objects.filter(is_within_threshold=True).count(),
-            "over_threshold": SimilarityCheckRecord.objects.filter(is_within_threshold=False).count(),
+            "total": similarity.count(),
+            "within_threshold": similarity.filter(is_within_threshold=True).count(),
+            "over_threshold": similarity.filter(is_within_threshold=False).count(),
         },
-        "ai_use_declarations": AIUseDeclaration.objects.count(),
-        "coi_disclosures_by_status": dict(
-            ConflictOfInterestDisclosure.objects.values_list("status").annotate(count=Count("id"))
-        ),
-        "misconduct_cases_by_status": dict(
-            MisconductCaseReference.objects.values_list("status").annotate(count=Count("id"))
-        ),
+        "ai_use_declarations": ai_declarations.count(),
+        "coi_disclosures_by_status": dict(coi.values_list("status").annotate(count=Count("id"))),
+        "misconduct_cases_by_status": dict(misconduct.values_list("status").annotate(count=Count("id"))),
     }
 
 
-def compute_output_dashboard(year=None):
+def compute_output_dashboard(year=None, campus=None, college=None):
     pubs = PublicationRecord.objects.all()
     ip_records = IPRecord.objects.all()
     creative_works = CreativeWorkRecord.objects.all()
+    if campus or college:
+        projects = _scoped_projects(campus, college=college)
+        pubs = pubs.filter(project__in=projects)
+        ip_records = ip_records.filter(project__in=projects)
+        creative_works = creative_works.filter(project__in=projects)
     if year:
         pubs = pubs.filter(published_on__year=year)
         ip_records = ip_records.filter(created_at__year=year)
@@ -100,11 +112,11 @@ def compute_output_dashboard(year=None):
     }
 
 
-def compute_portfolio_dashboard(campus=None):
+def compute_portfolio_dashboard(campus=None, college=None):
     """Analytics > Portfolio (client request 2026-10-13): project counts by research priority area, SDG and college.
     Counts only, over every project, so roles whose project list is scoped (Program Leader) still see the whole
     university portfolio."""
-    projects = _scoped_projects(campus)
+    projects = _scoped_projects(campus, college=college)
     priority_labels = dict(Project.PRIORITY_AREA_CHOICES)
     by_priority_area = {
         priority_labels.get(code, "Unspecified"): count
@@ -128,6 +140,132 @@ def compute_portfolio_dashboard(campus=None):
         "by_priority_area": by_priority_area,
         "by_sdg": by_sdg,
         "by_college": sorted(colleges.values(), key=lambda c: (c["campus"], c["code"])),
+    }
+
+
+RANKING_WEIGHTS = {"progress": 0.4, "utilization": 0.3, "completion": 0.2, "outputs": 0.1}
+
+
+def _performance_score(rows):
+    """Prototype formula (client 2026-10-14, provisional until the client confirms): 0.4 average physical progress
+    + 0.3 budget utilization + 0.2 completion rate + 0.1 min(100, outputs x 10). A project with no milestones counts
+    as 0% progress; utilization is the group's total disbursed over its total approved budget."""
+    count = len(rows)
+    avg_progress = round(sum(r["physical_pct"] or 0 for r in rows) / count)
+    approved = sum(r["approved"] for r in rows)
+    actual = sum(r["actual"] for r in rows)
+    utilization = round(actual / approved * 100) if approved else 0
+    completed = sum(1 for r in rows if r["status"] == "completed")
+    completion = round(completed / count * 100)
+    outputs = sum(r["outputs"] for r in rows)
+    score = round(
+        RANKING_WEIGHTS["progress"] * avg_progress + RANKING_WEIGHTS["utilization"] * utilization
+        + RANKING_WEIGHTS["completion"] * completion + RANKING_WEIGHTS["outputs"] * min(100, outputs * 10)
+    )
+    return {
+        "projects": count, "avg_progress": avg_progress, "utilization": utilization, "completed": completed,
+        "outputs": outputs, "score": score,
+    }
+
+
+def _ranking(rows, key, describe):
+    groups = {}
+    for row in rows:
+        k = key(row)
+        if k:
+            groups.setdefault(k, []).append(row)
+    ranked = [describe(group[0]) | _performance_score(group) for group in groups.values()]
+    return sorted(ranked, key=lambda r: -r["score"])
+
+
+def _latest_12_months(disbursements):
+    """Totals for the 12 months ending at the latest disbursement month (the prototype's "Latest 12 Months")."""
+    latest = disbursements.order_by("-disbursed_on").values_list("disbursed_on", flat=True).first()
+    if latest is None:
+        return []
+    months = []
+    year, month = latest.year, latest.month
+    for _ in range(12):
+        months.append((year, month))
+        year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+    months.reverse()
+    totals = {
+        (row["month"].year, row["month"].month): row
+        for row in disbursements.filter(disbursed_on__gte=date(*months[0], 1))
+        .annotate(month=TruncMonth("disbursed_on")).values("month")
+        .annotate(total=Sum("amount"), count=Count("id"))
+    }
+    return [
+        {
+            "month": f"{y}-{m:02d}",
+            "total": float(totals[(y, m)]["total"]) if (y, m) in totals else 0.0,
+            "count": totals[(y, m)]["count"] if (y, m) in totals else 0,
+        }
+        for y, m in months
+    ]
+
+
+def compute_performance_dashboard(campus=None, college=None):
+    """Analytics per-project progress rows plus College, Campus and Project Leader performance rankings
+    (client 2026-10-14, important.png)."""
+    projects = (
+        _scoped_projects(campus, college=college)
+        .select_related("lead")
+        .annotate(
+            milestones_total=Count("milestones", distinct=True),
+            milestones_done=Count("milestones", filter=Q(milestones__status="done"), distinct=True),
+            publication_count=Count("publications", distinct=True),
+            ip_count=Count("ip_records", distinct=True),
+            creative_count=Count("creative_works", distinct=True),
+            team_count=Count("team_members", distinct=True),
+        )
+        .order_by("project_code")
+    )
+    current_budgets = LineItemBudget.objects.filter(project__in=projects, is_current=True)
+    approved_by_project = dict(
+        LineItem.objects.filter(budget__in=current_budgets).values_list("budget__project").annotate(total=Sum("amount"))
+    )
+    actual_by_project = dict(
+        Disbursement.objects.filter(line_item__budget__in=current_budgets)
+        .values_list("line_item__budget__project").annotate(total=Sum("amount"))
+    )
+    priority_labels = dict(Project.PRIORITY_AREA_CHOICES)
+    rows = []
+    for p in projects:
+        approved = float(approved_by_project.get(p.pk) or 0)
+        actual = float(actual_by_project.get(p.pk) or 0)
+        code, _, title = p.college.partition(CollegeUnit.SEPARATOR)
+        rows.append({
+            "project": p.pk, "project_code": p.project_code, "title": p.title,
+            "priority_area": priority_labels.get(p.research_priority_area, ""), "status": p.status,
+            "funding_type": p.funding_type, "team_members": p.team_count,
+            "campus": p.campus, "college": p.college, "college_code": code, "college_title": title or code,
+            "leader_id": p.lead_id, "leader": p.lead.display_name, "leader_position": p.lead.position,
+            "leader_office": p.lead.office,
+            "physical_pct": round(p.milestones_done / p.milestones_total * 100, 2) if p.milestones_total else None,
+            "financial_pct": round(actual / approved * 100, 2) if approved else None,
+            "milestones_done": p.milestones_done, "milestones_total": p.milestones_total,
+            "outputs": p.publication_count + p.ip_count + p.creative_count,
+            "approved": approved, "actual": actual,
+        })
+    return {
+        "weights": RANKING_WEIGHTS,
+        "projects": rows,
+        "monthly_disbursements": _latest_12_months(
+            Disbursement.objects.filter(line_item__budget__in=current_budgets)
+        ),
+        "college_ranking": _ranking(
+            rows, lambda r: r["college"] and (r["campus"], r["college"]),
+            lambda r: {"campus": r["campus"], "college": r["college"], "code": r["college_code"], "title": r["college_title"]},
+        ),
+        "campus_ranking": _ranking(rows, lambda r: r["campus"], lambda r: {"campus": r["campus"]}),
+        "leader_ranking": _ranking(
+            rows, lambda r: r["leader_id"],
+            lambda r: {
+                "leader_id": r["leader_id"], "leader": r["leader"], "position": r["leader_position"],
+                "office": r["leader_office"],
+            },
+        ),
     }
 
 
@@ -249,9 +387,9 @@ def appendix_g_export(campus=None, year=None):
     }
 
 
-def compute_forecasting_dashboard(campus=None, funding_type=None):
+def compute_forecasting_dashboard(campus=None, funding_type=None, college=None):
     """Forecasting Analytics Dashboard (Objective 5c): latest successful ARIMA run per project."""
-    projects = _scoped_projects(campus, funding_type)
+    projects = _scoped_projects(campus, funding_type, college)
     runs = []
     for project in projects:
         run = ForecastRun.objects.filter(project=project, status="success").order_by("-run_at").first()

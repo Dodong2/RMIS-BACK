@@ -37,6 +37,7 @@ class ProjectDashboardView(APIView):
             services.compute_project_dashboard(
                 campus=request.query_params.get("campus"),
                 funding_type=request.query_params.get("funding_type"),
+                college=request.query_params.get("college"),
             )
         )
 
@@ -45,14 +46,18 @@ class BudgetDashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        return Response(services.compute_budget_dashboard(campus=request.query_params.get("campus")))
+        return Response(services.compute_budget_dashboard(
+            campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+        ))
 
 
 class ComplianceDashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        return Response(services.compute_compliance_dashboard())
+        return Response(services.compute_compliance_dashboard(
+            campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+        ))
 
 
 class OutputDashboardView(APIView):
@@ -60,14 +65,30 @@ class OutputDashboardView(APIView):
 
     def get(self, request):
         year = request.query_params.get("year")
-        return Response(services.compute_output_dashboard(year=int(year) if year else None))
+        return Response(services.compute_output_dashboard(
+            year=int(year) if year else None,
+            campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+        ))
 
 
 class PortfolioDashboardView(APIView):
     permission_classes = [HasRole("dashboard.view_portfolio")]
 
     def get(self, request):
-        return Response(services.compute_portfolio_dashboard(campus=request.query_params.get("campus")))
+        return Response(services.compute_portfolio_dashboard(
+            campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+        ))
+
+
+class PerformanceDashboardView(APIView):
+    """Analytics Overview progress rows and rankings; same audience as the Portfolio tab."""
+
+    permission_classes = [HasRole("dashboard.view_portfolio")]
+
+    def get(self, request):
+        return Response(services.compute_performance_dashboard(
+            campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+        ))
 
 
 class REIThrustAlignmentView(APIView):
@@ -121,6 +142,7 @@ class ForecastingDashboardView(APIView):
     def get(self, request):
         return Response(services.compute_forecasting_dashboard(
             campus=request.query_params.get("campus"), funding_type=request.query_params.get("funding_type"),
+            college=request.query_params.get("college"),
         ))
 
 
