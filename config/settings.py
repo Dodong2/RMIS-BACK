@@ -24,6 +24,7 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["127.0.0.1", "localhost"])
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 INSTALLED_APPS = [
+    "daphne",                        # first: its runserver serves ASGI (HTTP + WebSockets) in local dev
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -40,6 +41,7 @@ INSTALLED_APPS = [
     "allauth.socialaccount",   # required: dj_rest_auth.registration imports its models even if unused
     "dj_rest_auth",
     "dj_rest_auth.registration",
+    "channels",
 
     "accounts",
     "research_projects",
@@ -56,6 +58,7 @@ INSTALLED_APPS = [
     "risk_indicators",
     "reports",
     "budget_sync",
+    "realtime",
 ]
 
 SITE_ID = 1
@@ -94,6 +97,16 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
+
+# Real-time signals (realtime/notify.py). In-memory by default: production runs ONE Daphne process, so every browser
+# socket lives in the same process as the views that send. Setting REDIS_URL switches to Redis, needed only for
+# several processes or for signals sent from a management command/cron (also needs channels-redis installed).
+REDIS_URL = env("REDIS_URL", default="")
+if REDIS_URL:
+    CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer", "CONFIG": {"hosts": [REDIS_URL]}}}
+else:
+    CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 
 AUTH_USER_MODEL = "accounts.User"     # custom user — set this BEFORE first migration
 
@@ -105,7 +118,9 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD"),
         "HOST": env("DB_HOST"),
         "PORT": env("DB_PORT"),
-        "CONN_MAX_AGE": 60,                 # reuse DB connections instead of reconnecting per request
+        # 0 = close after each request. Under ASGI (Daphne) sync views run on worker threads, and persistent
+        # connections held per thread are never cleaned up, which would leak connections to the Supabase pooler.
+        "CONN_MAX_AGE": 0,
         "CONN_HEALTH_CHECKS": True,         # drop dead connections (e.g. after network change)
         "OPTIONS": {"sslmode": "require"},  # Supabase requires SSL
     }
