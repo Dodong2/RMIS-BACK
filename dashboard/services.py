@@ -248,9 +248,21 @@ def compute_performance_dashboard(campus=None, college=None):
             "outputs": p.publication_count + p.ip_count + p.creative_count,
             "approved": approved, "actual": actual,
         })
+    # Overview "Budget Allocation by Funding Agency" (prototype; Carl 2026-10-14). Projects carry no agency
+    # field, so this is the current LIB's line items summed per funding source.
+    by_agency = (
+        LineItem.objects.filter(budget__in=current_budgets).values_list("funding_source").annotate(total=Sum("amount"))
+    )
+    agency_totals = {}
+    for source, total in by_agency:
+        agency = source.strip() or "Unspecified"
+        agency_totals[agency] = agency_totals.get(agency, 0.0) + float(total)
     return {
         "weights": RANKING_WEIGHTS,
         "projects": rows,
+        "budget_by_funding_agency": [
+            {"agency": a, "total": t} for a, t in sorted(agency_totals.items(), key=lambda kv: (-kv[1], kv[0]))
+        ],
         "monthly_disbursements": _latest_12_months(
             Disbursement.objects.filter(line_item__budget__in=current_budgets)
         ),

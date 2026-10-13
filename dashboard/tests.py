@@ -180,6 +180,28 @@ class PerformanceDashboardTests(RMISTestCase):
         self.assertEqual(siniloan[-1]["total"], 1000.0)
         self.assertEqual(empty, [])
 
+    def test_budget_by_funding_agency_sums_current_lib_items_per_funding_source(self):
+        from budget_lib.models import LineItem, LineItemBudget
+
+        a1 = Project.objects.get(project_code="A-1")
+        budget = LineItemBudget.objects.get(project=a1)
+        LineItem.objects.filter(budget=budget).update(funding_source="DOST-PCAARRD")
+        LineItem.objects.create(budget=budget, category="ps", description="Honoraria", amount=300, funding_source="LSPU GAA")
+        old = LineItemBudget.objects.create(project=a1, version_number=2, is_current=False)
+        LineItem.objects.create(budget=old, category="ps", description="Old", amount=9999, funding_source="CHED")
+        client = self.client_for(self.make_user("drd"))
+
+        everything = client.get("/api/dashboard/performance/").data["budget_by_funding_agency"]
+        siniloan = client.get("/api/dashboard/performance/", {"campus": "Siniloan"}).data["budget_by_funding_agency"]
+
+        # B-1's line item has no funding source; the old (non-current) LIB version is ignored.
+        self.assertEqual(everything, [
+            {"agency": "DOST-PCAARRD", "total": 1000.0},
+            {"agency": "Unspecified", "total": 1000.0},
+            {"agency": "LSPU GAA", "total": 300.0},
+        ])
+        self.assertEqual(siniloan, [{"agency": "Unspecified", "total": 1000.0}])
+
     def test_study_leader_cannot_see_performance(self):
         response = self.client_for(self.make_user("study_leader")).get("/api/dashboard/performance/")
 
