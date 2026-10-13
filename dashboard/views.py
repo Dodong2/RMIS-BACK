@@ -8,6 +8,13 @@ from . import services
 from .models import PlanningTarget
 from .serializers import PlanningTargetSerializer
 
+# Analytics is for oversight, finance, procurement and program leaders (client 2026-10-13); seed source for
+# dashboard.view_portfolio.
+ANALYTICS_ROLES = [
+    "system_admin", "vprei", "university_admin", "drd", "crc_chair", "riuh", "finance_budget",
+    "procurement_officer_lib", "program_leader",
+]
+
 
 class PlanningTargetListCreateView(generics.ListCreateAPIView):
     queryset = PlanningTarget.objects.all().order_by("-target_year")
@@ -57,7 +64,7 @@ class OutputDashboardView(APIView):
 
 
 class PortfolioDashboardView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasRole("dashboard.view_portfolio")]
 
     def get(self, request):
         return Response(services.compute_portfolio_dashboard(campus=request.query_params.get("campus")))

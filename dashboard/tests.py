@@ -26,6 +26,11 @@ class PortfolioDashboardTests(RMISTestCase):
             "campus": "San Pablo City", "total": 2, "by_status": {"active": 1, "completed": 1},
         }])
 
+    def test_project_leader_cannot_see_the_portfolio(self):
+        response = self.client_for(self.make_user("project_leader")).get("/api/dashboard/portfolio/")
+
+        self.assertEqual(response.status_code, 403)
+
     def test_campus_filter(self):
         leader = self.make_user("project_leader")
         Project.objects.create(title="A", project_code="A-1", funding_type="core_funded", lead=leader, campus="Siniloan")

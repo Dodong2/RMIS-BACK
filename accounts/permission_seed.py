@@ -34,6 +34,7 @@ PERMISSIONS = {
     "monitoring.request_extension": ("monitoring", "Request a project extension", "monitoring.serializers:EXTENSION_REQUEST_ROLES"),
     "monitoring.endorse_extension": ("monitoring", "Endorse an extension (DRD / campus coordinator)", "monitoring.serializers:EXTENSION_ENDORSE_ROLES"),
     "monitoring.approve_extension": ("monitoring", "Approve/deny an extension (University President)", "monitoring.serializers:EXTENSION_APPROVE_ROLES"),
+    "dashboard.view_portfolio": ("dashboard", "View Analytics > Portfolio (counts across all projects)", "dashboard.views:ANALYTICS_ROLES"),
     "dashboard.manage_targets": ("dashboard", "Set Planning Office targets", "dashboard.serializers:MANAGE_ROLES"),
     "forecasting.run": ("forecasting", "Trigger ARIMA forecast runs", "forecasting.serializers:FORECAST_ROLES"),
     "dss.manage": ("decision_support", "Manage criteria, AHP runs, WSM recommendation runs", "decision_support.serializers:DSS_ROLES"),
