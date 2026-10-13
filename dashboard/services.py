@@ -13,7 +13,7 @@ from compliance.models import (
 )
 from decision_support.models import FundingRecommendationRun
 from financial_monitoring.models import Disbursement
-from forecasting.models import ForecastRun
+from forecasting.models import ForecastRun, MonthlyForecast
 from monitoring.models import MidtermReport, MonthlyProgressReport, TerminalReport
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
 from outputs.serializers import compute_ip_incentive_eligible, compute_publication_incentive
@@ -395,6 +395,10 @@ def compute_forecasting_dashboard(campus=None, funding_type=None, college=None):
         run = ForecastRun.objects.filter(project=project, status="success").order_by("-run_at").first()
         if run:
             runs.append(run)
+    monthly = {}
+    for period, amount in MonthlyForecast.objects.filter(forecast_run__in=runs).values_list("period", "predicted_amount"):
+        key = f"{period:%Y-%m}"
+        monthly[key] = monthly.get(key, 0) + float(amount)
     accuracy = ForecastRun.objects.filter(pk__in=[r.pk for r in runs]).aggregate(
         avg_mae=Avg("mae"), avg_rmse=Avg("rmse"), avg_mape=Avg("mape"),
     )
@@ -403,9 +407,11 @@ def compute_forecasting_dashboard(campus=None, funding_type=None, college=None):
         "projects_forecasted": len(runs),
         "overrun_risk_count": sum(1 for r in runs if r.is_overrun_risk),
         "accuracy": accuracy,
+        "monthly_forecast": [{"month": m, "predicted": monthly[m]} for m in sorted(monthly)],
         "projects": [
             {
-                "project": r.project_id, "project_code": r.project.project_code, "run": r.id, "run_at": r.run_at,
+                "project": r.project_id, "project_code": r.project.project_code, "title": r.project.title,
+                "run": r.id, "run_at": r.run_at,
                 "approved_budget_total": r.approved_budget_total, "actual_to_date": r.actual_to_date,
                 "projected_total_at_horizon": r.projected_total_at_horizon, "is_overrun_risk": r.is_overrun_risk,
                 "mae": r.mae, "rmse": r.rmse, "mape": r.mape,

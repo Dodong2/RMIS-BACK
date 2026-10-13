@@ -201,3 +201,28 @@ class ComplianceFilterTests(RMISTestCase):
 
         self.assertEqual(client.get("/api/dashboard/compliance/").data["ai_use_declarations"], 1)
         self.assertEqual(client.get("/api/dashboard/compliance/", {"campus": "Sta. Cruz"}).data["ai_use_declarations"], 0)
+
+
+class ForecastingDashboardTests(RMISTestCase):
+    def test_monthly_forecast_sums_the_latest_successful_run_per_project(self):
+        from datetime import date
+
+        from forecasting.models import ForecastRun, MonthlyForecast
+
+        leader = self.make_user("project_leader")
+        project = Project.objects.create(
+            title="Smart Irrigation", project_code="A-1", funding_type="institutional", lead=leader,
+            campus="Siniloan", college="CA - College of Agriculture",
+        )
+        old = ForecastRun.objects.create(project=project, run_by=leader, status="success")
+        MonthlyForecast.objects.create(forecast_run=old, period=date(2026, 3, 1), predicted_amount=999, lower_bound=0, upper_bound=0)
+        latest = ForecastRun.objects.create(project=project, run_by=leader, status="success")
+        for month, amount in ((3, 100), (4, 200)):
+            MonthlyForecast.objects.create(
+                forecast_run=latest, period=date(2026, month, 1), predicted_amount=amount, lower_bound=0, upper_bound=0,
+            )
+
+        data = self.client_for(self.make_user("drd")).get("/api/dashboard/forecasting/", {"college": "CA - College of Agriculture"}).data
+
+        self.assertEqual(data["monthly_forecast"], [{"month": "2026-03", "predicted": 100.0}, {"month": "2026-04", "predicted": 200.0}])
+        self.assertEqual(data["projects"][0]["title"], "Smart Irrigation")
