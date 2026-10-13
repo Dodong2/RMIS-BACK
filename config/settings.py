@@ -111,6 +111,10 @@ DATABASES = {
     }
 }
 
+# Same as Django's default, written out so it's clear: per-process memory, no Redis. Production runs ONE Daphne
+# process, so DRF throttle counters kept here are accurate.
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
