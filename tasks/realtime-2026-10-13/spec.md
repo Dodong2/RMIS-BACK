@@ -35,6 +35,8 @@ Every message: `{"type": "<event>", "id": <record id>, "project": <project id>, 
 | `monitoring.renewal.decided` | `status` | renewal approved/denied |
 | `monitoring.extension.created` | `status` | extension request submitted |
 | `monitoring.extension.updated` | `status` | extension endorsed/approved/denied |
+| `procurement.created` | `status` | leader files a procurement request (added 2026-10-13, Carl's test) |
+| `procurement.updated` | `status` | Procurement Office receives / moves status / completes, or the leader resubmits |
 | `pong` | | reply to the browser's `{"type": "ping"}` |
 
 Frontend-only (synthetic): `realtime.reconnected`, emitted after every (re)connect so pages refetch once.
@@ -43,6 +45,10 @@ Browser -> server: only `{"type": "ping"}` every 25 s (Cloudflare drops idle soc
 
 Close codes: 4401 = no/invalid/expired token (frontend refreshes the token, then reconnects); a bad Origin is
 rejected at the handshake (403).
+
+Procurement events go to every role holding a `financial.*` permission (leaders/staff excluded), the project lead
+and the requester. Frontend: the Procurement page reloads and the bell refetches; bell items deep-link to
+`/procurement?request=<id>` (row highlighted) or `/procurement?view=pending` (Procurement Office queue).
 
 ### Recipients of monitoring events
 - `role_<code>` for every role that holds a `monitoring.*` permission in the DB, except leader roles and project_staff

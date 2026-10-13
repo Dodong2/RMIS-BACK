@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 from accounts.permissions import BudgetScopedMixin, HasRole, role_can, scoped_projects
 from budget_lib.models import LineItemBudget
 from config.concurrency import idempotent, lock
+from realtime.notify import notify, project_audience
 from .models import PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, BudgetRealignment, Disbursement, ProcurementRequest
 from .serializers import (
     BudgetRealignmentSerializer,
@@ -150,6 +151,14 @@ class RealignmentReviewView(APIView):
         return Response(BudgetRealignmentSerializer(realignment).data)
 
 
+def procurement_signal(event_type, procurement):
+    """Real-time "this procurement request changed" (realtime/notify.py), sent after commit to the roles holding a
+    financial.* permission, the project lead and the requester, so the leader's open Procurement page and bell refetch."""
+    project = procurement.line_item.budget.project
+    notify(project_audience(project, "financial.", procurement.requested_by_id), event_type,
+           id=procurement.id, project=project.id, status=procurement.status)
+
+
 class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
     project_lookup = "line_item__budget__project"
     serializer_class = ProcurementRequestSerializer
@@ -179,7 +188,7 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        serializer.save(requested_by=self.request.user)
+        procurement_signal("procurement.created", serializer.save(requested_by=self.request.user))
 
 
 class ProcurementReceiveView(APIView):
@@ -196,6 +205,7 @@ class ProcurementReceiveView(APIView):
         procurement.received_by = procurement.updated_by = request.user
         procurement.received_at = timezone.now()
         procurement.save()
+        procurement_signal("procurement.updated", procurement)
         return Response(ProcurementRequestSerializer(procurement).data)
 
 
@@ -217,6 +227,7 @@ class ProcurementStatusView(APIView):
             procurement.completed_at = timezone.now()
             post_procurement_disbursement(procurement)
         procurement.save()
+        procurement_signal("procurement.updated", procurement)
         return Response(ProcurementRequestSerializer(procurement).data)
 
 
@@ -237,7 +248,7 @@ class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):
         data["remarks"] = request.data.get("remarks", "")  # the leader's note replaces the Procurement Office's return reason
         serializer = self.get_serializer(procurement, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save(status="requested", received_by=None, received_at=None)
+        procurement_signal("procurement.updated", serializer.save(status="requested", received_by=None, received_at=None))
         return Response(serializer.data)
 
 
