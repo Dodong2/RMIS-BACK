@@ -8,7 +8,8 @@ Every demo project code starts with DEMO-, so the data is easy to spot and remov
     python manage.py seed_demo            # adds what is missing, skips demo projects that already exist
     python manage.py seed_demo --clear    # deletes every DEMO- project and everything under it
 
-No accounts are created. Each step is done by the first active user holding the role that does it in the real flow;
+No accounts are created. Each step is done by the first active user holding the role that does it in the real flow
+(DRD, else VPREI, for the approval);
 if a role has no active user the command stops before writing anything.
 """
 
@@ -36,7 +37,8 @@ from research_projects.models import (
 )
 
 PREFIX = "DEMO-"
-ROLES = ("project_leader", "finance_budget", "procurement_officer_lib", "riuh", "drd")
+# Each step's doer; a tuple = first role that has an active user (quarterly approval is DRD or VPREI).
+ROLES = ("project_leader", "finance_budget", "procurement_officer_lib", "riuh", ("drd", "vprei"))
 d = datetime.date
 
 PROJECTS = [
@@ -94,11 +96,17 @@ PROJECTS = [
 ]
 
 
-def _user(code):
-    return (
-        User.objects.filter(role__code=code, is_active=True, account_status="active", is_pending_role=False)
-        .order_by("id").first()
-    )
+def _user(codes):
+    active = User.objects.filter(is_active=True, account_status="active", is_pending_role=False).order_by("id")
+    for code in codes if isinstance(codes, tuple) else (codes,):
+        user = active.filter(role__code=code).first()
+        if user:
+            return user
+    return None
+
+
+def _label(codes):
+    return " or ".join(codes) if isinstance(codes, tuple) else codes
 
 
 def _name(user):
@@ -124,8 +132,8 @@ class Command(BaseCommand):
         if options["clear"]:
             self.clear()
             return
-        users = {code: _user(code) for code in ROLES}
-        missing = [code for code, user in users.items() if user is None]
+        users = {codes: _user(codes) for codes in ROLES}
+        missing = [_label(codes) for codes, user in users.items() if user is None]
         if missing:
             raise CommandError(f"No active user for role(s): {', '.join(missing)}. Add one, then run again.")
         with transaction.atomic():
@@ -177,7 +185,10 @@ class Command(BaseCommand):
         ProjectTeamMember.objects.create(project=project, member_role="co_leader", name="Demo Co-Leader", gender="male")
         ProjectTeamMember.objects.create(project=project, member_role="member", name="Demo Research Assistant", gender="female")
         TargetBeneficiary.objects.create(project=project, group=spec["beneficiary"][0], total=spec["beneficiary"][1])
-        for user, designation in ((riuh, "Research and Innovation Unit Head"), (drd, "Director, Research and Development")):
+        designations = {"riuh": "Research and Innovation Unit Head", "drd": "Director, Research and Development",
+                        "vprei": "Vice President for Research, Extension and Innovation"}
+        for user in (riuh, drd):
+            designation = designations[user.role.code]
             ProjectEndorser.objects.create(project=project, role_code=user.role.code, user=user, name=_name(user),
                                            designation=designation, signed_on=start - datetime.timedelta(days=40))
 

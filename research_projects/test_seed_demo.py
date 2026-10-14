@@ -68,8 +68,15 @@ class SeedDemoTests(RMISTestCase):
         self.assertFalse(ProcurementRequest.objects.exists())
         self.assertTrue(Project.objects.filter(pk=real.pk).exists())
 
+    def test_vprei_approves_when_there_is_no_drd(self):
+        User.objects.filter(role__code="drd").update(is_active=False)
+        vprei = self.make_user("vprei")
+        self.seed()
+        report = QuarterlyProgressReport.objects.filter(project__project_code__startswith="DEMO-").first()
+        self.assertEqual(report.approved_by, vprei)
+
     def test_missing_role_stops_with_clear_message(self):
         User.objects.filter(role__code="drd").update(is_active=False)
-        with self.assertRaisesMessage(CommandError, "drd"):
+        with self.assertRaisesMessage(CommandError, "drd or vprei"):
             self.seed()
         self.assertFalse(Project.objects.filter(project_code__startswith="DEMO-").exists())
