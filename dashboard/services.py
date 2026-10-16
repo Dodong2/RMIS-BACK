@@ -281,8 +281,8 @@ def compute_performance_dashboard(campus=None, college=None):
     }
 
 
-def compute_rei_thrust_alignment():
-    projects = Project.objects.all()
+def compute_rei_thrust_alignment(campus=None, college=None):
+    projects = _scoped_projects(campus, college=college)
     return {
         "by_thrust": dict(
             projects.exclude(rei_thrust="").values_list("rei_thrust").annotate(count=Count("id"))

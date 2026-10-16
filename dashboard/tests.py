@@ -73,6 +73,18 @@ class CollegeFilterTests(RMISTestCase):
         self.assertEqual(budget.data["project_count"], 0)
         self.assertEqual(outputs.status_code, 200)
 
+    def test_rei_thrust_alignment_follows_campus_and_college(self):
+        """Client 2026-10-16: the restored REI Thrust tab follows the Analytics Campus/College filter."""
+        Project.objects.filter(project_code="A-1").update(rei_thrust="REI-01 - Food Security")
+
+        everything = self.client.get("/api/dashboard/rei-thrust-alignment/")
+        ccs = self.client.get("/api/dashboard/rei-thrust-alignment/", {"college": "CCS - College of Computer Studies"})
+        siniloan = self.client.get("/api/dashboard/rei-thrust-alignment/", {"campus": "Siniloan"})
+
+        self.assertEqual((everything.data["by_thrust"], everything.data["unaligned_count"]), ({"REI-01 - Food Security": 1}, 1))
+        self.assertEqual((ccs.data["by_thrust"], ccs.data["unaligned_count"]), ({"REI-01 - Food Security": 1}, 0))
+        self.assertEqual((siniloan.data["by_thrust"], siniloan.data["unaligned_count"]), ({}, 0))
+
 
 class PerformanceDashboardTests(RMISTestCase):
     """Analytics > Overview rankings (client 2026-10-14, prototype formula, provisional until the client confirms):
