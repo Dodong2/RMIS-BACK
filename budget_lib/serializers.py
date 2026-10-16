@@ -1,11 +1,12 @@
-from decimal import ROUND_HALF_UP, Decimal
+from collections import defaultdict
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.permissions import ensure_in_scope
-from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, LineItem, LineItemBudget
+from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, LineItem, LineItemBudget, allocation_periods
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
@@ -22,7 +23,7 @@ class LineItemSerializer(serializers.ModelSerializer):
         model = LineItem
         fields = [
             "id", "budget", "category", "description", "amount", "unit", "quantity", "unit_cost",
-            "fiscal_year", "funding_source", "is_counterpart", "justification", "q1_amount", "q2_amount", "q3_amount", "q4_amount", "is_app_flagged", "created_at",
+            "fiscal_year", "funding_source", "is_counterpart", "justification", "q1_amount", "q2_amount", "q3_amount", "q4_amount", "allocations", "is_app_flagged", "created_at",
         ]
         read_only_fields = ["is_app_flagged"]
 
@@ -41,7 +42,34 @@ class LineItemSerializer(serializers.ModelSerializer):
         unit_cost = attrs.get("unit_cost", getattr(self.instance, "unit_cost", None))
         if quantity is not None and unit_cost is not None and line_total(quantity, unit_cost) != amount:
             raise serializers.ValidationError({"amount": "Total must equal Qty x Unit Cost."})
+        allocations = attrs.get("allocations", getattr(self.instance, "allocations", None) or [])
+        if allocations or self.context.get("require_allocations"):
+            attrs["allocations"] = clean_allocations(allocations, allocation_periods(budget.project), amount)
         return attrs
+
+
+def clean_allocations(allocations, periods, amount):
+    """Per-year (Y1..Yn) or per-quarter (Q1-Q4) split of a line item (client meeting 2026-10-14). Returns every
+    period in order, missing ones as 0.00, and refuses unknown periods or a split that doesn't add up to the amount."""
+    if periods is None:
+        raise serializers.ValidationError({"allocations": "Set the project's start and target end dates first."})
+    if not isinstance(allocations, list):
+        raise serializers.ValidationError({"allocations": "Send a list of {period, amount}."})
+    by_period = {}
+    for row in allocations:
+        period = row.get("period") if isinstance(row, dict) else None
+        if period not in periods or period in by_period:
+            raise serializers.ValidationError({"allocations": f"Use each of {', '.join(periods)} at most once."})
+        try:
+            value = Decimal(str(row.get("amount") or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            raise serializers.ValidationError({"allocations": f"{period} amount is not a number."})
+        if value < 0:
+            raise serializers.ValidationError({"allocations": f"{period} amount can't be negative."})
+        by_period[period] = value
+    if sum(by_period.values()) != amount:
+        raise serializers.ValidationError({"allocations": f"{' + '.join(periods)} must add up to the line item total ({amount})."})
+    return [{"period": p, "amount": str(by_period.get(p, Decimal("0.00")))} for p in periods]
 
 
 class LineItemBudgetSerializer(serializers.ModelSerializer):
@@ -65,12 +93,19 @@ class LineItemBudgetSerializer(serializers.ModelSerializer):
         return project
 
     def get_exceeds_dry_cap(self, obj):
-        """Warning only: institutional dry research over the Manual's P100k/year cap (per fiscal year if set)."""
+        """Warning only: institutional dry research over the Manual's P100k/year cap. Items split per year (Y1..Yn)
+        count each year's allocation; other items count by fiscal year (one-year projects are a single year)."""
         project = obj.project
         if project.funding_type != "institutional" or not project.is_dry_research:
             return False
-        per_year = obj.line_items.values("fiscal_year").annotate(total=Sum("amount"))
-        return any(row["total"] > INSTITUTIONAL_DRY_RESEARCH_CAP for row in per_year)
+        per_year = defaultdict(Decimal)
+        for item in obj.line_items.all():
+            if item.allocations and item.allocations[0]["period"].startswith("Y"):
+                for row in item.allocations:
+                    per_year[row["period"]] += Decimal(row["amount"])
+            else:
+                per_year[item.fiscal_year] += item.amount
+        return any(total > INSTITUTIONAL_DRY_RESEARCH_CAP for total in per_year.values())
 
     def create(self, validated_data):
         project = validated_data["project"]

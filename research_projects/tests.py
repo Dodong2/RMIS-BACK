@@ -592,3 +592,103 @@ class EditRegisteredProjectTests(RMISTestCase):
         admin = self.client_for(self.make_user("system_admin"))
         recoded = admin.patch(f"/api/projects/{self.project.pk}/", {"title": "Fixed", "project_code": "LSPU-10"}, format="json")
         self.assertEqual(recoded.status_code, 200, recoded.data)
+
+
+class LibAllocationTests(RMISTestCase):
+    """Client meeting 2026-10-14: each LIB item is split per year (multi-year project) or per quarter (one-year)."""
+
+    def make_project(self, start, end, **fields):
+        leader = self.make_user("project_leader")
+        project = Project.objects.create(
+            title="P", project_code=f"P-{Project.objects.count()}", funding_type="core_funded", lead=leader,
+            start_date=start, target_end_date=end, **fields,
+        )
+        return leader, project
+
+    def row(self, allocations, unit_cost="10000"):
+        return {"category": "mooe", "description": "Travel Expenses", "unit": "lot", "quantity": "1", "unit_cost": unit_cost, "allocations": allocations}
+
+    def test_periods_follow_the_project_duration(self):
+        from budget_lib.models import allocation_periods
+        d = datetime.date
+        cases = [
+            ((d(2026, 1, 1), d(2026, 12, 31)), ["Q1", "Q2", "Q3", "Q4"]),
+            ((d(2026, 1, 15), d(2026, 7, 14)), ["Q1", "Q2", "Q3", "Q4"]),
+            ((d(2026, 1, 1), d(2027, 6, 30)), ["Y1", "Y2"]),
+            ((d(2026, 1, 1), d(2028, 12, 31)), ["Y1", "Y2", "Y3"]),
+            ((d(2026, 1, 1), None), None),
+        ]
+        for (start, end), expected in cases:
+            self.assertEqual(allocation_periods(Project(start_date=start, target_end_date=end)), expected, (start, end))
+
+    def test_three_year_project_saves_the_per_year_split(self):
+        leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2028, 12, 31))
+        split = [{"period": "Y1", "amount": "5000"}, {"period": "Y2", "amount": "2500"}, {"period": "Y3", "amount": 2500}]
+
+        response = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(split)]}, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(LineItem.objects.get().allocations, [
+            {"period": "Y1", "amount": "5000.00"}, {"period": "Y2", "amount": "2500.00"}, {"period": "Y3", "amount": "2500.00"},
+        ])
+
+    def test_one_year_project_uses_quarters_and_missing_quarters_are_zero(self):
+        leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2026, 12, 31))
+        split = [{"period": "Q1", "amount": "6000"}, {"period": "Q3", "amount": "4000"}]
+
+        response = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(split)]}, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual([a["amount"] for a in LineItem.objects.get().allocations], ["6000.00", "0.00", "4000.00", "0.00"])
+
+    def test_split_must_add_up_and_use_the_projects_periods(self):
+        leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2028, 12, 31))
+        url = f"/api/projects/{project.id}/lib/"
+        client = self.client_for(leader)
+
+        short = client.post(url, {"line_items": [self.row([{"period": "Y1", "amount": "5000"}])]}, format="json")
+        quarter = client.post(url, {"line_items": [self.row([{"period": "Q1", "amount": "10000"}])]}, format="json")
+        missing = client.post(url, {"line_items": [self.row([])]}, format="json")
+        negative = client.post(url, {"line_items": [self.row([{"period": "Y1", "amount": "12000"}, {"period": "Y2", "amount": "-2000"}])]}, format="json")
+
+        for response in (short, quarter, missing, negative):
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("allocations", response.data["errors"][0]["errors"])
+        self.assertFalse(LineItemBudget.objects.exists())
+
+    def test_projects_without_dates_and_budget_management_items_stay_optional(self):
+        leader, undated = self.make_project(None, None)
+        _, dated = self.make_project(datetime.date(2026, 1, 1), datetime.date(2028, 12, 31))
+        plain = {"category": "mooe", "description": "Travel", "unit": "lot", "quantity": "1", "unit_cost": "100"}
+
+        registered = self.client_for(leader).post(f"/api/projects/{undated.id}/lib/", {"line_items": [plain]}, format="json")
+        budget = self.client_for(dated.lead).post("/api/budget/budgets/", {"project": dated.id}, format="json").data
+        added = self.client_for(dated.lead).post("/api/budget/line-items/", {**plain, "budget": budget["id"], "amount": "100"}, format="json")
+
+        self.assertEqual(registered.status_code, 201, registered.data)
+        self.assertEqual(added.status_code, 201, added.data)
+        self.assertEqual(added.data["allocations"], [])
+
+    def test_changing_the_amount_needs_a_matching_split(self):
+        leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2027, 12, 31))
+        split = [{"period": "Y1", "amount": "5000"}, {"period": "Y2", "amount": "5000"}]
+        self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(split)]}, format="json")
+        item = LineItem.objects.get()
+
+        stale = self.client_for(leader).patch(f"/api/budget/line-items/{item.id}/", {"quantity": "2", "amount": "20000"}, format="json")
+
+        self.assertEqual(stale.status_code, 400)
+        self.assertIn("allocations", stale.data)
+
+    def test_dry_cap_counts_each_years_allocation(self):
+        leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2027, 12, 31), is_dry_research=True)
+        Project.objects.filter(pk=project.pk).update(funding_type="institutional")
+        even = [{"period": "Y1", "amount": "80000"}, {"period": "Y2", "amount": "80000"}]
+        lopsided = [{"period": "Y1", "amount": "150000"}, {"period": "Y2", "amount": "10000"}]
+
+        ok = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(even, "160000")]}, format="json")
+        LineItemBudget.objects.all().delete()
+        over = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(lopsided, "160000")]}, format="json")
+
+        self.assertFalse(ok.data["exceeds_dry_cap"])
+        self.assertTrue(over.data["exceeds_dry_cap"])

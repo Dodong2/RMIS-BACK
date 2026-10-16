@@ -7,6 +7,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope, role_can
+from budget_lib.models import allocation_periods
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from config.concurrency import AtomicMutationMixin, idempotent, lock
 from . import importer
@@ -127,7 +128,7 @@ class ProjectCodeAvailableView(APIView):
 
 
 class ProjectLibView(APIView):
-    """POST {"line_items": [{category, description, fiscal_year?, unit, quantity, unit_cost, amount?}]}: the registration
+    """POST {"line_items": [{category, description, fiscal_year?, unit, quantity, unit_cost, amount?, allocations}]}: the registration
     wizard's Budget Requirements step (client meeting 2026-10-01, #11) as draft LIB v1. Gated by projects.register,
     not budget.manage, because CRC Chair/DRD/RIUH register projects but don't encode budgets otherwise.
     All-or-nothing; a project that already has a LIB is refused."""
@@ -143,7 +144,8 @@ class ProjectLibView(APIView):
         if project.budgets.exists():
             return Response({"detail": "This project already has a LIB. Edit it under Budget Management."},
                             status=status.HTTP_400_BAD_REQUEST)
-        context = {"request": request}
+        # Every row needs its per-year/per-quarter split once the project has dates (client meeting 2026-10-14)
+        context = {"request": request, "require_allocations": allocation_periods(project) is not None}
         with transaction.atomic():
             budget = LineItemBudgetSerializer(data={"project": project.pk}, context=context)
             budget.is_valid(raise_exception=True)
