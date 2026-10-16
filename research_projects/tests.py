@@ -313,6 +313,22 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(LineItem.objects.get(budget__project=project).amount, 10000)
         self.assertEqual(project.milestones.count(), 1)
 
+    def test_budget_rows_take_the_year_columns(self):
+        """Client meeting 2026-10-14: a multi-year project's LIB rows carry Year 1-3 amounts."""
+        self.fill_project(**{"End Date": datetime.datetime(2028, 12, 31)})
+        #                                    FY    Cat     Particulars      Unit  Qty Cost   Total Y1    Y2    Y3
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Travel Expenses", "lot", 1, 10000, None, 5000, 2500, 2500])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Supplies", "lot", 1, 1000, None, 900])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual((response.data["errors"][0]["row"], response.data["errors"][0]["field"]), (3, "Year 1-3 / Q1-Q4"))
+        self.workbook["Budget Requirements"].delete_rows(3)
+        response = self.upload()
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual([a["amount"] for a in LineItem.objects.get().allocations], ["5000.00", "2500.00", "2500.00"])
+
     def test_college_unit_must_be_in_the_admin_list_and_fills_both_fields(self):
         self.fill_project()
         self.assertEqual(self.upload().status_code, 201)
@@ -383,6 +399,7 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(preview["objectives"], ["Train teachers", "Map communities"])
         self.assertEqual(preview["budget"][0], {
             "category": "mooe", "description": "Travel Expenses", "unit": "pax", "quantity": 4, "unit_cost": 2500, "total": 10000,
+            "allocations": [],
         })
         self.assertEqual(counts(), before)
 

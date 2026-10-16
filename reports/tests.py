@@ -146,6 +146,24 @@ class ProposalFormTests(RMISTestCase):
     def save(self, user=None):
         return self.client_for(user or self.leader).post("/api/documents/documents/proposal-form/", {"project": self.project.pk}, format="json")
 
+    def test_budget_table_shows_the_quarterly_split_when_there_is_one(self):
+        """Client meeting 2026-10-14: a one-year project's LIB items are split per quarter."""
+        from budget_lib.models import LineItem
+
+        LineItem.objects.update(allocations=[
+            {"period": "Q1", "amount": "20000.00"}, {"period": "Q2", "amount": "10000.00"},
+            {"period": "Q3", "amount": "10000.00"}, {"period": "Q4", "amount": "10000.00"},
+        ])
+        self.save()
+        for fmt in ("xlsx", "docx", "pdf"):
+            response = self.client_for(self.leader).get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": fmt})
+            self.assertEqual(response.status_code, 200, fmt)
+            if fmt == "pdf":
+                continue
+            text = text_of(fmt, response.content)
+            for expected in ("Q1", "Q4", "20,000.00", "50,000.00"):
+                self.assertIn(expected, text, fmt)
+
     def test_the_form_downloads_in_every_format(self):
         self.save()
         for fmt in ("pdf", "docx", "xlsx"):

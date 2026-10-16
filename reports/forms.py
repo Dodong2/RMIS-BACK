@@ -263,6 +263,18 @@ def proposal_form(project_id):
     sector_other = f": {data['sector_other']}" if data["sector_other"] else ""
     continuing = f"Continuing (Year {data['continuing_year']})" if data["is_continuing"] and data["continuing_year"] else "Continuing (i.e., Year 2, Year 3, and so on…)"
 
+    # Per-year / per-quarter allocation columns (client meeting 2026-10-14) only when the LIB has a split
+    periods = data["allocation_periods"] if any(b["allocations"] for b in data["budget"]) else []
+
+    def split(items):
+        sums = {p: 0.0 for p in periods}
+        for b in items:
+            for a in b["allocations"]:
+                if a["period"] in sums:
+                    sums[a["period"]] += a["amount"]
+        return [_money(sums[p]) for p in periods]
+
+    blank = [""] * len(periods)
     budget_rows, row_fills, bold_rows = [], {}, []
     for key, label in BUDGET_GROUPS:
         items = [b for b in data["budget"] if b["category"] == key]
@@ -270,19 +282,21 @@ def proposal_form(project_id):
             continue
         row_fills[len(budget_rows)] = PROPOSAL_FILL
         bold_rows.append(len(budget_rows))
-        budget_rows.append([label, "", "", "", ""])
+        budget_rows.append([label, "", "", "", *blank, ""])
         for b in items:
             budget_rows.append([f"    {b['description']}", b["unit"], f"{b['quantity']:g}" if b["quantity"] is not None else "",
-                                _money(b["unit_cost"]) if b["unit_cost"] is not None else "", _money(b["total"])])
+                                _money(b["unit_cost"]) if b["unit_cost"] is not None else "", *split([b]), _money(b["total"])])
         row_fills[len(budget_rows)] = "E2E8F0"
         bold_rows.append(len(budget_rows))
-        budget_rows.append(["SUBTOTAL", "", "", "", _money(sum(b["total"] for b in items))])
+        budget_rows.append(["SUBTOTAL", "", "", "", *split(items), _money(sum(b["total"] for b in items))])
     if budget_rows:
         row_fills[len(budget_rows)] = "FECACA"
         bold_rows.append(len(budget_rows))
-        budget_rows.append(["GRAND TOTAL", "", "", "", _money(sum(b["total"] for b in data["budget"]))])
+        budget_rows.append(["GRAND TOTAL", "", "", "", *split(data["budget"]), _money(sum(b["total"] for b in data["budget"]))])
     else:
-        budget_rows = [["No LIB entered.", "", "", "", ""]]
+        budget_rows = [["No LIB entered.", "", "", "", *blank, ""]]
+    budget_columns = 5 + len(periods)
+    period_width = 36 / len(periods) if periods else 0
 
     outputs = [[FORM_6P_LABELS.get(o["category"], o["category"]), o["description"], str(o["target_count"])] for o in data["outputs"]]
     beneficiaries = [[b["group"] + (f" – {b['description']}" if b["description"] else ""), str(b["total"])] for b in data["beneficiaries"]]
@@ -352,14 +366,15 @@ def proposal_form(project_id):
         _section("IX. LIST OF REFERENCES", data["references"]),
         {
             "kind": "table",
-            "header": [["X. BUDGET REQUIREMENTS", "", "", "", ""], ["DESCRIPTION", "UNIT", "QTY", "UNIT COST", "TOTAL"]],
-            "spans": [(0, 0, 4)],
+            "header": [["X. BUDGET REQUIREMENTS"] + [""] * (budget_columns - 1),
+                       ["DESCRIPTION", "UNIT", "QTY", "UNIT COST", *[p.replace("Y", "YEAR ") for p in periods], "TOTAL"]],
+            "spans": [(0, 0, budget_columns - 1)],
             "header_fill": PROPOSAL_FILL,
             "rows": budget_rows,
             "row_fills": row_fills,
             "bold_rows": bold_rows,
             "bold_first": False,
-            "widths": [45, 10, 8, 14, 14],
+            "widths": [30, 7, 6, 11, *[period_width] * len(periods), 10] if periods else [45, 10, 8, 14, 14],
         },
         _work_plan_block(data),
         {"kind": "page_break"},

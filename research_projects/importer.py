@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from accounts.models import User
 from accounts.permissions import LEADER_ROLES
-from budget_lib.models import LineItem
+from budget_lib.models import LineItem, allocation_periods
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer, line_total
 from outputs.models import SIX_PS
 from outputs.serializers import ExpectedOutputSerializer
@@ -138,6 +138,9 @@ TABLE_SHEETS = {
         ("Qty", "quantity", "decimal", None),
         ("Unit Cost", "unit_cost", "decimal", None),
         ("Total", "amount", "decimal", None),
+        # Client meeting 2026-10-14: the total split per year (projects over 12 months) or per quarter (one-year)
+        *[(f"Year {n}", f"alloc_Y{n}", "decimal", None) for n in (1, 2, 3)],
+        *[(f"Q{n}", f"alloc_Q{n}", "decimal", None) for n in (1, 2, 3, 4)],
     ],
     "Work Plan": [
         ("Activity", "title", "text", None),
@@ -368,11 +371,14 @@ def import_workbook(file_obj, request):
 
     budget = None
     for name, rows in tables.items():
-        labels = {field: header for header, field, *_ in TABLE_SHEETS[name]}
+        labels = {field: header for header, field, *_ in TABLE_SHEETS[name]} | {"allocations": "Year 1-3 / Q1-Q4"}
         for row_number, data in rows:
             data["project"] = project.pk
             if name == "Budget Requirements":
                 fill_line_item_amount(data)
+                split = [{"period": key[len("alloc_"):], "amount": data.pop(key)} for key in [k for k in data if k.startswith("alloc_")]]
+                if split:
+                    data["allocations"] = split
                 if budget is None:
                     budget = LineItemBudgetSerializer(data={"project": project.pk}, context=context)
                     budget.is_valid(raise_exception=True)
@@ -443,9 +449,11 @@ def proposal_preview(project):
         "budget": [
             {"category": i.category, "description": i.description, "unit": i.get_unit_display() if i.unit else "",
              "quantity": float(i.quantity) if i.quantity is not None else None,
-             "unit_cost": float(i.unit_cost) if i.unit_cost is not None else None, "total": float(i.amount)}
+             "unit_cost": float(i.unit_cost) if i.unit_cost is not None else None, "total": float(i.amount),
+             "allocations": [{"period": a["period"], "amount": float(a["amount"])} for a in i.allocations]}
             for i in line_items
         ],
+        "allocation_periods": allocation_periods(project) or [],
         "work_plan": [
             {"title": m.title, "start_date": str(m.start_date or "") or None, "target_date": str(m.target_date or "") or None}
             for m in project.milestones.order_by("id")
