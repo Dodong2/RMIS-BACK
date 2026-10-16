@@ -20,7 +20,7 @@ from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer,
 from outputs.models import SIX_PS
 from outputs.serializers import ExpectedOutputSerializer
 
-from .models import CollegeUnit, CooperatingAgency, Program, Project, ReiThrust, ProjectEndorser, ProjectTeamMember
+from .models import CollegeUnit, CooperatingAgency, FundingType, Program, Project, ReiThrust, ProjectEndorser, ProjectTeamMember
 from .serializers import (
     ProjectSerializer, ProjectTeamMemberSerializer, StudySerializer, TargetBeneficiarySerializer,
     WorkPlanMilestoneSerializer, leader_owns,
@@ -37,11 +37,22 @@ ADMIN_CHOICE_PAGES = {CollegeUnit: "College Units", ReiThrust: "REI Thrusts", Co
 OLD_COLLEGE_UNIT_LABELS = ("Implementing Unit", "College Unit")
 
 # (label in column A, serializer field, kind, choices, note in column C). Order follows the form.
+class _FundingTypes:
+    """(code, name) pairs read when the template is built or a workbook is imported, so the admin's Funding Types count."""
+
+    def __iter__(self):
+        rows = dict(Program.FUNDING_CHOICES)
+        rows.update(FundingType.objects.values_list("code", "name"))
+        return iter(rows.items())
+
+
+FUNDING_TYPES = _FundingTypes()
+
 PROJECT_FIELDS = [
     ("Title", "title", "text", None, "Required"),
     ("LSPU Faculty Research Number (Project Code)", "project_code", "text", None, "Required, must be unique"),
     ("Program Code (if under a Program)", "program", "program", None, "Optional; code of an existing RMIS Program"),
-    ("Funding Type", "funding_type", "choice", Program.FUNDING_CHOICES, "Blank = Institutional (LSPU-Funded)"),
+    ("Funding Type", "funding_type", "choice", FUNDING_TYPES, "Blank = Institutional (LSPU-Funded)"),
     ("Project Leader E-mail Address", "lead", "user", None, "Required; RMIS account with the Project Leader role"),
     ("Project Leader Gender", "lead_gender", "choice", Project.GENDER_CHOICES, "Male or Female"),
     ("Contact No./s.", "contact_number", "text", None, ""),

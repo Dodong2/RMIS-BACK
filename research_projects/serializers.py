@@ -1,9 +1,10 @@
+from django.utils.text import slugify
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 from accounts.models import Role, User
 from accounts.permissions import LEADER_ROLES, acting_for, ensure_in_scope, scoped_projects
 from .models import (
-    CollegeUnit, CooperatingAgency, EndorserChoice, Program, ReiThrust, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
+    CollegeUnit, CooperatingAgency, EndorserChoice, FundingType, Program, ReiThrust, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
 
 
@@ -44,6 +45,35 @@ class CodedChoiceSerializer(AdminChoiceSerializer):
         if others.filter(name__iexact=name).exists():
             raise serializers.ValidationError(f"This {model._meta.verbose_name} already exists.")
         return {**attrs, "code": code, "title": title}
+
+
+def funding_type_codes():
+    """Codes a program/project may use: the admin's Funding Types plus the three system ones, which the Manual's
+    rules depend on and which exist even before the seed migration's rows do."""
+    return {code for code, _ in Program.FUNDING_CHOICES} | set(FundingType.objects.values_list("code", flat=True))
+
+
+def validate_funding_type(value):
+    if value not in funding_type_codes():
+        raise serializers.ValidationError(f"'{value}' is not a Funding Type in System Admin > Funding Types.")
+    return value
+
+
+class FundingTypeSerializer(AdminChoiceSerializer):
+    """The admin types only the name; the stored code is made from it once and never changes."""
+
+    class Meta(AdminChoiceSerializer.Meta):
+        model = FundingType
+        fields = ["id", "code", "name", "is_system", "created_at"]
+        read_only_fields = ["code", "is_system"]
+
+    def create(self, validated_data):
+        base = slugify(validated_data["name"]).replace("-", "_")[:20].strip("_") or "funding_type"
+        code, n = base, 2
+        while code in funding_type_codes():
+            suffix = f"_{n}"
+            code, n = base[: 20 - len(suffix)] + suffix, n + 1
+        return super().create({**validated_data, "code": code})
 
 
 class CollegeUnitSerializer(CodedChoiceSerializer):
@@ -172,6 +202,9 @@ class ProgramSerializer(serializers.ModelSerializer):
             "lead", "lead_detail", "status", "start_date", "created_at",
         ]
 
+    def validate_funding_type(self, value):
+        return validate_funding_type(value)
+
     def validate(self, attrs):
         lead = attrs.get("lead", getattr(self.instance, "lead", None))
         funding_type = attrs.get("funding_type", getattr(self.instance, "funding_type", None))
@@ -205,6 +238,9 @@ class ProjectSerializer(serializers.ModelSerializer):
             "recommended_by_vprde", "recommended_by_vprde_on", "approved_by_president",
             "created_at",
         ]
+
+    def validate_funding_type(self, value):
+        return validate_funding_type(value)
 
     def validate_sdgs(self, value):
         if not isinstance(value, list) or any(

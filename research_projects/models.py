@@ -3,6 +3,8 @@ from django.db import models
 
 
 class Program(models.Model):
+    # The three funding types the Manual's rules use (dry cap, leader cap, forecasting scope). They are seeded as
+    # FundingType rows the System Admin can rename but not delete; more types are added there (client meeting 2026-10-14).
     FUNDING_CHOICES = (
         ("institutional", "Institutional (LSPU-Funded)"),
         ("core_funded", "Core-Funded (Self-Funded)"),
@@ -16,7 +18,7 @@ class Program(models.Model):
 
     code = models.CharField(max_length=50, unique=True, blank=True, null=True)
     title = models.CharField(max_length=300)
-    funding_type = models.CharField(max_length=20, choices=FUNDING_CHOICES)
+    funding_type = models.CharField(max_length=20)  # a FundingType.code
     rei_thrust = models.CharField(max_length=150, blank=True)
     lead = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="led_programs")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
@@ -69,6 +71,14 @@ class ReiThrust(CodedChoice):
     """"REI Thrust" dropdown on Project Details, e.g. "REI-01 - Agriculture, Fisheries, and Food Security"."""
 
 
+class FundingType(AdminChoice):
+    """"Funding Type" dropdown (client meeting 2026-10-14). Projects and programs store `code`, which never changes, so
+    the admin can rename `name` freely. System rows (Program.FUNDING_CHOICES) carry Manual rules and can't be deleted."""
+
+    code = models.SlugField(max_length=20, unique=True)
+    is_system = models.BooleanField(default=False)
+
+
 class CooperatingAgency(AdminChoice):
     """"Cooperating Agency/ies" multi-select on Proponents & Team (e.g. DOST-PCAARRD)."""
 
@@ -90,7 +100,7 @@ class Project(models.Model):
     program = models.ForeignKey(Program, on_delete=models.SET_NULL, null=True, blank=True, related_name="projects")
     title = models.CharField(max_length=300)
     project_code = models.CharField(max_length=50, unique=True)
-    funding_type = models.CharField(max_length=20, choices=FUNDING_CHOICES)
+    funding_type = models.CharField(max_length=20)  # a FundingType.code
     ntp_number = models.CharField(max_length=50, blank=True)
     ntp_date = models.DateField(null=True, blank=True)
     toe_signed_date = models.DateField(null=True, blank=True)
