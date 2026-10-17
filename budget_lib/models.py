@@ -10,15 +10,17 @@ APP_FLAG_THRESHOLD = 50000
 
 
 def allocation_periods(project):
-    """LIB allocation periods (client meeting 2026-10-14): Y1..Yn for a project longer than 12 months, years rounded up
-    (18 months = Y1, Y2), and Q1-Q4 for a one-year project. None until both start and target end dates are set."""
+    """LIB allocation periods: the quarters the project covers, counted from its start date (client meeting 2026-10-14
+    + yearly.png, 2026-10-17). Q1..Qk for a project of 12 months or less, Y1Q1..YnQm (each project year's quarters)
+    for a longer one; 8 months = Q1-Q3, 15 months = Y1Q1-Y1Q4 + Y2Q1. None until both start and target end dates are set."""
     start, end = project.start_date, project.target_end_date
     if not start or not end or end < start:
         return None
     months = (end.year - start.year) * 12 + end.month - start.month + (1 if end.day >= start.day else 0)
+    quarters = (months + 2) // 3
     if months <= 12:
-        return ["Q1", "Q2", "Q3", "Q4"]
-    return [f"Y{n}" for n in range(1, (months + 11) // 12 + 1)]
+        return [f"Q{n}" for n in range(1, quarters + 1)]
+    return [f"Y{i // 4 + 1}Q{i % 4 + 1}" for i in range(quarters)]
 
 
 class LineItemBudget(models.Model):
@@ -76,8 +78,8 @@ class LineItem(models.Model):
     q2_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     q3_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     q4_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
-    # Client meeting 2026-10-14 (oct 14.mp3): the item's total split per year (Y1..Yn) for multi-year projects,
-    # per quarter (Q1-Q4) for one-year projects. [{"period": "Y1", "amount": "5000.00"}, ...]; must add up to amount.
+    # Client meeting 2026-10-14 + yearly.png: the item's total split over allocation_periods(project), Y1Q1..YnQ4 or
+    # Q1..Q4. [{"period": "Y1Q1", "amount": "5000.00"}, ...]; must add up to amount.
     allocations = models.JSONField(default=list, blank=True)
     is_app_flagged = models.BooleanField(default=False, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)

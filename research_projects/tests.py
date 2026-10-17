@@ -612,7 +612,8 @@ class EditRegisteredProjectTests(RMISTestCase):
 
 
 class LibAllocationTests(RMISTestCase):
-    """Client meeting 2026-10-14: each LIB item is split per year (multi-year project) or per quarter (one-year)."""
+    """Client meeting 2026-10-14 + yearly.png (2026-10-17): each LIB item is split per quarter of each project year
+    (Y1Q1..YnQ4) on a multi-year project, per quarter (Q1..Q4) on a one-year project; only quarters the project covers."""
 
     def make_project(self, start, end, **fields):
         leader = self.make_user("project_leader")
@@ -630,24 +631,35 @@ class LibAllocationTests(RMISTestCase):
         d = datetime.date
         cases = [
             ((d(2026, 1, 1), d(2026, 12, 31)), ["Q1", "Q2", "Q3", "Q4"]),
-            ((d(2026, 1, 15), d(2026, 7, 14)), ["Q1", "Q2", "Q3", "Q4"]),
-            ((d(2026, 1, 1), d(2027, 6, 30)), ["Y1", "Y2"]),
-            ((d(2026, 1, 1), d(2028, 12, 31)), ["Y1", "Y2", "Y3"]),
+            ((d(2026, 1, 15), d(2026, 7, 14)), ["Q1", "Q2"]),
+            ((d(2026, 1, 1), d(2026, 8, 31)), ["Q1", "Q2", "Q3"]),
+            ((d(2026, 1, 1), d(2027, 3, 31)), ["Y1Q1", "Y1Q2", "Y1Q3", "Y1Q4", "Y2Q1"]),
+            ((d(2026, 1, 1), d(2028, 12, 31)), [f"Y{y}Q{q}" for y in (1, 2, 3) for q in (1, 2, 3, 4)]),
             ((d(2026, 1, 1), None), None),
         ]
         for (start, end), expected in cases:
             self.assertEqual(allocation_periods(Project(start_date=start, target_end_date=end)), expected, (start, end))
 
-    def test_three_year_project_saves_the_per_year_split(self):
-        leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2028, 12, 31))
-        split = [{"period": "Y1", "amount": "5000"}, {"period": "Y2", "amount": "2500"}, {"period": "Y3", "amount": 2500}]
+    def test_multi_year_project_saves_the_split_per_quarter_of_each_year(self):
+        leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2027, 3, 31))
+        split = [{"period": "Y1Q1", "amount": "5000"}, {"period": "Y1Q3", "amount": "2500"}, {"period": "Y2Q1", "amount": 2500}]
 
         response = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(split)]}, format="json")
 
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(LineItem.objects.get().allocations, [
-            {"period": "Y1", "amount": "5000.00"}, {"period": "Y2", "amount": "2500.00"}, {"period": "Y3", "amount": "2500.00"},
+            {"period": "Y1Q1", "amount": "5000.00"}, {"period": "Y1Q2", "amount": "0.00"}, {"period": "Y1Q3", "amount": "2500.00"},
+            {"period": "Y1Q4", "amount": "0.00"}, {"period": "Y2Q1", "amount": "2500.00"},
         ])
+
+    def test_quarters_after_the_end_date_are_refused(self):
+        leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2027, 3, 31))
+        late = [{"period": "Y1Q1", "amount": "5000"}, {"period": "Y2Q2", "amount": "5000"}]
+
+        response = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(late)]}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("allocations", response.data["errors"][0]["errors"])
 
     def test_one_year_project_uses_quarters_and_missing_quarters_are_zero(self):
         leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2026, 12, 31))
@@ -663,12 +675,13 @@ class LibAllocationTests(RMISTestCase):
         url = f"/api/projects/{project.id}/lib/"
         client = self.client_for(leader)
 
-        short = client.post(url, {"line_items": [self.row([{"period": "Y1", "amount": "5000"}])]}, format="json")
+        short = client.post(url, {"line_items": [self.row([{"period": "Y1Q1", "amount": "5000"}])]}, format="json")
+        per_year = client.post(url, {"line_items": [self.row([{"period": "Y1", "amount": "10000"}])]}, format="json")
         quarter = client.post(url, {"line_items": [self.row([{"period": "Q1", "amount": "10000"}])]}, format="json")
         missing = client.post(url, {"line_items": [self.row([])]}, format="json")
-        negative = client.post(url, {"line_items": [self.row([{"period": "Y1", "amount": "12000"}, {"period": "Y2", "amount": "-2000"}])]}, format="json")
+        negative = client.post(url, {"line_items": [self.row([{"period": "Y1Q1", "amount": "12000"}, {"period": "Y2Q1", "amount": "-2000"}])]}, format="json")
 
-        for response in (short, quarter, missing, negative):
+        for response in (short, per_year, quarter, missing, negative):
             self.assertEqual(response.status_code, 400)
             self.assertIn("allocations", response.data["errors"][0]["errors"])
         self.assertFalse(LineItemBudget.objects.exists())
@@ -688,7 +701,7 @@ class LibAllocationTests(RMISTestCase):
 
     def test_changing_the_amount_needs_a_matching_split(self):
         leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2027, 12, 31))
-        split = [{"period": "Y1", "amount": "5000"}, {"period": "Y2", "amount": "5000"}]
+        split = [{"period": "Y1Q1", "amount": "5000"}, {"period": "Y2Q1", "amount": "5000"}]
         self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(split)]}, format="json")
         item = LineItem.objects.get()
 
@@ -700,8 +713,9 @@ class LibAllocationTests(RMISTestCase):
     def test_dry_cap_counts_each_years_allocation(self):
         leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2027, 12, 31), is_dry_research=True)
         Project.objects.filter(pk=project.pk).update(funding_type="institutional")
-        even = [{"period": "Y1", "amount": "80000"}, {"period": "Y2", "amount": "80000"}]
-        lopsided = [{"period": "Y1", "amount": "150000"}, {"period": "Y2", "amount": "10000"}]
+        even = [{"period": "Y1Q1", "amount": "40000"}, {"period": "Y1Q2", "amount": "40000"}, {"period": "Y2Q1", "amount": "80000"}]
+        # no single quarter is over P100k, but Year 1's four quarters together are
+        lopsided = [{"period": "Y1Q1", "amount": "60000"}, {"period": "Y1Q4", "amount": "60000"}, {"period": "Y2Q1", "amount": "40000"}]
 
         ok = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(even, "160000")]}, format="json")
         LineItemBudget.objects.all().delete()

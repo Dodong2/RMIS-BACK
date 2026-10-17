@@ -93,8 +93,9 @@ class LineItemBudgetSerializer(serializers.ModelSerializer):
         return project
 
     def get_exceeds_dry_cap(self, obj):
-        """Warning only: institutional dry research over the Manual's P100k/year cap. Items split per year (Y1..Yn)
-        count each year's allocation; other items count by fiscal year (one-year projects are a single year)."""
+        """Warning only: institutional dry research over the Manual's P100k/year cap. Items split per project year
+        (Y1Q1..YnQ4) count each year's four quarters together; other items count by fiscal year (one-year projects
+        are a single year)."""
         project = obj.project
         if project.funding_type != "institutional" or not project.is_dry_research:
             return False
@@ -102,7 +103,7 @@ class LineItemBudgetSerializer(serializers.ModelSerializer):
         for item in obj.line_items.all():
             if item.allocations and item.allocations[0]["period"].startswith("Y"):
                 for row in item.allocations:
-                    per_year[row["period"]] += Decimal(row["amount"])
+                    per_year[row["period"].split("Q")[0]] += Decimal(row["amount"])
             else:
                 per_year[item.fiscal_year] += item.amount
         return any(total > INSTITUTIONAL_DRY_RESEARCH_CAP for total in per_year.values())
