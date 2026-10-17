@@ -138,9 +138,9 @@ TABLE_SHEETS = {
         ("Qty", "quantity", "decimal", None),
         ("Unit Cost", "unit_cost", "decimal", None),
         ("Total", "amount", "decimal", None),
-        # Client meeting 2026-10-14: the total split per year (projects over 12 months) or per quarter (one-year)
-        *[(f"Year {n}", f"alloc_Y{n}", "decimal", None) for n in (1, 2, 3)],
-        *[(f"Q{n}", f"alloc_Q{n}", "decimal", None) for n in (1, 2, 3, 4)],
+        # Client 2026-10-17 (yearly.png): the total split per quarter of each project year; a one-year project
+        # fills only Y1 Q1-Q4 (saved as Q1-Q4)
+        *[(f"Y{y} Q{q}", f"alloc_Y{y}Q{q}", "decimal", None) for y in (1, 2, 3) for q in (1, 2, 3, 4)],
     ],
     "Work Plan": [
         ("Activity", "title", "text", None),
@@ -371,12 +371,15 @@ def import_workbook(file_obj, request):
 
     budget = None
     for name, rows in tables.items():
-        labels = {field: header for header, field, *_ in TABLE_SHEETS[name]} | {"allocations": "Year 1-3 / Q1-Q4"}
+        labels = {field: header for header, field, *_ in TABLE_SHEETS[name]} | {"allocations": "Y1 Q1 - Y3 Q4"}
+        one_year = (allocation_periods(project) or ["Q1"])[0] == "Q1"
         for row_number, data in rows:
             data["project"] = project.pk
             if name == "Budget Requirements":
                 fill_line_item_amount(data)
                 split = [{"period": key[len("alloc_"):], "amount": data.pop(key)} for key in [k for k in data if k.startswith("alloc_")]]
+                if one_year:
+                    split = [{**a, "period": a["period"][2:]} if a["period"].startswith("Y1Q") else a for a in split]
                 if split:
                     data["allocations"] = split
                 if budget is None:

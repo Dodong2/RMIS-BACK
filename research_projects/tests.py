@@ -313,21 +313,34 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(LineItem.objects.get(budget__project=project).amount, 10000)
         self.assertEqual(project.milestones.count(), 1)
 
-    def test_budget_rows_take_the_year_columns(self):
-        """Client meeting 2026-10-14: a multi-year project's LIB rows carry Year 1-3 amounts."""
-        self.fill_project(**{"End Date": datetime.datetime(2028, 12, 31)})
-        #                                    FY    Cat     Particulars      Unit  Qty Cost   Total Y1    Y2    Y3
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Travel Expenses", "lot", 1, 10000, None, 5000, 2500, 2500])
+    def test_budget_rows_take_the_quarter_columns_of_each_year(self):
+        """Client 2026-10-17 (yearly.png): a multi-year project's LIB rows carry Y1 Q1 .. Y3 Q4 amounts."""
+        self.fill_project(**{"End Date": datetime.datetime(2027, 3, 31)})
+        #                                    FY    Cat     Particulars      Unit  Qty Cost   Total Y1Q1  Q2    Q3    Q4    Y2Q1
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Travel Expenses", "lot", 1, 10000, None, 5000, None, 2500, None, 2500])
         self.workbook["Budget Requirements"].append([2026, "MOOE", "Supplies", "lot", 1, 1000, None, 900])
 
         response = self.upload()
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual((response.data["errors"][0]["row"], response.data["errors"][0]["field"]), (3, "Year 1-3 / Q1-Q4"))
+        self.assertEqual((response.data["errors"][0]["row"], response.data["errors"][0]["field"]), (3, "Y1 Q1 - Y3 Q4"))
         self.workbook["Budget Requirements"].delete_rows(3)
         response = self.upload()
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual([a["amount"] for a in LineItem.objects.get().allocations], ["5000.00", "2500.00", "2500.00"])
+        self.assertEqual([(a["period"], a["amount"]) for a in LineItem.objects.get().allocations], [
+            ("Y1Q1", "5000.00"), ("Y1Q2", "0.00"), ("Y1Q3", "2500.00"), ("Y1Q4", "0.00"), ("Y2Q1", "2500.00"),
+        ])
+
+    def test_one_year_project_reads_the_year_1_quarters_as_q1_to_q4(self):
+        self.fill_project(**{"End Date": datetime.datetime(2026, 12, 31)})
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Travel Expenses", "lot", 1, 10000, None, None, 6000, None, 4000])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual([(a["period"], a["amount"]) for a in LineItem.objects.get().allocations], [
+            ("Q1", "0.00"), ("Q2", "6000.00"), ("Q3", "0.00"), ("Q4", "4000.00"),
+        ])
 
     def test_college_unit_must_be_in_the_admin_list_and_fills_both_fields(self):
         self.fill_project()

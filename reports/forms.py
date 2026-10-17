@@ -263,7 +263,7 @@ def proposal_form(project_id):
     sector_other = f": {data['sector_other']}" if data["sector_other"] else ""
     continuing = f"Continuing (Year {data['continuing_year']})" if data["is_continuing"] and data["continuing_year"] else "Continuing (i.e., Year 2, Year 3, and so on…)"
 
-    # Per-year / per-quarter allocation columns (client meeting 2026-10-14) only when the LIB has a split
+    # Allocation columns (Q1..Q4, or Y1Q1..YnQ4 for a multi-year project; client 2026-10-14/10-17) only when the LIB has a split
     periods = data["allocation_periods"] if any(b["allocations"] for b in data["budget"]) else []
 
     def split(items):
@@ -296,7 +296,10 @@ def proposal_form(project_id):
     else:
         budget_rows = [["No LIB entered.", "", "", "", *blank, ""]]
     budget_columns = 5 + len(periods)
-    period_width = 36 / len(periods) if periods else 0
+    # Y1Q1..YnQ4 share the room left after the fixed columns, labelled like the work plan (1Q1, 1Q2, ...)
+    fixed_widths = [30, 7, 6, 11] if len(periods) <= 4 else [18, 5, 4, 8]
+    period_width = (90 - sum(fixed_widths)) / len(periods) if periods else 0
+    period_labels = [p[1:] if p[0] == "Y" else p for p in periods]
 
     outputs = [[FORM_6P_LABELS.get(o["category"], o["category"]), o["description"], str(o["target_count"])] for o in data["outputs"]]
     beneficiaries = [[b["group"] + (f" – {b['description']}" if b["description"] else ""), str(b["total"])] for b in data["beneficiaries"]]
@@ -367,14 +370,14 @@ def proposal_form(project_id):
         {
             "kind": "table",
             "header": [["X. BUDGET REQUIREMENTS"] + [""] * (budget_columns - 1),
-                       ["DESCRIPTION", "UNIT", "QTY", "UNIT COST", *[p.replace("Y", "YEAR ") for p in periods], "TOTAL"]],
+                       ["DESCRIPTION", "UNIT", "QTY", "UNIT COST", *period_labels, "TOTAL"]],
             "spans": [(0, 0, budget_columns - 1)],
             "header_fill": PROPOSAL_FILL,
             "rows": budget_rows,
             "row_fills": row_fills,
             "bold_rows": bold_rows,
             "bold_first": False,
-            "widths": [30, 7, 6, 11, *[period_width] * len(periods), 10] if periods else [45, 10, 8, 14, 14],
+            "widths": [*fixed_widths, *[period_width] * len(periods), 10] if periods else [45, 10, 8, 14, 14],
         },
         _work_plan_block(data),
         {"kind": "page_break"},

@@ -164,6 +164,28 @@ class ProposalFormTests(RMISTestCase):
             for expected in ("Q1", "Q4", "20,000.00", "50,000.00"):
                 self.assertIn(expected, text, fmt)
 
+    def test_budget_table_shows_each_years_quarters_on_a_multi_year_project(self):
+        """Client 2026-10-17 (yearly.png): Y1Q1..YnQ4 columns, labelled like the work plan (1Q1, 1Q2, ...)."""
+        from datetime import date
+
+        from budget_lib.models import LineItem
+
+        type(self.project).objects.filter(pk=self.project.pk).update(start_date=date(2026, 1, 1), target_end_date=date(2027, 3, 31))
+        LineItem.objects.update(allocations=[
+            {"period": "Y1Q1", "amount": "20000.00"}, {"period": "Y1Q2", "amount": "10000.00"}, {"period": "Y1Q3", "amount": "0.00"},
+            {"period": "Y1Q4", "amount": "0.00"}, {"period": "Y2Q1", "amount": "20000.00"},
+        ])
+        self.save()
+        for fmt in ("xlsx", "docx", "pdf"):
+            response = self.client_for(self.leader).get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": fmt})
+            self.assertEqual(response.status_code, 200, fmt)
+            if fmt == "pdf":
+                continue
+            text = text_of(fmt, response.content)
+            for expected in ("1Q1", "1Q4", "2Q1", "20,000.00"):
+                self.assertIn(expected, text, fmt)
+            self.assertNotIn("YEAR 1Q1", text, fmt)
+
     def test_the_form_downloads_in_every_format(self):
         self.save()
         for fmt in ("pdf", "docx", "xlsx"):
