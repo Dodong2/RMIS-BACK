@@ -2,12 +2,11 @@ from django.db import transaction
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
-from accounts.permissions import BudgetScopedMixin, HasRole
+from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_can
 from config.concurrency import lock
 from .models import LineItem, LineItemBudget
-from .serializers import LineItemBudgetSerializer, LineItemSerializer, certify_budget
+from .serializers import LineItemBudgetSerializer, LineItemSerializer, review_budget, total_cost_problem
 
 # Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
 # ensure_in_scope. Certification stays with the Budget Officer (budget.certify).
@@ -88,17 +87,57 @@ class LineItemDetailView(BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIVie
         return super().destroy(request, *args, **kwargs)
 
     def perform_destroy(self, instance):
-        if lock(LineItemBudget.objects.all(), pk=instance.budget_id).status == "certified":
-            raise ValidationError("This budget is certified and can no longer be edited.")
+        budget = lock(LineItemBudget.objects.all(), pk=instance.budget_id)
+        if budget.status not in LineItemBudget.EDITABLE_STATUSES:
+            raise ValidationError(f"This LIB is {budget.get_status_display().lower()} and can no longer be edited.")
         instance.delete()
 
 
-class CertifyBudgetView(APIView):
-    permission_classes = [HasRole("budget.certify")]
+class BudgetReviewView(BudgetScopedMixin, generics.GenericAPIView):
+    """POST {"remarks"?}: one step of the LIB endorsement chain (client 2026-10-18).
+    endorse: CRC Chair (budget.endorse), draft -> endorsed. certify: Budget Officer (budget.certify), endorsed ->
+    certified. return: CRC Chair on a draft or the Budget Officer on an endorsed LIB, remarks required -> returned.
+    resubmit: the project's own leader (or acting replacement), returned -> draft. Endorse and resubmit need the
+    Grand Total to equal the Total Project/Study Cost. Out-of-scope LIBs 404."""
+
+    queryset = LineItemBudget.objects.select_related("project")
+    permission_classes = [permissions.IsAuthenticated]
+    step = None
 
     @transaction.atomic
     def post(self, request, pk):
-        budget = lock(LineItemBudget.objects.all(), pk=pk)
-        if budget.status == "certified":
-            return Response({"detail": "This budget is already certified."}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(LineItemBudgetSerializer(certify_budget(budget, request.user)).data)
+        budget = lock(LineItemBudget.objects.select_related("project"), pk=self.get_object().pk)
+        remarks = (request.data.get("remarks") or "").strip()
+        user = request.user
+
+        if self.step == "returned":
+            if budget.status not in ("draft", "endorsed"):
+                return self.refuse(f"A {budget.get_status_display().lower()} LIB can't be returned.")
+            needed = "budget.endorse" if budget.status == "draft" else "budget.certify"
+            if not role_can(user, needed):
+                who = "CRC Chair" if budget.status == "draft" else "Budget Officer"
+                return self.refuse(f"Only the {who} can return this LIB now.", status.HTTP_403_FORBIDDEN)
+            if not remarks:
+                return Response({"remarks": "Say what needs to be revised."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            if self.step == "resubmitted":
+                allowed = budget.project.lead_id in [user.pk, *acting_for(user)]
+            else:
+                allowed = role_can(user, "budget.endorse" if self.step == "endorsed" else "budget.certify")
+            if not allowed:
+                return self.refuse("You may not take this step on this LIB.", status.HTTP_403_FORBIDDEN)
+            expected = {"endorsed": "draft", "certified": "endorsed", "resubmitted": "returned"}[self.step]
+            if budget.status != expected:
+                return self.refuse(
+                    f"Only a LIB that is {dict(LineItemBudget.STATUS_CHOICES)[expected].lower()} can be "
+                    f"{self.step} (this one is {budget.get_status_display().lower()})."
+                )
+            if self.step in ("endorsed", "resubmitted"):
+                problem = total_cost_problem(budget)
+                if problem:
+                    return self.refuse(problem)
+
+        return Response(LineItemBudgetSerializer(review_budget(budget, user, self.step, remarks)).data)
+
+    def refuse(self, detail, code=status.HTTP_400_BAD_REQUEST):
+        return Response({"detail": detail}, status=code)

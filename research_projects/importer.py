@@ -409,6 +409,7 @@ def proposal_preview(project):
 
     team = list(project.team_members.order_by("id"))
     line_items = LineItem.objects.filter(budget__project=project).order_by("id")
+    lib = project.budgets.filter(is_current=True).select_related("endorsed_by", "certified_by").first()
     return {
         "title": project.title,
         "lead_name": project.lead.get_full_name() or project.lead.email,
@@ -457,6 +458,9 @@ def proposal_preview(project):
             for i in line_items
         ],
         "allocation_periods": allocation_periods(project) or [],
+        # Client 2026-10-18: SF-018 shows who endorsed (CRC Chair) and certified (Budget Officer) the LIB, names only
+        "lib_endorsed_by": lib.endorsed_by.display_name if lib and lib.endorsed_by else "",
+        "lib_certified_by": lib.certified_by.display_name if lib and lib.certified_by else "",
         "work_plan": [
             {"title": m.title, "start_date": str(m.start_date or "") or None, "target_date": str(m.target_date or "") or None}
             for m in project.milestones.order_by("id")

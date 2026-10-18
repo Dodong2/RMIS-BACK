@@ -14,6 +14,7 @@ PERMISSIONS = {
     "personnel.clearance": ("personnel", "Acknowledge property clearance", "personnel.serializers:CLEARANCE_ROLES"),
     "budget.manage": ("budget_lib", "Encode LIB budgets and line items", "budget_lib.views:MANAGE_ROLES"),
     "budget.certify": ("budget_lib", "Certify a LIB budget (Budget Officer)", "budget_lib.serializers:CERTIFY_ROLES"),
+    "budget.endorse": ("budget_lib", "Endorse or return a LIB before certification (CRC Chair)", "budget_lib.serializers:ENDORSE_ROLES"),
     "financial.record_disbursement": ("financial_monitoring", "Record actual disbursements", "financial_monitoring.serializers:DISBURSEMENT_ROLES"),
     "financial.request_realignment": ("financial_monitoring", "Request a budget realignment", "financial_monitoring.serializers:REALIGNMENT_REQUEST_ROLES"),
     "financial.review_major_realignment": ("financial_monitoring", "Review major (33-100%) realignments", "financial_monitoring.serializers:REALIGNMENT_MAJOR_REVIEW_ROLES"),

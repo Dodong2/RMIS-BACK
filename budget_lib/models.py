@@ -24,10 +24,15 @@ def allocation_periods(project):
 
 
 class LineItemBudget(models.Model):
+    # Client 2026-10-18: CRC Chair endorses, then the Budget Officer certifies; either one can return it to the
+    # Project Leader, who edits and resubmits (back to draft). Only draft/returned LIBs can be edited.
     STATUS_CHOICES = (
         ("draft", "Draft"),
+        ("endorsed", "Endorsed by CRC Chair"),
+        ("returned", "Returned for Revision"),
         ("certified", "Certified"),
     )
+    EDITABLE_STATUSES = ("draft", "returned")
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="budgets")
     version_number = models.PositiveIntegerField()
@@ -37,6 +42,10 @@ class LineItemBudget(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="certified_budgets"
     )
     certified_at = models.DateTimeField(null=True, blank=True)
+    endorsed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="endorsed_budgets"
+    )
+    endorsed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -46,6 +55,29 @@ class LineItemBudget(models.Model):
 
     def __str__(self):
         return f"{self.project.project_code} budget v{self.version_number}"
+
+
+class BudgetReview(models.Model):
+    """One row per endorsement step on a LIB (client 2026-10-18: full history of every return and resubmit)."""
+
+    ACTION_CHOICES = (
+        ("endorsed", "Endorsed"),
+        ("returned", "Returned for Revision"),
+        ("resubmitted", "Resubmitted"),
+        ("certified", "Certified"),
+    )
+
+    budget = models.ForeignKey(LineItemBudget, on_delete=models.CASCADE, related_name="reviews")
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    remarks = models.TextField(blank=True)
+    acted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="budget_reviews")
+    acted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["acted_at", "id"]
+
+    def __str__(self):
+        return f"{self.budget}: {self.action}"
 
 
 class LineItem(models.Model):

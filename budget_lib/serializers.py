@@ -6,10 +6,11 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.permissions import ensure_in_scope
-from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, LineItem, LineItemBudget, allocation_periods
+from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, BudgetReview, LineItem, LineItemBudget, allocation_periods
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
+ENDORSE_ROLES = ["system_admin", "crc_chair"]
 QUARTER_FIELDS = ["q1_amount", "q2_amount", "q3_amount", "q4_amount"]
 
 
@@ -32,8 +33,8 @@ class LineItemSerializer(serializers.ModelSerializer):
         ensure_in_scope(self, budget.project)
         # Locked (and re-read) so an item can't slip into a LIB that is being certified at the same moment.
         budget = LineItemBudget.objects.select_for_update().get(pk=budget.pk)
-        if budget.status == "certified":
-            raise serializers.ValidationError("This budget is certified and can no longer be edited.")
+        if budget.status not in LineItemBudget.EDITABLE_STATUSES:
+            raise serializers.ValidationError(f"This LIB is {budget.get_status_display().lower()} and can no longer be edited.")
         quarters = [attrs.get(f, getattr(self.instance, f, None)) for f in QUARTER_FIELDS]
         amount = attrs.get("amount", getattr(self.instance, "amount", None))
         if any(q is not None for q in quarters) and sum(q or 0 for q in quarters) != amount:
@@ -72,8 +73,19 @@ def clean_allocations(allocations, periods, amount):
     return [{"period": p, "amount": str(by_period.get(p, Decimal("0.00")))} for p in periods]
 
 
+class BudgetReviewSerializer(serializers.ModelSerializer):
+    acted_by_name = serializers.CharField(source="acted_by.display_name", read_only=True)
+
+    class Meta:
+        model = BudgetReview
+        fields = ["id", "action", "remarks", "acted_by", "acted_by_name", "acted_at"]
+
+
 class LineItemBudgetSerializer(serializers.ModelSerializer):
     line_items = LineItemSerializer(many=True, read_only=True)
+    reviews = BudgetReviewSerializer(many=True, read_only=True)
+    endorsed_by_name = serializers.CharField(source="endorsed_by.display_name", read_only=True, default=None)
+    certified_by_name = serializers.CharField(source="certified_by.display_name", read_only=True, default=None)
     total_amount = serializers.SerializerMethodField()
     exceeds_dry_cap = serializers.SerializerMethodField()
 
@@ -81,9 +93,10 @@ class LineItemBudgetSerializer(serializers.ModelSerializer):
         model = LineItemBudget
         fields = [
             "id", "project", "version_number", "is_current", "status",
-            "certified_by", "certified_at", "created_at", "line_items", "total_amount", "exceeds_dry_cap",
+            "certified_by", "certified_at", "certified_by_name", "endorsed_by", "endorsed_at", "endorsed_by_name",
+            "created_at", "line_items", "total_amount", "exceeds_dry_cap", "reviews",
         ]
-        read_only_fields = ["version_number", "is_current", "status", "certified_by", "certified_at"]
+        read_only_fields = ["version_number", "is_current", "status", "certified_by", "certified_at", "endorsed_by", "endorsed_at"]
 
     def get_total_amount(self, obj):
         return obj.line_items.aggregate(total=Sum("amount"))["total"] or 0
@@ -117,10 +130,29 @@ class LineItemBudgetSerializer(serializers.ModelSerializer):
         return LineItemBudget.objects.create(**validated_data)
 
 
-def certify_budget(budget, user):
-    """Certify a draft budget. Caller must have checked budget.status == 'draft'."""
-    budget.status = "certified"
-    budget.certified_by = user
-    budget.certified_at = timezone.now()
-    budget.save(update_fields=["status", "certified_by", "certified_at"])
+def total_cost_problem(budget):
+    """Why this LIB can't move on (client 2026-10-18: Grand Total must equal Total Project/Study Cost, checked on the
+    server too), or None. Same rule as the registration wizard: an empty LIB is refused; no Total Cost skips the check."""
+    total = budget.line_items.aggregate(total=Sum("amount"))["total"]
+    if total is None:
+        return "This LIB has no line items."
+    cost = budget.project.total_cost
+    if cost is not None and total != cost:
+        return f"The LIB Grand Total ({total:,.2f}) must equal the Total Project/Study Cost ({cost:,.2f})."
+    return None
+
+
+def review_budget(budget, user, action, remarks=""):
+    """Move a LIB one step along the endorsement chain and keep the step in its history. Caller has locked the row
+    and checked the current status and the user's right to take this step."""
+    now = timezone.now()
+    budget.status = {"endorsed": "endorsed", "returned": "returned", "resubmitted": "draft", "certified": "certified"}[action]
+    if action == "endorsed":
+        budget.endorsed_by, budget.endorsed_at = user, now
+    elif action == "certified":
+        budget.certified_by, budget.certified_at = user, now
+    elif action == "resubmitted":
+        budget.endorsed_by, budget.endorsed_at = None, None
+    budget.save(update_fields=["status", "endorsed_by", "endorsed_at", "certified_by", "certified_at"])
+    BudgetReview.objects.create(budget=budget, action=action, remarks=remarks, acted_by=user)
     return budget
