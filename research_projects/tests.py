@@ -484,7 +484,7 @@ class ProjectReadScopeTests(RMISTestCase):
         self.assertEqual(self.client_for(self.leader).get(f"/api/projects/{self.mine.id}/").status_code, 200)
 
     def test_team_members_and_assigned_staff_see_the_project(self):
-        member, staff = self.make_user("project_leader"), self.make_user("project_staff")
+        member, staff = self.make_user("study_leader"), self.make_user("project_staff")
         self.theirs.team_members.create(name="Member", user=member)
         from personnel.models import ProjectAssignment
         ProjectAssignment.objects.create(user=staff, project=self.theirs, start_date="2026-01-01")
@@ -492,6 +492,15 @@ class ProjectReadScopeTests(RMISTestCase):
         self.assertEqual(self.codes(member), ["T-1"])
         self.assertEqual(self.codes(staff), ["T-1"])
         self.assertEqual(self.codes(self.make_user("project_staff")), [])
+
+    def test_project_leader_sees_only_projects_they_lead(self):
+        """Client 2026-10-18: a Project Leader sees only their own projects, not ones where they are listed as a
+        Co-Project Leader, team member or assigned elsewhere."""
+        self.theirs.team_members.create(member_role="co_leader", name="Co", user=self.leader)
+        self.theirs.studies.create(title="Their study", lead=self.leader)
+
+        self.assertEqual(self.codes(self.leader), ["M-1"])
+        self.assertEqual(self.client_for(self.leader).get(f"/api/projects/{self.theirs.id}/").status_code, 404)
 
     def test_university_wide_roles_still_see_everything(self):
         self.assertEqual(self.codes(self.make_user("drd")), ["M-1", "T-1"])

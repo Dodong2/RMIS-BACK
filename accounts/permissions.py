@@ -80,6 +80,10 @@ def visible_projects(user):
     from research_projects.models import Project
 
     code = user.role.code if user.role else None
+    if code == "project_leader":
+        # Client 2026-10-18: a Project Leader sees only the projects they lead (or lead as acting replacement), not
+        # ones where they are listed as Co-Project Leader or team member.
+        return Project.objects.filter(lead__in=[user.pk, *acting_for(user)])
     if code in LEADER_ROLES or code == "project_staff":
         leads = [user.pk, *acting_for(user)]
         return Project.objects.filter(
