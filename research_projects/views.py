@@ -6,7 +6,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from accounts.permissions import HasRole, ProjectVisibleMixin, acting_for, ensure_in_scope, role_can
+from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope, role_can
 from budget_lib.models import allocation_periods
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from config.concurrency import AtomicMutationMixin, idempotent, lock
@@ -246,36 +246,6 @@ class TeamMemberListCreateView(ProjectChildListCreateView):
 
 class TeamMemberDetailView(ProjectChildDetailView):
     serializer_class = ProjectTeamMemberSerializer
-
-
-class AddTeamMemberView(APIView):
-    """POST {"name", "user"?, "gender"?}: the Project Leader adds Project Staff left out of an approved project's
-    registration, from the project's Team tab (client 2026-10-18). Same ProjectTeamMember row as Step 2, so it also
-    shows on the SF-018. Own project only (or as acting replacement), any project status, always "member", the
-    account (if picked) must be Project Staff, and nobody already on the team (same account or name) is added again.
-    No personnel assignment is made."""
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    @idempotent
-    def post(self, request, pk):
-        project = lock(Project.objects.select_related("lead"), pk=pk)  # two adds of the same person can't both pass
-        if project.lead_id not in [request.user.pk, *acting_for(request.user)]:
-            return Response({"detail": "Only the project's Project Leader can add team members."}, status=status.HTTP_403_FORBIDDEN)
-        serializer = ProjectTeamMemberSerializer(
-            data={**request.data, "project": project.pk, "member_role": "member"}, context={"request": request},
-        )
-        serializer.is_valid(raise_exception=True)
-        name, user = serializer.validated_data["name"].strip(), serializer.validated_data.get("user")
-        if not name:
-            return Response({"name": "Enter the member's name."}, status=status.HTTP_400_BAD_REQUEST)
-        if user is not None and (not user.role or user.role.code != "project_staff"):
-            return Response({"user": "Pick a Project Staff account."}, status=status.HTTP_400_BAD_REQUEST)
-        names = {m.name.strip().lower() for m in project.team_members.all()} | {project.lead.display_name.strip().lower()}
-        if name.lower() in names or (user is not None and (user == project.lead or project.team_members.filter(user=user).exists())):
-            return Response({"detail": f"{name} is already on this project's team."}, status=status.HTTP_400_BAD_REQUEST)
-        serializer.save(name=name)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class EndorserListCreateView(ProjectChildListCreateView):
