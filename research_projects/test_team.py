@@ -40,9 +40,10 @@ class AddTeamMemberTests(RMISTestCase):
             self.assertIn(self.add(user, name="Someone").status_code, (403, 404), user.role.code)
         self.assertFalse(ProjectTeamMember.objects.exists())
 
-    def test_only_active_projects(self):
+    def test_any_project_status(self):
+        """Client 2026-10-18 (later): the button doesn't depend on the project being active."""
         Project.objects.filter(pk=self.project.pk).update(status="completed")
-        self.assertEqual(self.add(self.leader, name="Someone").status_code, 400)
+        self.assertEqual(self.add(self.leader, name="Someone").status_code, 201)
 
     def test_account_must_be_project_staff(self):
         other_leader = self.make_user("project_leader")

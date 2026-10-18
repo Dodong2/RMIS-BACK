@@ -251,7 +251,7 @@ class TeamMemberDetailView(ProjectChildDetailView):
 class AddTeamMemberView(APIView):
     """POST {"name", "user"?, "gender"?}: the Project Leader adds Project Staff left out of an approved project's
     registration, from the project's Team tab (client 2026-10-18). Same ProjectTeamMember row as Step 2, so it also
-    shows on the SF-018. Own project only (or as acting replacement), active projects only, always "member", the
+    shows on the SF-018. Own project only (or as acting replacement), any project status, always "member", the
     account (if picked) must be Project Staff, and nobody already on the team (same account or name) is added again.
     No personnel assignment is made."""
 
@@ -262,8 +262,6 @@ class AddTeamMemberView(APIView):
         project = lock(Project.objects.select_related("lead"), pk=pk)  # two adds of the same person can't both pass
         if project.lead_id not in [request.user.pk, *acting_for(request.user)]:
             return Response({"detail": "Only the project's Project Leader can add team members."}, status=status.HTTP_403_FORBIDDEN)
-        if project.status != "active":
-            return Response({"detail": "Members can only be added to an active project."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = ProjectTeamMemberSerializer(
             data={**request.data, "project": project.pk, "member_role": "member"}, context={"request": request},
         )
