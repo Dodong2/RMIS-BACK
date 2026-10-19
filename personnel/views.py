@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.permissions import HasRole, role_can
-from config.concurrency import AtomicMutationMixin, lock
+from config.concurrency import AtomicMutationMixin, idempotent, lock
 from research_projects.models import Project
 from . import notifications
 from .models import PersonnelChange, ProjectAssignment, StaffProfile, Task, TaskDeliverable, TaskUpdate
@@ -179,6 +179,10 @@ class TaskUpdateListCreateView(generics.ListCreateAPIView):
         if self.request.method == "POST":
             context["task"] = self.get_task()
         return context
+
+    @idempotent  # a retried Work Log is saved once, so its hours are counted once
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         task = serializer.context["task"]

@@ -59,21 +59,10 @@ class StaffNotificationTests(RMISTestCase):
         self.assertEqual(self.assign().status_code, 201)
         self.assertTrue(Task.objects.exists())
 
-    def test_task_progress_is_the_latest_reported_percent(self):
-        task_id = self.assign().data["id"]
-        client = self.client_for(self.staff)
-
-        client.post(f"/api/personnel/tasks/{task_id}/updates/", {"note": "Half the barangays", "hours": "6", "progress_pct": 50}, format="json")
-        client.post(f"/api/personnel/tasks/{task_id}/updates/", {"note": "Comment only"}, format="json")
-        bad = client.post(f"/api/personnel/tasks/{task_id}/updates/", {"note": "x", "progress_pct": 120}, format="json")
-
-        self.assertEqual(bad.status_code, 400)
-        self.assertEqual(client.get(f"/api/personnel/tasks/{task_id}/").data["progress_pct"], 50)
-
-    def make_task_with_update(self, when, pct=50, hours=6):
+    def make_task_with_update(self, when, hours=6):
         task = Task.objects.create(project=self.project, title="Data collection", assignee=self.staff, assigned_by=self.leader,
-                                   due_date=datetime.date(2026, 12, 31))
-        update = TaskUpdate.objects.create(task=task, author=self.staff, note="Half the barangays", hours=hours, progress_pct=pct)
+                                   due_date=datetime.date(2026, 12, 31), estimated_hours=12)
+        update = TaskUpdate.objects.create(task=task, author=self.staff, note="Half the barangays", hours=hours)
         TaskUpdate.objects.filter(pk=update.pk).update(created_at=when)
         Task.objects.filter(pk=task.pk).update(created_at=when)
         return task
@@ -318,3 +307,84 @@ class TaskScheduleTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["estimated_hours"], "12.00")
+
+
+class WorkLogProgressTests(RMISTestCase):
+    """Client 2026-10-19: % completed = the assignee's Work Log hours / planned hours (capped at 100), 100 once done."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader")
+        self.staff = self.make_user("project_staff")
+        self.project = Project.objects.create(title="P", project_code="P-1", funding_type="institutional", lead=self.leader)
+        self.task_id = self.client_for(self.leader).post("/api/personnel/tasks/", {
+            "project": self.project.pk, "title": "Survey", "assignee": self.staff.pk, "start_date": "2026-10-19", "due_date": "2026-10-23",
+        }, format="json").data["id"]
+        self.staff_client = self.client_for(self.staff)
+
+    def log(self, client=None, **payload):
+        return (client or self.staff_client).post(f"/api/personnel/tasks/{self.task_id}/updates/", {"note": "Data collection", **payload}, format="json")
+
+    def task(self):
+        return self.staff_client.get(f"/api/personnel/tasks/{self.task_id}/").data
+
+    def test_progress_follows_the_logged_hours(self):
+        self.assertEqual(self.log(hours="8").status_code, 201)
+        after_first = self.task()["progress_pct"]
+        self.log(hours="4")
+
+        self.assertEqual((after_first, self.task()["progress_pct"]), (20, 30))
+
+    def test_a_work_log_needs_hours_above_zero(self):
+        self.assertEqual(self.log().status_code, 400)
+        self.assertIn("hours", self.log(hours="0").data)
+        self.assertEqual(self.log(hours="1.5").status_code, 201)
+
+    def test_only_work_logs_carry_hours(self):
+        self.assertIn("hours", self.log(kind="comment", hours="2").data)
+        self.assertEqual(self.log(kind="comment").status_code, 201)
+        self.assertEqual(self.task()["progress_pct"], 0)
+
+    def test_only_the_assignee_logs_work(self):
+        leader = self.client_for(self.leader)
+
+        self.assertEqual(self.log(leader, hours="8").status_code, 400)
+        self.assertEqual(self.log(leader, kind="comment").status_code, 201)
+        self.assertEqual(self.task()["progress_pct"], 0)
+
+    def test_progress_caps_at_100_but_the_hours_are_kept(self):
+        self.log(hours="48")
+
+        data = self.task()
+        self.assertEqual((data["progress_pct"], data["logged_hours"]), (100, "48.00"))
+
+    def test_a_reported_percent_is_ignored(self):
+        self.log(hours="8", progress_pct=90)
+
+        self.assertEqual(self.task()["progress_pct"], 20)
+
+    def test_a_retry_with_the_same_key_is_counted_once(self):
+        url = f"/api/personnel/tasks/{self.task_id}/updates/"
+        for _ in range(2):
+            self.staff_client.post(url, {"note": "Data collection", "hours": "8"}, format="json", HTTP_IDEMPOTENCY_KEY="worklog-0001")
+
+        self.assertEqual(TaskUpdate.objects.filter(task_id=self.task_id).count(), 1)
+        self.assertEqual(self.task()["progress_pct"], 20)
+
+    def test_no_planned_hours_means_zero_and_done_means_100(self):
+        task = Task.objects.get(pk=self.task_id)
+        Task.objects.filter(pk=task.pk).update(estimated_hours=None)
+        self.log(hours="8")
+        self.assertEqual(self.task()["progress_pct"], 0)
+
+        Task.objects.filter(pk=task.pk).update(status="done", completed_at=timezone.now())
+        self.assertEqual(self.task()["progress_pct"], 100)
+
+    def test_progress_as_of_a_moment_counts_only_earlier_logs(self):
+        self.log(hours="8")
+        later = TaskUpdate.objects.get(pk=self.log(hours="8").data["id"])
+        TaskUpdate.objects.filter(pk=later.pk).update(created_at=timezone.now() + datetime.timedelta(days=10))
+
+        task = Task.objects.get(pk=self.task_id)
+        self.assertEqual(task.progress_as_of(timezone.now() + datetime.timedelta(days=1)), 20)
+        self.assertEqual(task.progress_pct, 40)

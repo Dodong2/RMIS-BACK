@@ -54,9 +54,10 @@ def task_assigned(task):
         ("Project", f"{task.project.project_code} · {task.project.title}"),
         ("Task", task.title),
         ("Description", task.description or "—"),
+        ("Start date", f"{task.start_date:%B %d, %Y}" if task.start_date else "—"),
         ("Deadline", due),
         ("Priority", task.get_priority_display()),
-        ("Estimated hours", task.estimated_hours or "—"),
+        ("Planned hours", task.estimated_hours or "—"),
         ("Assigned by", display_name(task.assigned_by)),
     ]
     links = button(calendar_link(task), "Open in RMIS calendar")

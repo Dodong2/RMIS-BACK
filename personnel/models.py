@@ -97,15 +97,18 @@ class Task(models.Model):
         return self.updates.aggregate(total=models.Sum("hours"))["total"] or 0
 
     def progress_as_of(self, moment=None):
-        """% completed: the latest progress the assignee reported (up to `moment`), 100 once done (client
-        follow-up 2026-10-02: the monthly accomplishment report pulls this instead of staff recalling it)."""
+        """% completed up to `moment`: the assignee's Work Log hours / planned hours, capped at 100; 100 once done;
+        0 without planned hours (client 2026-10-19, replaces the self-reported % of 2026-10-02). The monthly
+        accomplishment report still pulls this."""
         if self.status == "done" and (moment is None or (self.completed_at and self.completed_at <= moment)):
             return 100
-        updates = self.updates.exclude(progress_pct=None)
+        if not self.estimated_hours:
+            return 0
+        logs = self.updates.filter(kind="update", author_id=self.assignee_id)
         if moment is not None:
-            updates = updates.filter(created_at__lte=moment)
-        latest = updates.order_by("-created_at", "-id").first()
-        return latest.progress_pct if latest else 0
+            logs = logs.filter(created_at__lte=moment)
+        hours = logs.aggregate(total=models.Sum("hours"))["total"] or 0
+        return min(100, round(hours * 100 / self.estimated_hours))
 
     @property
     def progress_pct(self):

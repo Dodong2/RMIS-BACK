@@ -173,13 +173,23 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskUpdate
         fields = ["id", "task", "author", "author_email", "author_name", "note", "kind", "hours", "progress_pct", "new_status", "created_at"]
-        read_only_fields = ["task", "author"]
+        # progress_pct stays for older entries; % completed now comes from the hours (client 2026-10-19).
+        read_only_fields = ["task", "author", "progress_pct"]
 
     def validate(self, attrs):
         user = self.context["request"].user
         task = self.context["task"]
         if not role_can(user, "personnel.assign_tasks") and task.assignee_id != user.id:
             raise serializers.ValidationError("Only the assignee or a task assigner can post updates on this task.")
+        # Client 2026-10-19: hours are logged only in a Work Log ("update"), only by the assignee, and must be > 0.
+        hours = attrs.get("hours") or 0
+        if attrs.get("kind", "update") == "update":
+            if task.assignee_id != user.id:
+                raise serializers.ValidationError({"kind": "Only the assignee logs work on this task; post a comment instead."})
+            if hours <= 0:
+                raise serializers.ValidationError({"hours": "Enter the hours worked (more than 0)."})
+        elif hours:
+            raise serializers.ValidationError({"hours": "Hours are logged in a Work Log only."})
         if attrs.get("new_status") == "done" and not role_can(user, "personnel.assign_tasks"):
             raise serializers.ValidationError({"new_status": "Submit the task for review; a leader marks it done."})
         return attrs
