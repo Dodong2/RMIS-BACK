@@ -9,7 +9,7 @@ from accounts.testing import RMISTestCase
 from monitoring.models import MidtermReport
 from research_projects.models import Project
 
-from .models import Task, TaskUpdate
+from .models import Task, TaskUpdate, working_days
 
 
 class StaffNotificationTests(RMISTestCase):
@@ -27,7 +27,8 @@ class StaffNotificationTests(RMISTestCase):
                 for c in self.brevo_post.call_args_list]
 
     def assign(self, **fields):
-        payload = {"project": self.project.pk, "title": "Data collection", "assignee": self.staff.pk, "due_date": "2026-10-31", **fields}
+        payload = {"project": self.project.pk, "title": "Data collection", "assignee": self.staff.pk,
+                   "start_date": "2026-10-26", "due_date": "2026-10-31", **fields}
         return self.client_for(self.leader).post("/api/personnel/tasks/", payload, format="json")
 
     def test_assigned_staff_is_emailed_the_task_with_calendar_links(self):
@@ -151,7 +152,8 @@ class MilestoneTaskTests(RMISTestCase):
 
     def add_task(self, title, **fields):
         response = self.client.post("/api/personnel/tasks/", {
-            "project": self.project.pk, "title": title, "assignee": self.staff.pk, "milestone": self.milestone.pk, **fields,
+            "project": self.project.pk, "title": title, "assignee": self.staff.pk, "milestone": self.milestone.pk,
+            "start_date": "2026-06-01", "due_date": "2026-06-05", **fields,
         }, format="json")
         self.assertEqual(response.status_code, 201, response.data)
         return response.data["id"]
@@ -184,6 +186,7 @@ class MilestoneTaskTests(RMISTestCase):
 
         response = self.client.post("/api/personnel/tasks/", {
             "project": other.pk, "title": "x", "assignee": self.staff.pk, "milestone": self.milestone.pk,
+            "start_date": "2026-06-01", "due_date": "2026-06-05",
         }, format="json")
 
         self.assertEqual(response.status_code, 400)
@@ -192,15 +195,17 @@ class MilestoneTaskTests(RMISTestCase):
     def test_task_due_date_stays_within_the_activity_dates(self):
         self.milestone.start_date = datetime.date(2026, 3, 1)
         self.milestone.save()
-        post = lambda due: self.client.post("/api/personnel/tasks/", {
-            "project": self.project.pk, "title": "x", "assignee": self.staff.pk, "milestone": self.milestone.pk, "due_date": due,
+        post = lambda start, due: self.client.post("/api/personnel/tasks/", {
+            "project": self.project.pk, "title": "x", "assignee": self.staff.pk, "milestone": self.milestone.pk,
+            "start_date": start, "due_date": due,
         }, format="json")
 
-        self.assertEqual(post("2026-02-28").status_code, 400)
-        self.assertEqual(post("2026-07-01").status_code, 400)
-        self.assertIn("planned dates", str(post("2026-07-01").data))
-        self.assertEqual(post("2026-03-01").status_code, 201)
-        self.assertEqual(post("2026-06-30").status_code, 201)
+        self.assertEqual(post("2026-02-27", "2026-03-03").status_code, 400)
+        self.assertEqual(post("2026-06-29", "2026-07-01").status_code, 400)
+        self.assertIn("planned dates", str(post("2026-06-29", "2026-07-01").data))
+        self.assertIn("planned dates", str(post("2026-02-27", "2026-03-03").data))
+        self.assertEqual(post("2026-03-02", "2026-03-06").status_code, 201)
+        self.assertEqual(post("2026-06-29", "2026-06-30").status_code, 201)
 
     def test_old_task_outside_the_dates_can_still_be_edited(self):
         task = Task.objects.get(pk=self.add_task("Survey"))
@@ -212,7 +217,8 @@ class MilestoneTaskTests(RMISTestCase):
 
     def test_tasks_filter_by_milestone(self):
         self.add_task("Survey")
-        self.client.post("/api/personnel/tasks/", {"project": self.project.pk, "title": "Loose", "assignee": self.staff.pk}, format="json")
+        self.client.post("/api/personnel/tasks/", {"project": self.project.pk, "title": "Loose", "assignee": self.staff.pk,
+                                                   "start_date": "2026-06-01", "due_date": "2026-06-05"}, format="json")
 
         titles = [t["title"] for t in self.client.get("/api/personnel/tasks/", {"milestone": self.milestone.pk}).data]
 
@@ -248,3 +254,67 @@ class PersonnelTransitionsHappenOnceTests(RMISTestCase):
         self.assertEqual(self.admin.post(url, {"action": "return"}).status_code, 400)
         task.refresh_from_db()
         self.assertEqual(task.status, "done")
+
+
+class TaskScheduleTests(RMISTestCase):
+    """Client 2026-10-19: a task has a Start and End (due) date; planned hours = working days (Mon-Fri, inclusive) x 8."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader")
+        self.staff = self.make_user("project_staff")
+        self.project = Project.objects.create(title="P", project_code="P-1", funding_type="institutional", lead=self.leader)
+        self.client = self.client_for(self.leader)
+
+    def create(self, start, due, **fields):
+        return self.client.post("/api/personnel/tasks/", {
+            "project": self.project.pk, "title": "Survey", "assignee": self.staff.pk, "start_date": start, "due_date": due, **fields,
+        }, format="json")
+
+    def test_working_days_skip_weekends_and_count_both_ends(self):
+        day = datetime.date.fromisoformat
+        self.assertEqual(working_days(day("2026-10-19"), day("2026-10-23")), 5)  # Mon-Fri
+        self.assertEqual(working_days(day("2026-10-23"), day("2026-10-26")), 2)  # Fri-Mon
+        self.assertEqual(working_days(day("2026-10-19"), day("2026-10-19")), 1)  # same day
+        self.assertEqual(working_days(day("2026-10-24"), day("2026-10-25")), 0)  # Sat-Sun
+        self.assertEqual(working_days(day("2026-10-19"), day("2026-10-30")), 10)  # two weeks
+
+    def test_planned_hours_come_from_the_dates_not_the_client(self):
+        response = self.create("2026-10-19", "2026-10-23", estimated_hours="3")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["estimated_hours"], "40.00")
+
+    def test_start_and_end_dates_are_required_for_a_new_task(self):
+        response = self.client.post("/api/personnel/tasks/", {
+            "project": self.project.pk, "title": "Survey", "assignee": self.staff.pk, "due_date": "2026-10-23",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("start_date", response.data)
+
+    def test_end_before_start_or_no_working_day_is_rejected(self):
+        backwards = self.create("2026-10-23", "2026-10-19")
+        weekend = self.create("2026-10-24", "2026-10-25")
+
+        self.assertEqual(backwards.status_code, 400)
+        self.assertIn("due_date", backwards.data)
+        self.assertEqual(weekend.status_code, 400)
+        self.assertIn("working day", str(weekend.data))
+
+    def test_changing_the_dates_recomputes_planned_hours(self):
+        task_id = self.create("2026-10-19", "2026-10-23").data["id"]
+
+        response = self.client.patch(f"/api/personnel/tasks/{task_id}/", {"due_date": "2026-10-20"}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["estimated_hours"], "16.00")
+
+    def test_old_task_without_a_start_date_can_still_be_edited(self):
+        task = Task.objects.create(project=self.project, title="Old", assignee=self.staff, assigned_by=self.leader,
+                                   due_date=datetime.date(2026, 10, 23), estimated_hours=12)
+
+        response = self.client.patch(f"/api/personnel/tasks/{task.pk}/", {"title": "Old v2"}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["estimated_hours"], "12.00")

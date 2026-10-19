@@ -11,7 +11,8 @@ from research_projects.serializers import (
     validate_lead_role,
 )
 from .models import (
-    PersonnelChange, ProjectAssignment, PropertyClearance, StaffProfile, Task, TaskDeliverable, TaskUpdate,
+    HOURS_PER_WORKING_DAY, PersonnelChange, ProjectAssignment, PropertyClearance, StaffProfile, Task, TaskDeliverable,
+    TaskUpdate, working_days,
 )
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
@@ -111,10 +112,10 @@ class TaskSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Task
-        fields = ["id", "project", "study", "title", "description", "due_date", "status", "priority",
+        fields = ["id", "project", "study", "title", "description", "start_date", "due_date", "status", "priority",
                   "estimated_hours", "logged_hours", "progress_pct", "milestone", "tags", "deliverables", "assignee", "assignee_detail", "assigned_by",
                   "started_at", "completed_at", "created_at"]
-        read_only_fields = ["assigned_by"]
+        read_only_fields = ["assigned_by", "estimated_hours"]
 
     def validate_tags(self, value):
         if not isinstance(value, list) or not all(isinstance(t, str) and t.strip() for t in value):
@@ -139,15 +140,29 @@ class TaskSerializer(serializers.ModelSerializer):
         milestone = attrs.get("milestone", getattr(self.instance, "milestone", None))
         if milestone and milestone.project_id != project.id:
             raise serializers.ValidationError({"milestone": "Milestone does not belong to this project."})
-        # Client request 2026-10-07: a task under a work plan activity is due within that activity's planned dates.
-        # Checked only when the due date or activity changes, so older tasks can still be edited.
+        start = attrs.get("start_date", getattr(self.instance, "start_date", None))
         due = attrs.get("due_date", getattr(self.instance, "due_date", None))
-        if milestone and due and ("due_date" in attrs or "milestone" in attrs):
-            if (milestone.start_date and due < milestone.start_date) or due > milestone.target_date:
-                start = milestone.start_date.isoformat() if milestone.start_date else "the start"
-                raise serializers.ValidationError(
-                    {"due_date": f"The due date must be within the activity's planned dates ({start} to {milestone.target_date.isoformat()})."}
-                )
+        if not self.instance:
+            missing = {f: "A new task needs a Start Date and an End Date." for f, v in (("start_date", start), ("due_date", due)) if not v}
+            if missing:
+                raise serializers.ValidationError(missing)
+        dates_changed = bool({"start_date", "due_date", "milestone"} & set(attrs))
+        # Client request 2026-10-07: a task under a work plan activity is due within that activity's planned dates.
+        # Checked only when the dates or activity change, so older tasks can still be edited.
+        if milestone and dates_changed:
+            first = milestone.start_date.isoformat() if milestone.start_date else "the start"
+            message = f"must be within the activity's planned dates ({first} to {milestone.target_date.isoformat()})."
+            for field, value in (("start_date", start), ("due_date", due)):
+                if value and ((milestone.start_date and value < milestone.start_date) or value > milestone.target_date):
+                    raise serializers.ValidationError({field: f"The {'start' if field == 'start_date' else 'due'} date {message}"})
+        # Client 2026-10-19: planned hours = working days x 8, always from the dates (never typed in).
+        if start and due and dates_changed:
+            if due < start:
+                raise serializers.ValidationError({"due_date": "The End Date can't be before the Start Date."})
+            days = working_days(start, due)
+            if not days:
+                raise serializers.ValidationError({"due_date": "The dates must include at least one working day (Mon-Fri)."})
+            attrs["estimated_hours"] = days * HOURS_PER_WORKING_DAY
         return attrs
 
 

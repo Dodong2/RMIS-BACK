@@ -1,9 +1,19 @@
+import datetime
+
 from django.conf import settings
 from django.core.validators import MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
 from research_projects.models import Program, Project, Study
+
+
+HOURS_PER_WORKING_DAY = 8
+
+
+def working_days(start, end):
+    """Mon-Fri days from start to end, both included (client 2026-10-19: weekends only, no holiday calendar)."""
+    return sum(1 for n in range((end - start).days + 1) if (start + datetime.timedelta(days=n)).weekday() < 5)
 
 
 class StaffProfile(models.Model):
@@ -62,6 +72,8 @@ class Task(models.Model):
     )
     title = models.CharField(max_length=300)
     description = models.TextField(blank=True)
+    # Client 2026-10-19: Start/End dates set the planned hours; due_date is the End Date.
+    start_date = models.DateField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default="medium")
