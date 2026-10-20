@@ -299,8 +299,20 @@ class DashboardRoleScopeTests(RMISTestCase):
         self.assertEqual([r["project"] for r in self.get(self.staff, "dashboard/tasks/")], [self.mine.pk])
         self.assertEqual(self.get(self.staff, "risk/dashboard/")["total_projects"], 1)
 
-    def test_project_staff_get_no_budget_figures(self):
-        self.assertEqual(self.get(self.staff, "dashboard/budget/")["project_count"], 0)
+    def test_project_staff_get_budget_totals_of_their_own_projects(self):
+        """Client 2026-10-20 (overrides Clarification Q12 for the Dashboard only): staff see the overall Budget and
+        Utilization of the projects they belong to."""
+        from decimal import Decimal
+
+        from budget_lib.models import LineItem, LineItemBudget
+
+        for project, amount in ((self.mine, "1000"), (self.other, "5000")):
+            budget = LineItemBudget.objects.create(project=project, version_number=1, is_current=True)
+            LineItem.objects.create(budget=budget, category="mooe", description="Supplies", amount=Decimal(amount))
+
+        data = self.get(self.staff, "dashboard/budget/")
+
+        self.assertEqual((data["project_count"], data["total_approved"]), (1, Decimal("1000")))
 
     def test_project_leader_counts_only_projects_they_lead(self):
         self.assertEqual(self.get(self.leader, "dashboard/projects/")["total_projects"], 1)

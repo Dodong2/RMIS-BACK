@@ -57,7 +57,10 @@ def compute_project_dashboard(campus=None, funding_type=None, college=None, user
 
 
 def compute_budget_dashboard(campus=None, college=None, user=None):
-    projects = _scoped_projects(campus, college=college, user=user, budget=True)
+    # Client 2026-10-20: Project Staff see the overall Budget/Utilization of the projects they belong to (Dashboard
+    # only; the Budget page still follows Clarification Q12 = no budget data for staff).
+    is_staff = user is not None and user.role is not None and user.role.code == "project_staff"
+    projects = _scoped_projects(campus, college=college, user=user, budget=not is_staff)
     current_budgets = LineItemBudget.objects.filter(project__in=projects, is_current=True)
     approved = LineItem.objects.filter(budget__in=current_budgets).aggregate(total=Sum("amount"))["total"] or 0
     actual = (
