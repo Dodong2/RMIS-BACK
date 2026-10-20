@@ -186,6 +186,17 @@ class ProposalFormTests(RMISTestCase):
                 self.assertIn(expected, text, fmt)
             self.assertNotIn("YEAR 1Q1", text, fmt)
 
+    def test_the_form_shows_the_rde_agenda(self):
+        """Client 2026-10-20: the RDE Thrust and Priority Area appear on the SF-018 like on the wizard preview."""
+        type(self.project).objects.filter(pk=self.project.pk).update(
+            rde_thrust="1 - Computing and Emerging Technologies", rde_priority="1.3 - Artificial Intelligence and Machine Learning",
+        )
+        self.save()
+        for fmt in ("docx", "xlsx"):
+            text = text_of(fmt, self.client_for(self.leader).get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": fmt}).content)
+            for expected in ("RDE AGENDA", "RDE THRUST: 1 - Computing and Emerging Technologies", "1.3 - Artificial Intelligence"):
+                self.assertIn(expected, text, fmt)
+
     def test_the_form_downloads_in_every_format(self):
         self.save()
         for fmt in ("pdf", "docx", "xlsx"):

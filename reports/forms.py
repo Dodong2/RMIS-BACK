@@ -342,6 +342,7 @@ def proposal_form(project_id):
             f"{_box(not data['is_dry_research'], 'Wet Research (i.e., with laboratory)')}    {_box(data['is_dry_research'], 'Dry Research')}",
         ])),
         _section("STUDY COMPONENT TITLES", "\n".join(f"Study {i}: {t}" for i, t in enumerate(data["study_titles"] or ["", ""], start=1))),
+        _section("RDE AGENDA", f"RDE THRUST: {data['rde_thrust'] or '—'}\nRDE PRIORITY AREA: {data['rde_priority'] or '—'}"),
         _section("RESEARCH PRIORITY AREA", "\n".join(_box(code == data["research_priority_area"], label) for code, label in Project.PRIORITY_AREA_CHOICES)),
         _section("RESEARCH TYPOLOGY", "\n".join(_box(code in data["research_typology"], label) for code, label in Project.TYPOLOGY_CHOICES)),
         _section("SUSTAINABLE DEVELOPMENT GOALS (SDGs)", "; ".join(f"SDG {n} — {SDG_LABELS[n - 1]}" for n in data["sdgs"]) or "None selected"),

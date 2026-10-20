@@ -437,6 +437,8 @@ def proposal_preview(project):
         "research_type": project.research_type,
         "is_dry_research": project.is_dry_research,
         "study_titles": [s.title for s in project.studies.order_by("id")],
+        "rde_thrust": project.rde_thrust,
+        "rde_priority": project.rde_priority,
         "research_priority_area": project.research_priority_area,
         "research_typology": project.research_typology,
         "sdgs": project.sdgs,

@@ -422,6 +422,7 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(preview["lead_email"], "leader@lspu.test")
         self.assertEqual(preview["co_leaders"], [{"name": "Archieval M. Jain", "gender": "male"}])
         self.assertEqual(preview["objectives"], ["Train teachers", "Map communities"])
+        self.assertEqual((preview["rde_thrust"], preview["rde_priority"]), ("", ""))
         self.assertEqual(preview["budget"][0], {
             "category": "mooe", "description": "Traveling Expenses - Local", "unit": "pax", "quantity": 4, "unit_cost": 2500, "total": 10000,
             "allocations": [],
