@@ -77,14 +77,14 @@ class Command(BaseCommand):
             if not open_tasks and not done_last_month:
                 continue
             accomplished = [
-                (t.project.project_code, t.title, f"{t.progress_as_of(end)}%",
+                (t.project.project_code, t.title, f"{t.progress_as_of(end):g}%",
                  f"{t.updates.filter(author=user, created_at__gte=start, created_at__lt=end).aggregate(h=Sum('hours'))['h'] or 0:g}")
                 for t in done_last_month
             ]
             today = timezone.localdate()
             pending = [
                 (t.project.project_code, t.title, f"{t.due_date:%b %d, %Y}" if t.due_date else "—",
-                 "OVERDUE" if t.due_date and t.due_date < today else t.get_status_display(), f"{t.progress_pct}%")
+                 "OVERDUE" if t.due_date and t.due_date < today else t.get_status_display(), f"{t.progress_pct:g}%")
                 for t in open_tasks
             ]
             html = (

@@ -98,8 +98,9 @@ class Task(models.Model):
 
     def progress_as_of(self, moment=None):
         """% completed up to `moment`: the assignee's Work Log hours / planned hours, capped at 100; 100 once done;
-        0 without planned hours (client 2026-10-19, replaces the self-reported % of 2026-10-02). The monthly
-        accomplishment report still pulls this."""
+        0 without planned hours (client 2026-10-19, replaces the self-reported % of 2026-10-02). One decimal, so a day's
+        log on a year-long task shows 0.4% instead of 0% (client 2026-10-20). The monthly accomplishment report still
+        pulls this."""
         if self.status == "done" and (moment is None or (self.completed_at and self.completed_at <= moment)):
             return 100
         if not self.estimated_hours:
@@ -108,7 +109,7 @@ class Task(models.Model):
         if moment is not None:
             logs = logs.filter(created_at__lte=moment)
         hours = logs.aggregate(total=models.Sum("hours"))["total"] or 0
-        return min(100, round(hours * 100 / self.estimated_hours))
+        return min(100, float(round(hours * 100 / self.estimated_hours, 1)))
 
     @property
     def progress_pct(self):

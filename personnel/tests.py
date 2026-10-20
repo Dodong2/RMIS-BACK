@@ -335,6 +335,13 @@ class WorkLogProgressTests(RMISTestCase):
 
         self.assertEqual((after_first, self.task()["progress_pct"]), (20, 30))
 
+    def test_a_long_task_moves_off_zero_after_one_day(self):
+        # Client 2026-10-20: 8h on a year-long task (2088 planned hours) showed 0% because the % was a whole number.
+        Task.objects.filter(pk=self.task_id).update(estimated_hours=2088)
+        self.log(hours="8")
+
+        self.assertEqual(self.task()["progress_pct"], 0.4)
+
     def test_a_work_log_needs_hours_above_zero(self):
         self.assertEqual(self.log().status_code, 400)
         self.assertIn("hours", self.log(hours="0").data)

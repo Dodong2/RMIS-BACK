@@ -108,7 +108,7 @@ class TaskSerializer(serializers.ModelSerializer):
     assignee_detail = LeadSerializer(source="assignee", read_only=True)
     deliverables = TaskDeliverableSerializer(many=True, read_only=True)
     logged_hours = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
-    progress_pct = serializers.IntegerField(read_only=True)
+    progress_pct = serializers.FloatField(read_only=True)
 
     class Meta:
         model = Task
