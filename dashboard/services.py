@@ -3,7 +3,9 @@ from datetime import date
 from django.db.models import Avg, Count, Q, Sum
 from django.db.models.functions import TruncMonth
 
+from accounts.permissions import scoped_projects, visible_projects
 from budget_lib.models import LineItem, LineItemBudget
+from budget_lib.serializers import LineItemBudgetSerializer
 from compliance.models import (
     AIUseDeclaration,
     ConflictOfInterestDisclosure,
@@ -17,11 +19,17 @@ from forecasting.models import ForecastRun, MonthlyForecast
 from monitoring.models import MidtermReport, MonthlyProgressReport, TerminalReport
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
 from outputs.serializers import compute_ip_incentive_eligible, compute_publication_incentive
-from accounts.permissions import scoped_projects, visible_projects
 from personnel.models import Task
 from research_projects.models import CollegeUnit, Project
 
 from .models import PlanningTarget
+
+
+class DashboardBudgetRowSerializer(LineItemBudgetSerializer):
+    """One current LIB per project for the Dashboard Budget tab, without line items or reviews."""
+
+    class Meta(LineItemBudgetSerializer.Meta):
+        fields = ["id", "project", "version_number", "is_current", "status", "total_amount", "exceeds_dry_cap"]
 
 
 def _user_projects(user, budget=False):
@@ -57,10 +65,10 @@ def compute_project_dashboard(campus=None, funding_type=None, college=None, user
 
 
 def compute_budget_dashboard(campus=None, college=None, user=None):
-    # Client 2026-10-20: Project Staff see the overall Budget/Utilization of the projects they belong to (Dashboard
-    # only; the Budget page still follows Clarification Q12 = no budget data for staff).
-    is_staff = user is not None and user.role is not None and user.role.code == "project_staff"
-    projects = _scoped_projects(campus, college=college, user=user, budget=not is_staff)
+    # Client 2026-10-20: Project Staff and Project Leaders see the budget of the projects they are involved in (same
+    # list as their Projects count). Dashboard only; the Budget page still follows Clarification Q12.
+    involved_only = user is not None and user.role is not None and user.role.code in ("project_staff", "project_leader")
+    projects = _scoped_projects(campus, college=college, user=user, budget=not involved_only)
     current_budgets = LineItemBudget.objects.filter(project__in=projects, is_current=True)
     approved = LineItem.objects.filter(budget__in=current_budgets).aggregate(total=Sum("amount"))["total"] or 0
     actual = (
@@ -72,6 +80,9 @@ def compute_budget_dashboard(campus=None, college=None, user=None):
         "total_approved": approved,
         "total_actual": actual,
         "utilization_pct": utilization_pct,
+        "budgets": DashboardBudgetRowSerializer(
+            current_budgets.select_related("project").order_by("project__project_code"), many=True,
+        ).data,
     }
 
 

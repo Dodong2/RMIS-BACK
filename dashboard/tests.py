@@ -313,6 +313,21 @@ class DashboardRoleScopeTests(RMISTestCase):
         data = self.get(self.staff, "dashboard/budget/")
 
         self.assertEqual((data["project_count"], data["total_approved"]), (1, Decimal("1000")))
+        self.assertEqual([(b["project"], b["version_number"]) for b in data["budgets"]], [(self.mine.pk, 1)])
+
+    def test_project_leader_budget_rows_cover_only_projects_they_lead(self):
+        """A project_leader who leads a study under someone else's project still sees only the projects they lead
+        (same list as their Projects count)."""
+        from budget_lib.models import LineItemBudget
+        from research_projects.models import Study
+
+        Study.objects.create(project=self.other, title="S", lead=self.leader)
+        for project in (self.mine, self.other):
+            LineItemBudget.objects.create(project=project, version_number=1, is_current=True)
+
+        data = self.get(self.leader, "dashboard/budget/")
+
+        self.assertEqual([b["project"] for b in data["budgets"]], [self.mine.pk])
 
     def test_project_leader_counts_only_projects_they_lead(self):
         self.assertEqual(self.get(self.leader, "dashboard/projects/")["total_projects"], 1)
