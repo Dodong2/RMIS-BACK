@@ -37,6 +37,7 @@ class RiskDashboardView(APIView):
             services.compute_risk_dashboard(
                 campus=request.query_params.get("campus"),
                 funding_type=request.query_params.get("funding_type"),
+                user=request.user,
             )
         )
 

@@ -38,6 +38,7 @@ class ProjectDashboardView(APIView):
                 campus=request.query_params.get("campus"),
                 funding_type=request.query_params.get("funding_type"),
                 college=request.query_params.get("college"),
+                user=request.user,
             )
         )
 
@@ -48,6 +49,7 @@ class BudgetDashboardView(APIView):
     def get(self, request):
         return Response(services.compute_budget_dashboard(
             campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+            user=request.user,
         ))
 
 
@@ -57,6 +59,7 @@ class ComplianceDashboardView(APIView):
     def get(self, request):
         return Response(services.compute_compliance_dashboard(
             campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+            user=request.user,
         ))
 
 
@@ -68,6 +71,7 @@ class OutputDashboardView(APIView):
         return Response(services.compute_output_dashboard(
             year=int(year) if year else None,
             campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+            user=request.user,
         ))
 
 
@@ -97,6 +101,7 @@ class REIThrustAlignmentView(APIView):
     def get(self, request):
         return Response(services.compute_rei_thrust_alignment(
             campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+            user=request.user,
         ))
 
 
@@ -144,7 +149,7 @@ class ForecastingDashboardView(APIView):
     def get(self, request):
         return Response(services.compute_forecasting_dashboard(
             campus=request.query_params.get("campus"), funding_type=request.query_params.get("funding_type"),
-            college=request.query_params.get("college"),
+            college=request.query_params.get("college"), user=request.user,
         ))
 
 
@@ -164,4 +169,6 @@ class TaskDashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        return Response(services.compute_task_dashboard(project_id=request.query_params.get("project")))
+        return Response(services.compute_task_dashboard(
+            project_id=request.query_params.get("project"), user=request.user,
+        ))

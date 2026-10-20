@@ -17,14 +17,26 @@ from forecasting.models import ForecastRun, MonthlyForecast
 from monitoring.models import MidtermReport, MonthlyProgressReport, TerminalReport
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
 from outputs.serializers import compute_ip_incentive_eligible, compute_publication_incentive
+from accounts.permissions import scoped_projects, visible_projects
 from personnel.models import Task
 from research_projects.models import CollegeUnit, Project
 
 from .models import PlanningTarget
 
 
-def _scoped_projects(campus=None, funding_type=None, college=None):
+def _user_projects(user, budget=False):
+    """Projects the user may see on the Dashboard, or None for every project (client 2026-10-20). Budget figures
+    follow scoped_projects (no budget data for Project Staff), everything else visible_projects. No user = no limit."""
+    if user is None:
+        return None
+    return scoped_projects(user) if budget else visible_projects(user)
+
+
+def _scoped_projects(campus=None, funding_type=None, college=None, user=None, budget=False):
     qs = Project.objects.all()
+    allowed = _user_projects(user, budget)
+    if allowed is not None:
+        qs = qs.filter(pk__in=allowed.values("pk"))
     if campus:
         qs = qs.filter(campus=campus)
     if college:
@@ -34,8 +46,8 @@ def _scoped_projects(campus=None, funding_type=None, college=None):
     return qs
 
 
-def compute_project_dashboard(campus=None, funding_type=None, college=None):
-    projects = _scoped_projects(campus, funding_type, college)
+def compute_project_dashboard(campus=None, funding_type=None, college=None, user=None):
+    projects = _scoped_projects(campus, funding_type, college, user=user)
     return {
         "total_projects": projects.count(),
         "by_status": dict(projects.values_list("status").annotate(count=Count("id"))),
@@ -44,8 +56,8 @@ def compute_project_dashboard(campus=None, funding_type=None, college=None):
     }
 
 
-def compute_budget_dashboard(campus=None, college=None):
-    projects = _scoped_projects(campus, college=college)
+def compute_budget_dashboard(campus=None, college=None, user=None):
+    projects = _scoped_projects(campus, college=college, user=user, budget=True)
     current_budgets = LineItemBudget.objects.filter(project__in=projects, is_current=True)
     approved = LineItem.objects.filter(budget__in=current_budgets).aggregate(total=Sum("amount"))["total"] or 0
     actual = (
@@ -60,14 +72,14 @@ def compute_budget_dashboard(campus=None, college=None):
     }
 
 
-def compute_compliance_dashboard(campus=None, college=None):
+def compute_compliance_dashboard(campus=None, college=None, user=None):
     ethics = EthicsReviewReference.objects.all()
     similarity = SimilarityCheckRecord.objects.all()
     ai_declarations = AIUseDeclaration.objects.all()
     coi = ConflictOfInterestDisclosure.objects.all()
     misconduct = MisconductCaseReference.objects.all()
-    if campus or college:
-        projects = _scoped_projects(campus, college=college)
+    if campus or college or _user_projects(user) is not None:
+        projects = _scoped_projects(campus, college=college, user=user)
         ethics, similarity, ai_declarations, coi, misconduct = (
             qs.filter(project__in=projects) for qs in (ethics, similarity, ai_declarations, coi, misconduct)
         )
@@ -84,12 +96,12 @@ def compute_compliance_dashboard(campus=None, college=None):
     }
 
 
-def compute_output_dashboard(year=None, campus=None, college=None):
+def compute_output_dashboard(year=None, campus=None, college=None, user=None):
     pubs = PublicationRecord.objects.all()
     ip_records = IPRecord.objects.all()
     creative_works = CreativeWorkRecord.objects.all()
-    if campus or college:
-        projects = _scoped_projects(campus, college=college)
+    if campus or college or _user_projects(user) is not None:
+        projects = _scoped_projects(campus, college=college, user=user)
         pubs = pubs.filter(project__in=projects)
         ip_records = ip_records.filter(project__in=projects)
         creative_works = creative_works.filter(project__in=projects)
@@ -281,8 +293,8 @@ def compute_performance_dashboard(campus=None, college=None):
     }
 
 
-def compute_rei_thrust_alignment(campus=None, college=None):
-    projects = _scoped_projects(campus, college=college)
+def compute_rei_thrust_alignment(campus=None, college=None, user=None):
+    projects = _scoped_projects(campus, college=college, user=user)
     return {
         "by_thrust": dict(
             projects.exclude(rei_thrust="").values_list("rei_thrust").annotate(count=Count("id"))
@@ -399,9 +411,9 @@ def appendix_g_export(campus=None, year=None):
     }
 
 
-def compute_forecasting_dashboard(campus=None, funding_type=None, college=None):
+def compute_forecasting_dashboard(campus=None, funding_type=None, college=None, user=None):
     """Forecasting Analytics Dashboard (Objective 5c): latest successful ARIMA run per project."""
-    projects = _scoped_projects(campus, funding_type, college)
+    projects = _scoped_projects(campus, funding_type, college, user=user, budget=True)
     runs = []
     for project in projects:
         run = ForecastRun.objects.filter(project=project, status="success").order_by("-run_at").first()
@@ -459,9 +471,12 @@ def compute_funding_allocation_dashboard(run_id=None):
     }
 
 
-def compute_task_dashboard(project_id=None):
+def compute_task_dashboard(project_id=None, user=None):
     """Open/overdue/done task counts per project (feeds the Compliance & Activity Dashboard, Objective 5a)."""
     tasks = Task.objects.all()
+    allowed = _user_projects(user)
+    if allowed is not None:
+        tasks = tasks.filter(project__in=allowed.values("pk"))
     if project_id:
         tasks = tasks.filter(project_id=project_id)
     rows = (

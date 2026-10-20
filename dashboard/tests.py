@@ -260,3 +260,61 @@ class ForecastingDashboardTests(RMISTestCase):
 
         self.assertEqual(data["monthly_forecast"], [{"month": "2026-03", "predicted": 100.0}, {"month": "2026-04", "predicted": 200.0}])
         self.assertEqual(data["projects"][0]["title"], "Smart Irrigation")
+
+
+class DashboardRoleScopeTests(RMISTestCase):
+    """Client 2026-10-20: the Dashboard counts only the projects the user can see (visible_projects); only
+    university-wide roles get every project. Budget figures follow scoped_projects, so Project Staff get none."""
+
+    def setUp(self):
+        super().setUp()
+        from datetime import date
+
+        from compliance.models import AIUseDeclaration
+        from personnel.models import Task
+        from research_projects.models import ProjectTeamMember
+
+        self.leader = self.make_user("project_leader")
+        self.other_leader = self.make_user("project_leader")
+        self.staff = self.make_user("project_staff")
+        self.mine = Project.objects.create(
+            title="Mine", project_code="M-1", funding_type="core_funded", lead=self.leader, campus="San Pablo City",
+        )
+        self.other = Project.objects.create(
+            title="Other", project_code="O-1", funding_type="core_funded", lead=self.other_leader, campus="Siniloan",
+        )
+        ProjectTeamMember.objects.create(project=self.mine, name="Staff", user=self.staff)
+        for project in (self.mine, self.other):
+            AIUseDeclaration.objects.create(
+                project=project, declared_by=project.lead, ai_content_pct=5, declared_on=date(2026, 1, 1),
+            )
+            Task.objects.create(project=project, title="T", assigned_by=project.lead, assignee=project.lead)
+
+    def get(self, user, path):
+        return self.client_for(user).get(f"/api/{path}").data
+
+    def test_project_staff_counts_only_projects_they_belong_to(self):
+        self.assertEqual(self.get(self.staff, "dashboard/projects/")["total_projects"], 1)
+        self.assertEqual(self.get(self.staff, "dashboard/compliance/")["ai_use_declarations"], 1)
+        self.assertEqual([r["project"] for r in self.get(self.staff, "dashboard/tasks/")], [self.mine.pk])
+        self.assertEqual(self.get(self.staff, "risk/dashboard/")["total_projects"], 1)
+
+    def test_project_staff_get_no_budget_figures(self):
+        self.assertEqual(self.get(self.staff, "dashboard/budget/")["project_count"], 0)
+
+    def test_project_leader_counts_only_projects_they_lead(self):
+        self.assertEqual(self.get(self.leader, "dashboard/projects/")["total_projects"], 1)
+        self.assertEqual(self.get(self.leader, "dashboard/budget/")["project_count"], 1)
+        self.assertEqual(self.get(self.leader, "dashboard/forecasting/")["projects_in_scope"], 1)
+
+    def test_campus_scoped_role_counts_only_its_campus(self):
+        crc = self.make_user("crc_chair", scope={"campus": "Siniloan"})
+
+        self.assertEqual(self.get(crc, "dashboard/projects/")["by_campus"], {"Siniloan": 1})
+        self.assertEqual(self.get(crc, "dashboard/compliance/")["ai_use_declarations"], 1)
+
+    def test_university_wide_roles_count_every_project(self):
+        for role in ("system_admin", "vprei"):
+            user = self.make_user(role)
+            self.assertEqual(self.get(user, "dashboard/projects/")["total_projects"], 2)
+            self.assertEqual(self.get(user, "risk/dashboard/")["total_projects"], 2)

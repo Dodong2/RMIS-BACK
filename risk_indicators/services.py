@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from accounts.permissions import visible_projects
 from financial_monitoring.models import PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, ProcurementRequest
 from forecasting.models import ForecastRun
 from monitoring.serializers import compute_budget_used_pct, compute_deliverables_pct, compute_escalation_status
@@ -139,10 +140,13 @@ def compute_project_risk(project):
     }
 
 
-def compute_risk_dashboard(campus=None, funding_type=None):
+def compute_risk_dashboard(campus=None, funding_type=None, user=None):
     """Scoped to active projects only — a completed/archived project isn't
-    an early-warning concern anymore."""
+    an early-warning concern anymore. With a user, only the projects they can see (client 2026-10-20)."""
     projects = Project.objects.filter(status="active")
+    allowed = visible_projects(user) if user is not None else None
+    if allowed is not None:
+        projects = projects.filter(pk__in=allowed.values("pk"))
     if campus:
         projects = projects.filter(campus=campus)
     if funding_type:
