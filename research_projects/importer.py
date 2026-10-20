@@ -32,7 +32,7 @@ WET_OR_DRY = (("wet", "Wet Research"), ("dry", "Dry Research"))
 # One dropdown since client feedback 2026-10-06; saved to both college and implementing_unit, like manual entry.
 COLLEGE_UNIT_LABEL = "College Unit - Implementing Unit"
 # System Admin pages that manage each dropdown, named in import errors and template notes
-ADMIN_CHOICE_PAGES = {CollegeUnit: "College Units", ReiThrust: "REI Thrusts", CooperatingAgency: "Cooperating Agencies"}
+ADMIN_CHOICE_PAGES = {CollegeUnit: "College Units", ReiThrust: "RDE Thrusts", CooperatingAgency: "Cooperating Agencies"}
 # Templates downloaded before the merge still have the two old rows; read either as the merged field.
 OLD_COLLEGE_UNIT_LABELS = ("Implementing Unit", "College Unit")
 
@@ -72,7 +72,9 @@ PROJECT_FIELDS = [
     ("Research Priority Area", "research_priority_area", "choice", Project.PRIORITY_AREA_CHOICES, ""),
     ("Research Typology", "research_typology", "multi", Project.TYPOLOGY_CHOICES, "One or more, comma-separated"),
     ("Sustainable Development Goals (SDGs)", "sdgs", "sdgs", None, "Required; goal numbers 1-17, comma-separated"),
-    ("REI Thrust", "rei_thrust", "admin_choice", ReiThrust, "Optional; must match System Admin > REI Thrusts"),
+    ("RDE Thrust", "rei_thrust", "admin_choice", ReiThrust, "Optional; must match System Admin > RDE Thrusts"),
+    ("RDE Priority Area", "rei_priority", "admin_choice", ReiThrust,
+     "Required with an RDE Thrust; a priority area under that thrust, e.g. 1.3 - Artificial Intelligence and Machine Learning"),
     ("II. Background of the Study", "background", "text", None, ""),
     ("III. Objectives of the Study", "objectives", "text", None, ""),
     ("IV. Project Descriptions/Methodology", "methodology", "text", None, ""),
@@ -252,10 +254,13 @@ def build_template():
     ws = wb.active
     ws.title = "Project"
     ws.append(["Field", "Value", "Notes / allowed values"])
-    for label, _, kind, choices, note in PROJECT_FIELDS:
+    for label, field, kind, choices, note in PROJECT_FIELDS:
         allowed = _allowed(kind, choices)
         if kind in ("admin_choice", "admin_choices"):
-            allowed = "; ".join(choices.objects.values_list("name", flat=True))
+            rows = choices.objects.all()
+            if choices is ReiThrust:  # the thrust row lists the thrusts; the priority-area note names the format only
+                rows = rows.filter(parent=None) if field == "rei_thrust" else rows.none()
+            allowed = "; ".join(rows.values_list("name", flat=True))
         ws.append([label, None, f"{note}. {allowed}".strip(". ") if allowed else note])
     ws.column_dimensions["A"].width = 45
     ws.column_dimensions["B"].width = 60

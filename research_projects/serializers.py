@@ -1,3 +1,5 @@
+import re
+
 from django.utils.text import slugify
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
@@ -82,8 +84,48 @@ class CollegeUnitSerializer(CodedChoiceSerializer):
 
 
 class ReiThrustSerializer(CodedChoiceSerializer):
+    """RDE Agenda entry (client 2026-10-20): a thrust has a number code ("1"); a priority area sits under a thrust and
+    its code is the thrust's code plus a number ("1.10"). Two levels only."""
+
     class Meta(CodedChoiceSerializer.Meta):
         model = ReiThrust
+        fields = [*CodedChoiceSerializer.Meta.fields, "parent"]
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        parent = attrs.get("parent", getattr(self.instance, "parent", None))
+        code = attrs["code"]
+        if parent is None:
+            if not re.fullmatch(r"\d+", code):
+                raise serializers.ValidationError({"code": "A thrust's code is a number, e.g. 9."})
+            return attrs
+        if parent.parent_id is not None:
+            raise serializers.ValidationError({"parent": "Pick a thrust; priority areas can't have their own."})
+        if self.instance is not None and (parent.pk == self.instance.pk or self.instance.priorities.exists()):
+            raise serializers.ValidationError({"parent": "A thrust with priority areas can't move under another thrust."})
+        if not re.fullmatch(rf"{re.escape(parent.code)}\.\d+", code):
+            raise serializers.ValidationError({"code": f"Use the thrust's number then a number, e.g. {parent.code}.1."})
+        return attrs
+
+
+def validate_rde_alignment(serializer, attrs):
+    """Project/Program RDE Thrust + RDE Priority Area (client 2026-10-20): both or neither, the thrust must be in
+    Admin > RDE Thrusts and the priority area must be one of its own. Checked only when either field is sent, so
+    older records keep their values on unrelated edits."""
+    if "rei_thrust" not in attrs and "rei_priority" not in attrs:
+        return
+    instance = serializer.instance
+    thrust = attrs.get("rei_thrust", getattr(instance, "rei_thrust", ""))
+    priority = attrs.get("rei_priority", getattr(instance, "rei_priority", ""))
+    if not thrust and not priority:
+        return
+    if not priority:
+        raise serializers.ValidationError({"rei_priority": "Select the RDE Priority Area under the RDE Thrust."})
+    row = ReiThrust.objects.filter(parent=None, name=thrust).first() if thrust else None
+    if row is None:
+        raise serializers.ValidationError({"rei_thrust": "Select an RDE Thrust from System Admin > RDE Thrusts."})
+    if not row.priorities.filter(name=priority).exists():
+        raise serializers.ValidationError({"rei_priority": "This RDE Priority Area isn't under the selected RDE Thrust."})
 
 
 class CooperatingAgencySerializer(AdminChoiceSerializer):
@@ -198,7 +240,7 @@ class ProgramSerializer(serializers.ModelSerializer):
     class Meta:
         model = Program
         fields = [
-            "id", "code", "title", "funding_type", "rei_thrust",
+            "id", "code", "title", "funding_type", "rei_thrust", "rei_priority",
             "lead", "lead_detail", "status", "start_date", "created_at",
         ]
 
@@ -209,6 +251,7 @@ class ProgramSerializer(serializers.ModelSerializer):
         lead = attrs.get("lead", getattr(self.instance, "lead", None))
         funding_type = attrs.get("funding_type", getattr(self.instance, "funding_type", None))
         validate_lead_role(lead, "program_leader")
+        validate_rde_alignment(self, attrs)
         ensure_leader_keeps(self, attrs, ["code", "lead"])
         ensure_registrant_in_scope(self, leads=[lead, getattr(self.instance, "lead", None)])
         validate_lead_concurrency(
@@ -227,7 +270,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             "id", "program", "title", "project_code", "funding_type",
             "ntp_number", "ntp_date", "toe_signed_date", "is_dry_research",
             "lead", "lead_detail", "lead_gender", "contact_number", "status", "start_date", "target_end_date",
-            "rei_thrust", "is_continuing", "continuing_year", "research_type", "sectors", "sector_other",
+            "rei_thrust", "rei_priority", "is_continuing", "continuing_year", "research_type", "sectors", "sector_other",
             "research_priority_area", "research_typology", "sdgs", "campus", "college",
             "implementing_unit", "cooperating_agencies", "total_cost",
             "background", "objectives", "methodology", "socio_economic_significance", "monitoring_evaluation",
@@ -277,6 +320,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         if is_continuing and (continuing_year or 0) < 2:
             raise serializers.ValidationError({"continuing_year": "A continuing proposal needs its year (2 or later)."})
         validate_lead_role(lead, "project_leader")
+        validate_rde_alignment(self, attrs)
         ensure_project_leader_registers_self(self, lead)
         ensure_leader_keeps(self, attrs, ["project_code", "lead", "program"])
         if self.instance is not None:

@@ -20,6 +20,7 @@ class Program(models.Model):
     title = models.CharField(max_length=300)
     funding_type = models.CharField(max_length=20)  # a FundingType.code
     rei_thrust = models.CharField(max_length=150, blank=True)
+    rei_priority = models.CharField(max_length=150, blank=True, help_text="RDE Priority Area under rei_thrust")
     lead = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="led_programs")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     start_date = models.DateField(null=True, blank=True)
@@ -68,7 +69,13 @@ class CollegeUnit(CodedChoice):
 
 
 class ReiThrust(CodedChoice):
-    """"REI Thrust" dropdown on Project Details, e.g. "REI-01 - Agriculture, Fisheries, and Food Security"."""
+    """LSPU 2024-2028 RDE Agenda (client 2026-10-20, LSPU-RDE-AGENDA-2024-2028.pdf): a thrust ("1 - Computing and
+    Emerging Technologies", no parent) or one of its priority areas ("1.3 - Artificial Intelligence and Machine
+    Learning", parent = the thrust). Two levels only. Projects and programs keep both names as text."""
+
+    parent = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="priorities",
+    )
 
 
 class FundingType(AdminChoice):
@@ -110,6 +117,7 @@ class Project(models.Model):
     start_date = models.DateField(null=True, blank=True)
     target_end_date = models.DateField(null=True, blank=True)
     rei_thrust = models.CharField(max_length=150, blank=True)
+    rei_priority = models.CharField(max_length=150, blank=True, help_text="RDE Priority Area under rei_thrust")
 
     # Fields from LSPU-RDO-SF-018 (Research Proposal Form), Section I
     SECTOR_CHOICES = (

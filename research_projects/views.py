@@ -53,6 +53,8 @@ class AdminChoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
     def destroy(self, request, *args, **kwargs):
         # Projects store a Funding Type's code, so a used or system type can't go (the other choices are copied as text)
         choice = self.get_object()
+        if isinstance(choice, ReiThrust) and choice.priorities.exists():
+            return Response({"detail": "This thrust still has priority areas; delete those first."}, status=status.HTTP_400_BAD_REQUEST)
         if isinstance(choice, FundingType):
             if choice.is_system:
                 return Response({"detail": "This is one of the Manual's funding types; rename it instead."}, status=status.HTTP_400_BAD_REQUEST)
