@@ -5,7 +5,7 @@ import openpyxl
 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
-from research_projects.models import CollegeUnit, CooperatingAgency, Project, ProjectEndorser, ReiThrust
+from research_projects.models import CollegeUnit, CooperatingAgency, Project, ProjectEndorser, RdeThrust
 from research_projects.rde_agenda import seed_rde_agenda
 
 
@@ -264,7 +264,7 @@ class ExcelImportTests(RMISTestCase):
         self.admin = self.make_user("system_admin")
         self.leader = self.make_user("project_leader", email="leader@lspu.test")
         CollegeUnit.objects.create(name="CTE")
-        seed_rde_agenda(ReiThrust)
+        seed_rde_agenda(RdeThrust)
         CooperatingAgency.objects.bulk_create([CooperatingAgency(name="DOST-PCAARRD"), CooperatingAgency(name="LGU of Siniloan, Laguna")])
         template = self.client_for(self.admin).get("/api/projects/import-template/")
         self.assertEqual(template.status_code, 200)
@@ -362,7 +362,7 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(self.upload().status_code, 201)
         project = Project.objects.get()
         self.assertEqual(
-            (project.rei_thrust, project.rei_priority), ("7 - Food, Nutrition and Health", "7.4 - Food Safety and Security"),
+            (project.rde_thrust, project.rde_priority), ("7 - Food, Nutrition and Health", "7.4 - Food Safety and Security"),
         )
         self.assertEqual(project.cooperating_agencies, "DOST-PCAARRD, LGU of Siniloan, Laguna")
 
@@ -558,13 +558,13 @@ class CollegeUnitTests(RMISTestCase):
         self.assertEqual([u["name"] for u in riuh.get("/api/college-units/").data], ["CTE - College of Teacher Education"])
         self.assertEqual(riuh.post("/api/college-units/", {"code": "CAS", "title": "Arts"}, format="json").status_code, 403)
 
-    def test_rei_thrust_name_is_code_then_title(self):
+    def test_rde_thrust_name_is_code_then_title(self):
         admin, riuh = self.client_for(self.make_user("system_admin")), self.client_for(self.make_user("riuh"))
 
-        created = admin.post("/api/rei-thrusts/", {"code": "9", "title": "Space Science"}, format="json")
+        created = admin.post("/api/rde-thrusts/", {"code": "9", "title": "Space Science"}, format="json")
         self.assertEqual(created.data["name"], "9 - Space Science")
-        self.assertEqual(admin.post("/api/rei-thrusts/", {"code": "9", "title": "X"}, format="json").status_code, 400)
-        self.assertEqual(riuh.delete(f"/api/rei-thrusts/{created.data['id']}/").status_code, 403)
+        self.assertEqual(admin.post("/api/rde-thrusts/", {"code": "9", "title": "X"}, format="json").status_code, 400)
+        self.assertEqual(riuh.delete(f"/api/rde-thrusts/{created.data['id']}/").status_code, 403)
 
     def test_cooperating_agencies_keep_a_single_name(self):
         admin, riuh = self.client_for(self.make_user("system_admin")), self.client_for(self.make_user("riuh"))

@@ -95,11 +95,11 @@ class PerformanceDashboardView(APIView):
         ))
 
 
-class REIThrustAlignmentView(APIView):
+class RdeThrustAlignmentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        return Response(services.compute_rei_thrust_alignment(
+        return Response(services.compute_rde_thrust_alignment(
             campus=request.query_params.get("campus"), college=request.query_params.get("college"),
             user=request.user,
         ))

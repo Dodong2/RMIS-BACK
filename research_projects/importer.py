@@ -20,7 +20,7 @@ from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer,
 from outputs.models import SIX_PS
 from outputs.serializers import ExpectedOutputSerializer
 
-from .models import CollegeUnit, CooperatingAgency, FundingType, Program, Project, ReiThrust, ProjectEndorser, ProjectTeamMember
+from .models import CollegeUnit, CooperatingAgency, FundingType, Program, Project, RdeThrust, ProjectEndorser, ProjectTeamMember
 from .serializers import (
     ProjectSerializer, ProjectTeamMemberSerializer, StudySerializer, TargetBeneficiarySerializer,
     WorkPlanMilestoneSerializer, leader_owns,
@@ -32,7 +32,7 @@ WET_OR_DRY = (("wet", "Wet Research"), ("dry", "Dry Research"))
 # One dropdown since client feedback 2026-10-06; saved to both college and implementing_unit, like manual entry.
 COLLEGE_UNIT_LABEL = "College Unit - Implementing Unit"
 # System Admin pages that manage each dropdown, named in import errors and template notes
-ADMIN_CHOICE_PAGES = {CollegeUnit: "College Units", ReiThrust: "RDE Thrusts", CooperatingAgency: "Cooperating Agencies"}
+ADMIN_CHOICE_PAGES = {CollegeUnit: "College Units", RdeThrust: "RDE Thrusts", CooperatingAgency: "Cooperating Agencies"}
 # Templates downloaded before the merge still have the two old rows; read either as the merged field.
 OLD_COLLEGE_UNIT_LABELS = ("Implementing Unit", "College Unit")
 
@@ -72,8 +72,8 @@ PROJECT_FIELDS = [
     ("Research Priority Area", "research_priority_area", "choice", Project.PRIORITY_AREA_CHOICES, ""),
     ("Research Typology", "research_typology", "multi", Project.TYPOLOGY_CHOICES, "One or more, comma-separated"),
     ("Sustainable Development Goals (SDGs)", "sdgs", "sdgs", None, "Required; goal numbers 1-17, comma-separated"),
-    ("RDE Thrust", "rei_thrust", "admin_choice", ReiThrust, "Optional; must match System Admin > RDE Thrusts"),
-    ("RDE Priority Area", "rei_priority", "admin_choice", ReiThrust,
+    ("RDE Thrust", "rde_thrust", "admin_choice", RdeThrust, "Optional; must match System Admin > RDE Thrusts"),
+    ("RDE Priority Area", "rde_priority", "admin_choice", RdeThrust,
      "Required with an RDE Thrust; a priority area under that thrust, e.g. 1.3 - Artificial Intelligence and Machine Learning"),
     ("II. Background of the Study", "background", "text", None, ""),
     ("III. Objectives of the Study", "objectives", "text", None, ""),
@@ -258,8 +258,8 @@ def build_template():
         allowed = _allowed(kind, choices)
         if kind in ("admin_choice", "admin_choices"):
             rows = choices.objects.all()
-            if choices is ReiThrust:  # the thrust row lists the thrusts; the priority-area note names the format only
-                rows = rows.filter(parent=None) if field == "rei_thrust" else rows.none()
+            if choices is RdeThrust:  # the thrust row lists the thrusts; the priority-area note names the format only
+                rows = rows.filter(parent=None) if field == "rde_thrust" else rows.none()
             allowed = "; ".join(rows.values_list("name", flat=True))
         ws.append([label, None, f"{note}. {allowed}".strip(". ") if allowed else note])
     ws.column_dimensions["A"].width = 45

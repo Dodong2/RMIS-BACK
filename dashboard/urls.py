@@ -15,7 +15,7 @@ from .views import (
     PerformanceDashboardView,
     PortfolioDashboardView,
     ProjectDashboardView,
-    REIThrustAlignmentView,
+    RdeThrustAlignmentView,
 )
 
 urlpatterns = [
@@ -28,7 +28,7 @@ urlpatterns = [
     path("tasks/", TaskDashboardView.as_view()),
     path("portfolio/", PortfolioDashboardView.as_view()),
     path("performance/", PerformanceDashboardView.as_view()),
-    path("rei-thrust-alignment/", REIThrustAlignmentView.as_view()),
+    path("rde-thrust-alignment/", RdeThrustAlignmentView.as_view()),
     path("planning-targets/", PlanningTargetListCreateView.as_view()),
     path("planning-targets/comparison/", PlanningTargetComparisonView.as_view()),
     path("exports/appendix-e/<int:project_id>/", AppendixEExportView.as_view()),

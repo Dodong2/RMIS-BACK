@@ -84,12 +84,12 @@ RDE_AGENDA = [
 ]
 
 
-def seed_rde_agenda(ReiThrust):
+def seed_rde_agenda(RdeThrust):
     """Insert or refresh the agenda by code. Takes the model so the migration can pass its historical one, which
     skips CodedChoice.save(); the "code - title" name is set here."""
 
     def upsert(code, title, parent=None):
-        row, _ = ReiThrust.objects.update_or_create(
+        row, _ = RdeThrust.objects.update_or_create(
             code=code, defaults={"title": title, "name": f"{code} - {title}", "parent": parent},
         )
         return row

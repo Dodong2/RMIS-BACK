@@ -307,13 +307,13 @@ def compute_performance_dashboard(campus=None, college=None):
     }
 
 
-def compute_rei_thrust_alignment(campus=None, college=None, user=None):
+def compute_rde_thrust_alignment(campus=None, college=None, user=None):
     projects = _scoped_projects(campus, college=college, user=user)
     return {
         "by_thrust": dict(
-            projects.exclude(rei_thrust="").values_list("rei_thrust").annotate(count=Count("id"))
+            projects.exclude(rde_thrust="").values_list("rde_thrust").annotate(count=Count("id"))
         ),
-        "unaligned_count": projects.filter(rei_thrust="").count(),
+        "unaligned_count": projects.filter(rde_thrust="").count(),
     }
 
 

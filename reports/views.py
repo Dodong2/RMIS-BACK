@@ -150,14 +150,14 @@ class ProjectListReportView(APIView):
             "campus": request.query_params.get("campus"),
             "funding_type": request.query_params.get("funding_type"),
             "status": request.query_params.get("status"),
-            "rei_thrust": request.query_params.get("rei_thrust"),
+            "rde_thrust": request.query_params.get("rde_thrust"),
             "year": request.query_params.get("year"),
         }
         data = services.project_list_report(
             campus=filters["campus"],
             funding_type=filters["funding_type"],
             status=filters["status"],
-            rei_thrust=filters["rei_thrust"],
+            rde_thrust=filters["rde_thrust"],
             year=int(filters["year"]) if filters["year"] else None,
         )
         response, error = build_report_response(request, "project_list", "Filtered Project List", data, filters=filters)

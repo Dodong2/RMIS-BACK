@@ -12,10 +12,10 @@ from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from config.concurrency import AtomicMutationMixin, idempotent, lock
 from . import importer
 from .models import (
-    CollegeUnit, CooperatingAgency, EndorserChoice, FundingType, Program, ReiThrust, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
+    CollegeUnit, CooperatingAgency, EndorserChoice, FundingType, Program, RdeThrust, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
 from .serializers import (
-    CollegeUnitSerializer, CooperatingAgencySerializer, EndorserChoiceSerializer, FundingTypeSerializer, ProgramSerializer, ReiThrustSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
+    CollegeUnitSerializer, CooperatingAgencySerializer, EndorserChoiceSerializer, FundingTypeSerializer, ProgramSerializer, RdeThrustSerializer, ProjectEndorserSerializer, ProjectSerializer, ProjectStatusHistorySerializer,
     ProjectTeamMemberSerializer, StudySerializer,
     TargetBeneficiarySerializer, WorkPlanMilestoneSerializer, can_edit_registration, ensure_registrant_in_scope,
 )
@@ -53,7 +53,7 @@ class AdminChoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
     def destroy(self, request, *args, **kwargs):
         # Projects store a Funding Type's code, so a used or system type can't go (the other choices are copied as text)
         choice = self.get_object()
-        if isinstance(choice, ReiThrust) and choice.priorities.exists():
+        if isinstance(choice, RdeThrust) and choice.priorities.exists():
             return Response({"detail": "This thrust still has priority areas; delete those first."}, status=status.HTTP_400_BAD_REQUEST)
         if isinstance(choice, FundingType):
             if choice.is_system:
@@ -65,7 +65,7 @@ class AdminChoiceDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 ADMIN_CHOICES = {
     "college-units": (CollegeUnit, CollegeUnitSerializer),
-    "rei-thrusts": (ReiThrust, ReiThrustSerializer),
+    "rde-thrusts": (RdeThrust, RdeThrustSerializer),
     "cooperating-agencies": (CooperatingAgency, CooperatingAgencySerializer),
     "endorsers": (EndorserChoice, EndorserChoiceSerializer),
     "funding-types": (FundingType, FundingTypeSerializer),

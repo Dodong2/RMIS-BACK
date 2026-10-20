@@ -19,8 +19,8 @@ class Program(models.Model):
     code = models.CharField(max_length=50, unique=True, blank=True, null=True)
     title = models.CharField(max_length=300)
     funding_type = models.CharField(max_length=20)  # a FundingType.code
-    rei_thrust = models.CharField(max_length=150, blank=True)
-    rei_priority = models.CharField(max_length=150, blank=True, help_text="RDE Priority Area under rei_thrust")
+    rde_thrust = models.CharField(max_length=150, blank=True)
+    rde_priority = models.CharField(max_length=150, blank=True, help_text="RDE Priority Area under rde_thrust")
     lead = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="led_programs")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     start_date = models.DateField(null=True, blank=True)
@@ -34,7 +34,7 @@ class AdminChoice(models.Model):
     """A dropdown choice on Register Approved Project, managed by the System Admin. Projects keep the chosen name as
     text, so renaming or deleting a choice never changes projects already registered."""
 
-    name = models.CharField(max_length=100, unique=True)  # fits Project.college (100), implementing_unit/rei_thrust (150)
+    name = models.CharField(max_length=100, unique=True)  # fits Project.college (100), implementing_unit/rde_thrust (150)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -68,7 +68,7 @@ class CollegeUnit(CodedChoice):
     """"College Unit - Implementing Unit" dropdown, e.g. "CA - College of Agriculture"."""
 
 
-class ReiThrust(CodedChoice):
+class RdeThrust(CodedChoice):
     """LSPU 2024-2028 RDE Agenda (client 2026-10-20, LSPU-RDE-AGENDA-2024-2028.pdf): a thrust ("1 - Computing and
     Emerging Technologies", no parent) or one of its priority areas ("1.3 - Artificial Intelligence and Machine
     Learning", parent = the thrust). Two levels only. Projects and programs keep both names as text."""
@@ -116,8 +116,8 @@ class Project(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     start_date = models.DateField(null=True, blank=True)
     target_end_date = models.DateField(null=True, blank=True)
-    rei_thrust = models.CharField(max_length=150, blank=True)
-    rei_priority = models.CharField(max_length=150, blank=True, help_text="RDE Priority Area under rei_thrust")
+    rde_thrust = models.CharField(max_length=150, blank=True)
+    rde_priority = models.CharField(max_length=150, blank=True, help_text="RDE Priority Area under rde_thrust")
 
     # Fields from LSPU-RDO-SF-018 (Research Proposal Form), Section I
     SECTOR_CHOICES = (
