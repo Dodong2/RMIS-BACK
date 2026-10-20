@@ -71,7 +71,7 @@ class EndorsementTests(RMISTestCase):
     def test_crc_chair_returns_and_leader_resubmits(self):
         self.assertEqual(self.act(self.crc, "return", remarks="Fix travel").status_code, 200)
         self.assertEqual(self.status(), "returned")
-        edit = self.client_for(self.leader).patch(f"/api/budget/line-items/{self.item.id}/", {"description": "Travel (fixed)"}, format="json")
+        edit = self.client_for(self.leader).patch(f"/api/budget/line-items/{self.item.id}/", {"description": "Training Expenses"}, format="json")
         self.assertEqual(edit.status_code, 200, edit.data)
         response = self.act(self.leader, "resubmit", remarks="Fixed")
         self.assertEqual(response.status_code, 200, response.data)

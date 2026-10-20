@@ -319,7 +319,7 @@ class ExcelImportTests(RMISTestCase):
         self.fill_project(**{"End Date": datetime.datetime(2027, 3, 31)})
         #                                    FY    Cat     Particulars      Unit  Qty Cost   Total Y1Q1  Q2    Q3    Q4    Y2Q1
         self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", "lot", 1, 10000, None, 5000, None, 2500, None, 2500])
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Supplies", "lot", 1, 1000, None, 900])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Office Supplies Expenses", "lot", 1, 1000, None, 900])
 
         response = self.upload()
 

@@ -5,8 +5,8 @@ from rest_framework.response import Response
 
 from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_can
 from config.concurrency import lock
-from .models import LineItem, LineItemBudget
-from .serializers import LineItemBudgetSerializer, LineItemSerializer, review_budget, total_cost_problem
+from .models import LibItem, LineItem, LineItemBudget
+from .serializers import LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, review_budget, total_cost_problem
 
 # Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
 # ensure_in_scope. Certification stays with the Budget Officer (budget.certify).
@@ -141,3 +141,32 @@ class BudgetReviewView(BudgetScopedMixin, generics.GenericAPIView):
 
     def refuse(self, detail, code=status.HTTP_400_BAD_REQUEST):
         return Response({"detail": detail}, status=code)
+
+
+class LibItemListCreateView(generics.ListCreateAPIView):
+    """Admin > LIB Items (client 2026-10-20). Everyone signed in reads the list (the LIB forms' Item dropdowns); only
+    the System Admin edits it."""
+
+    queryset = LibItem.objects.all()
+    serializer_class = LibItemSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [HasRole("accounts.manage_users")]
+        return [permissions.IsAuthenticated()]
+
+
+class LibItemDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = LibItem.objects.all()
+    serializer_class = LibItemSerializer
+
+    def get_permissions(self):
+        if self.request.method in ("PUT", "PATCH", "DELETE"):
+            return [HasRole("accounts.manage_users")]
+        return [permissions.IsAuthenticated()]
+
+    def destroy(self, request, *args, **kwargs):
+        item = self.get_object()
+        if LineItem.objects.filter(category=item.category, description__iexact=item.name).exists():
+            return Response({"detail": "LIBs use this item, so it can't be deleted. Deactivate it instead."}, status=status.HTTP_400_BAD_REQUEST)
+        return super().destroy(request, *args, **kwargs)

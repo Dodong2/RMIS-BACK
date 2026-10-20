@@ -74,7 +74,7 @@ class BulkRealignmentTests(RMISTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("same class", str(response.data))
 
-        new_item = {"from_line_item": self.travel.id, "new_item_category": "co", "new_item_description": "Laptop", "amount": "1000", "justification": "Need it"}
+        new_item = {"from_line_item": self.travel.id, "new_item_category": "co", "new_item_description": "Rents - Equipment", "amount": "1000", "justification": "Need it"}
         self.assertEqual(self.client.post(URL, [new_item], format="json").status_code, 400)
         new_item["new_item_category"] = "mooe"
         self.assertEqual(self.client.post(URL, [new_item], format="json").status_code, 201)

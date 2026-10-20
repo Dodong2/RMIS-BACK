@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.permissions import ensure_in_scope
-from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, BudgetReview, LineItem, LineItemBudget, allocation_periods
+from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, BudgetReview, LibItem, LineItem, LineItemBudget, allocation_periods
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
@@ -17,6 +17,34 @@ QUARTER_FIELDS = ["q1_amount", "q2_amount", "q3_amount", "q4_amount"]
 def line_total(quantity, unit_cost):
     """Qty x Unit Cost, rounded to centavos."""
     return (Decimal(str(quantity)) * Decimal(str(unit_cost))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def catalog_item_name(category, description):
+    """Client 2026-10-20: an LIB row's item is picked from the System Admin's active LIB Items of its class. Returns the
+    catalog spelling, or raises."""
+    item = LibItem.objects.filter(category=category, name__iexact=(description or "").strip(), is_active=True).first()
+    if item is None:
+        label = dict(LineItem.CATEGORY_CHOICES).get(category, category)
+        raise serializers.ValidationError(
+            {"description": f"'{description}' is not an active {label} item in System Admin > LIB Items."}
+        )
+    return item.name
+
+
+class LibItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LibItem
+        fields = ["id", "category", "name", "uacs_code", "is_active", "created_at"]
+
+    def validate(self, attrs):
+        category = attrs.get("category", getattr(self.instance, "category", None))
+        name = attrs.get("name", getattr(self.instance, "name", "")).strip()
+        if not name:
+            raise serializers.ValidationError({"name": "Enter the item."})
+        others = LibItem.objects.exclude(pk=getattr(self.instance, "pk", None))
+        if others.filter(category=category, name__iexact=name).exists():
+            raise serializers.ValidationError({"name": f"{name} is already an item under this class."})
+        return {**attrs, "name": name, "uacs_code": attrs.get("uacs_code", getattr(self.instance, "uacs_code", "")).strip()}
 
 
 class LineItemSerializer(serializers.ModelSerializer):
@@ -35,6 +63,11 @@ class LineItemSerializer(serializers.ModelSerializer):
         budget = LineItemBudget.objects.select_for_update().get(pk=budget.pk)
         if budget.status not in LineItemBudget.EDITABLE_STATUSES:
             raise serializers.ValidationError(f"This LIB is {budget.get_status_display().lower()} and can no longer be edited.")
+        category = attrs.get("category", getattr(self.instance, "category", None))
+        description = attrs.get("description", getattr(self.instance, "description", ""))
+        # Only a new row or a changed item is checked, so rows encoded before the catalog keep their text
+        if self.instance is None or (category, description) != (self.instance.category, self.instance.description):
+            attrs["description"] = catalog_item_name(category, description)
         quarters = [attrs.get(f, getattr(self.instance, f, None)) for f in QUARTER_FIELDS]
         amount = attrs.get("amount", getattr(self.instance, "amount", None))
         if any(q is not None for q in quarters) and sum(q or 0 for q in quarters) != amount:

@@ -46,6 +46,15 @@ class TestHelpers:
         return client
 
 
+def seed_starting_lists():
+    """Migration-seeded lists the API validates against (LIB Items, client 2026-10-20); a TransactionTestCase flush can
+    empty them in a --keepdb database."""
+    from budget_lib.lib_items import seed_lib_items
+    from budget_lib.models import LibItem
+
+    seed_lib_items(LibItem)
+
+
 @FAST_HASHER
 class RMISTestCase(TestHelpers, TestCase):
     """Seeds the 12 roles + their permissions once per class, and blocks every outbound call: Brevo e-mail and the
@@ -54,6 +63,7 @@ class RMISTestCase(TestHelpers, TestCase):
     @classmethod
     def setUpTestData(cls):
         call_command("seed_roles", stdout=open("/dev/null", "w"))
+        seed_starting_lists()
 
 
 @FAST_HASHER
@@ -71,6 +81,7 @@ class ConcurrencyTestCase(TestHelpers, TransactionTestCase):
 
     def setUp(self):
         call_command("seed_roles", stdout=open("/dev/null", "w"))
+        seed_starting_lists()
         super().setUp()
 
     def widen(self, target, seconds=0.6, before=False):

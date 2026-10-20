@@ -54,7 +54,7 @@ class MoneyConcurrencyTests(ConcurrencyTestCase):
 
     def test_two_approvals_of_a_new_item_realignment_create_one_item(self):
         realignment = BudgetRealignment.objects.create(
-            from_line_item=self.item, new_item_category="mooe", new_item_description="Laptop rental", amount=3000,
+            from_line_item=self.item, new_item_category="mooe", new_item_description="Rents - Equipment", amount=3000,
             tier="bor", status="pending_bor", justification="Need it", requested_by=self.leader,
         )
         self.widen("financial_monitoring.views.review_realignment", before=True)
@@ -62,7 +62,7 @@ class MoneyConcurrencyTests(ConcurrencyTestCase):
             f"/api/financial/realignments/{realignment.id}/review/", {"decision": "approved"})
         first, second = self.run_concurrently(approve, approve)
         self.assertEqual(sorted([first.status_code, second.status_code]), [200, 400])
-        self.assertEqual(LineItem.objects.filter(description="Laptop rental").count(), 1)
+        self.assertEqual(LineItem.objects.filter(description="Rents - Equipment").count(), 1)
 
     def test_two_completed_clicks_post_one_disbursement_and_no_500(self):
         pr = ProcurementRequest.objects.create(

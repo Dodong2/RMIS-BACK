@@ -8,6 +8,7 @@ from rest_framework import serializers
 from budget_lib.models import LineItem
 from accounts.permissions import ensure_in_scope
 from budget_lib.models import LineItemBudget
+from budget_lib.serializers import catalog_item_name
 from config.concurrency import lock_line_items
 from .models import APPLIED_STATUSES, PROCUREMENT_CLOSED_STATUSES, BudgetRealignment, Disbursement, ProcurementRequest
 
@@ -136,6 +137,11 @@ class BudgetRealignmentSerializer(serializers.ModelSerializer):
             )
         if new_category and not new_description:
             raise serializers.ValidationError({"new_item_description": "Required when creating a new expense item."})
+        if new_category:
+            try:
+                attrs["new_item_description"] = catalog_item_name(new_category, new_description)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"new_item_description": exc.detail["description"]})
 
         project = from_item.budget.project
         if from_item.budget.status != "certified":

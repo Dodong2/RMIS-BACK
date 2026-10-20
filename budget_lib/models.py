@@ -122,3 +122,22 @@ class LineItem(models.Model):
 
     def __str__(self):
         return f"{self.get_category_display()} - {self.description}"
+
+
+class LibItem(models.Model):
+    """An LIB Item the System Admin maintains under one fixed class (client 2026-10-20), e.g. "Honoraria" under PS.
+    Line items pick from the active ones and keep the name as text, so renaming or deactivating an item never changes
+    an LIB already encoded."""
+
+    category = models.CharField(max_length=10, choices=LineItem.CATEGORY_CHOICES)
+    name = models.CharField(max_length=300)
+    uacs_code = models.CharField(max_length=20, blank=True, help_text="DBM UACS object code, e.g. 5010210000")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["category", "name"]
+        constraints = [models.UniqueConstraint(fields=["category", "name"], name="unique_lib_item_per_class")]
+
+    def __str__(self):
+        return f"{self.get_category_display()} - {self.name}"
