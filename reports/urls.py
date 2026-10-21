@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AccomplishmentReportView,
+    AccomplishmentSummaryView,
     AppendixEReportView,
     AppendixFReportView,
     AppendixGReportView,
@@ -17,6 +18,7 @@ urlpatterns = [
     path("appendix-g/", AppendixGReportView.as_view()),
     path("proposal-form/<int:project_id>/", ProposalFormReportView.as_view()),
     path("accomplishment/", AccomplishmentReportView.as_view()),
+    path("accomplishment/summary/", AccomplishmentSummaryView.as_view()),
     path("projects/", ProjectListReportView.as_view()),
     path("logs/", GeneratedReportLogListView.as_view()),
     path("<str:report_type>/", ModuleReportView.as_view()),

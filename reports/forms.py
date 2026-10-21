@@ -428,10 +428,11 @@ def month_bounds(month):
     return start, timezone.make_aware(datetime.datetime(nxt.year, nxt.month, 1))
 
 
-def accomplishment_form(user, month, projects=None):
+def accomplishment_rows(user, month, projects=None):
     """Client follow-up 2026-10-02: instead of the staff recalling what they did, the report is pulled from their
-    tasks: % completed (latest progress update by month end), hours logged that month and what they noted. Covers
-    tasks with an update that month or still open at month end. `projects` limits it to the requester's scope."""
+    tasks: % completed (latest progress by month end), hours logged that month and what they noted. Covers tasks with
+    an update that month or still open at month end. `projects` limits it to the requester's scope. Shared by the
+    downloaded form and the Accomplishment Report page (client 2026-10-21), so both show the same numbers."""
     from django.db.models import Q, Sum
 
     from personnel.models import Task
@@ -445,15 +446,27 @@ def accomplishment_form(user, month, projects=None):
     )
     if projects is not None:
         tasks = tasks.filter(project__in=projects)
-    rows, total_hours, leaders = [], 0, []
-    for i, task in enumerate(tasks, start=1):
+    rows = []
+    for task in tasks:
         month_updates = task.updates.filter(created_at__gte=start, created_at__lt=end).order_by("created_at", "id")
-        hours = month_updates.filter(author=user).aggregate(total=Sum("hours"))["total"] or 0
+        rows.append({
+            "task": task,
+            "hours": month_updates.filter(author=user).aggregate(total=Sum("hours"))["total"] or 0,
+            "progress": task.progress_as_of(end),
+            "notes": "; ".join(u.note for u in month_updates if u.note),
+            "accomplished": task.status == "done" and task.completed_at is not None and start <= task.completed_at < end,
+        })
+    return rows
+
+
+def accomplishment_form(user, month, projects=None):
+    rows, total_hours, leaders = [], 0, []
+    for i, row in enumerate(accomplishment_rows(user, month, projects), start=1):
+        task, hours = row["task"], row["hours"]
         total_hours += hours
-        notes = "; ".join(u.note for u in month_updates if u.note)
         rows.append([
-            str(i), task.project.project_code, task.title, f"{task.progress_as_of(end):g}%", f"{hours:g}",
-            f"{task.due_date:%b %d, %Y}" if task.due_date else "", task.get_status_display(), notes,
+            str(i), task.project.project_code, task.title, f"{row['progress']:g}%", f"{hours:g}",
+            f"{task.due_date:%b %d, %Y}" if task.due_date else "", task.get_status_display(), row["notes"],
         ])
         if task.project.lead not in leaders:
             leaders.append(task.project.lead)

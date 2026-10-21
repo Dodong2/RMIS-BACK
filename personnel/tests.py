@@ -125,6 +125,34 @@ class StaffNotificationTests(RMISTestCase):
         self.assertNotIn("Data collection", self.client_for(other_leader).get("/api/reports/accomplishment/", params).content.decode())
         self.assertIn("Data collection", self.client_for(self.leader).get("/api/reports/accomplishment/", params).content.decode())
 
+    def test_accomplishment_summary_counts_this_months_hours_and_tasks_awaiting_approval(self):
+        # Client 2026-10-21: a staff who submitted a task saw 0 tasks and 0 hours until the leader approved it.
+        submitted = self.make_task_with_update(timezone.make_aware(datetime.datetime(2026, 9, 15)), hours=6)
+        Task.objects.filter(pk=submitted.pk).update(status="for_review")
+        approved = self.make_task_with_update(timezone.make_aware(datetime.datetime(2026, 9, 18)), hours=2)
+        old = TaskUpdate.objects.create(task=approved, author=self.staff, note="August work", hours=4)
+        TaskUpdate.objects.filter(pk=old.pk).update(created_at=timezone.make_aware(datetime.datetime(2026, 8, 10)))
+        Task.objects.filter(pk=approved.pk).update(status="done", completed_at=timezone.make_aware(datetime.datetime(2026, 9, 20)))
+
+        response = self.client_for(self.staff).get("/api/reports/accomplishment/summary/", {"month": "2026-09"})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["accomplished"], 1)
+        self.assertEqual(response.data["awaiting_approval"], 1)
+        self.assertEqual(response.data["total_hours"], 8)  # September only: 6 + 2, not August's 4
+        rows = {r["id"]: r for r in response.data["rows"]}
+        self.assertEqual((rows[approved.pk]["hours"], rows[approved.pk]["progress_pct"]), (2, 100))
+        self.assertEqual((rows[submitted.pk]["hours"], rows[submitted.pk]["status"]), (6, "for_review"))
+        self.assertEqual(rows[submitted.pk]["project_code"], "BRIDGI-1")
+
+    def test_accomplishment_summary_scope(self):
+        self.make_task_with_update(timezone.make_aware(datetime.datetime(2026, 9, 15)))
+        params = {"user": self.staff.pk, "month": "2026-09"}
+
+        self.assertEqual(self.client_for(self.make_user("project_staff")).get("/api/reports/accomplishment/summary/", params).status_code, 404)
+        self.assertEqual(self.client_for(self.make_user("project_leader")).get("/api/reports/accomplishment/summary/", params).data["rows"], [])
+        self.assertEqual(self.client_for(self.staff).get("/api/reports/accomplishment/summary/", {"month": "2026-9x"}).status_code, 400)
+
 
 class MilestoneTaskTests(RMISTestCase):
     """Client meeting 2026-10-01 (#14): milestone = parent, tasks = its activities, done only when all tasks are."""

@@ -103,7 +103,8 @@ class AccomplishmentReportView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request):
+    def resolve(self, request):
+        """(staff, month, projects) or an error Response."""
         user_id = request.query_params.get("user") or request.user.pk
         staff = User.objects.filter(pk=user_id).select_related("role").first() if str(user_id).isdigit() else None
         is_staff = request.user.role and request.user.role.code == "project_staff"
@@ -113,10 +114,16 @@ class AccomplishmentReportView(APIView):
             month = datetime.datetime.strptime(request.query_params.get("month") or f"{timezone.localdate():%Y-%m}", "%Y-%m").date()
         except ValueError:
             return Response({"detail": "month must be YYYY-MM."}, status=400)
+        return staff, month, None if is_staff else visible_projects(request.user)
+
+    def get(self, request):
+        resolved = self.resolve(request)
+        if isinstance(resolved, Response):
+            return resolved
+        staff, month, projects = resolved
         fmt = request.query_params.get("file_format", "pdf")
         if fmt not in forms.FORM_RENDERERS:
             return Response({"detail": f"Unsupported format: {fmt}. Choose one of {list(forms.FORM_RENDERERS)}."}, status=400)
-        projects = None if is_staff else visible_projects(request.user)
         form = forms.accomplishment_form(staff, month, projects)
         GeneratedReportLog.objects.create(
             report_type="accomplishment", format=fmt, filters={"user": staff.pk, "month": f"{month:%Y-%m}"},
@@ -125,6 +132,29 @@ class AccomplishmentReportView(APIView):
         response = HttpResponse(forms.FORM_RENDERERS[fmt](form), content_type=CONTENT_TYPES[fmt])
         response["Content-Disposition"] = f'attachment; filename="accomplishment_{month:%Y%m}_{staff.pk}.{fmt}"'
         return response
+
+
+class AccomplishmentSummaryView(AccomplishmentReportView):
+    """GET reports/accomplishment/summary/?user=&month=YYYY-MM: the same rows as the download, as JSON for the
+    Accomplishment Report page (client 2026-10-21: a submitted task showed 0 tasks and 0 hours). Tasks Accomplished =
+    approved (done) that month; Awaiting Approval = submitted, still For Review; Hours = Work Logs that month."""
+
+    def get(self, request):
+        resolved = self.resolve(request)
+        if isinstance(resolved, Response):
+            return resolved
+        rows = forms.accomplishment_rows(*resolved)
+        return Response({
+            "accomplished": sum(r["accomplished"] for r in rows),
+            "awaiting_approval": sum(r["task"].status == "for_review" for r in rows),
+            "total_hours": float(sum(r["hours"] for r in rows)),
+            "rows": [{
+                "id": r["task"].pk, "project": r["task"].project_id, "project_code": r["task"].project.project_code,
+                "title": r["task"].title, "status": r["task"].status, "progress_pct": r["progress"],
+                "hours": float(r["hours"]), "due_date": r["task"].due_date, "completed_at": r["task"].completed_at,
+                "notes": r["notes"],
+            } for r in rows],
+        })
 
 
 class AppendixGReportView(APIView):
