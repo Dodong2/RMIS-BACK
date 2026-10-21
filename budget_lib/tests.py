@@ -52,7 +52,7 @@ class LibWorkflowTests(RMISTestCase):
         for action in ("for-checking", "ready"):
             self.assertEqual(self.act(self.crc, action).status_code, 400, action)
         for action in ("start-certification", "certify"):
-            self.assertEqual(self.act(self.officer, action).status_code, 400, action)
+            self.assertEqual(self.act(self.officer, action).status_code, 404, action)  # Q10: hidden from Budget until Ready
         self.act(self.crc, "start-review")
         self.assertEqual(self.act(self.crc, "ready").status_code, 400)  # always through For Checking (client Q5)
         self.assertEqual(self.status(), "crc_processing")
@@ -65,7 +65,7 @@ class LibWorkflowTests(RMISTestCase):
             self.assertIn(self.act(user, "submit").status_code, (403, 404), user.role.code)
         self.act(self.leader, "submit")
         for user in (self.officer, self.leader, self.make_user("drd"), self.make_user("riuh")):
-            self.assertEqual(self.act(user, "start-review").status_code, 403, user.role.code)
+            self.assertIn(self.act(user, "start-review").status_code, (403, 404), user.role.code)  # Q10: hidden from Budget
         self.move_to("endorsed")
         for user in (self.crc, self.leader):
             self.assertEqual(self.act(user, "start-certification").status_code, 403, user.role.code)
@@ -94,7 +94,7 @@ class LibWorkflowTests(RMISTestCase):
         url = f"/api/budget/line-items/{self.item.id}/"
         leader = self.client_for(self.leader)
         self.assertEqual(leader.patch(url, {"justification": "Field visits"}, format="json").status_code, 200)
-        new_row = {"budget": self.budget.id, "category": "mooe", "description": "Travel", "amount": "10"}
+        new_row = {"budget": self.budget.id, "category": "mooe", "description": "Training Expenses", "amount": "10"}
         for status in ("submitted", "crc_processing", "for_checking", "endorsed", "certifying", "certified"):
             self.move_to(status)
             self.assertEqual(leader.patch(url, {"justification": "X"}, format="json").status_code, 400, status)
@@ -102,10 +102,33 @@ class LibWorkflowTests(RMISTestCase):
             self.assertEqual(leader.delete(url).status_code, 400, status)
 
     def test_only_the_project_leader_encodes(self):
-        # Client Q9 (2026-10-21): procurement and program leaders no longer encode LIBs.
-        row = {"budget": self.budget.id, "category": "mooe", "description": "Travel", "amount": "10"}
-        for code in ("crc_chair", "finance_budget"):
-            self.assertEqual(self.client_for(self.make_user(code)).post("/api/budget/line-items/", row, format="json").status_code, 403, code)
+        # Client Q9 (2026-10-21): the Procurement Officer and Program Leaders no longer encode LIBs.
+        row = {"budget": self.budget.id, "category": "mooe", "description": "Training Expenses", "amount": "10"}
+        url = f"/api/budget/line-items/{self.item.id}/"
+        for code in ("procurement_officer_lib", "program_leader", "crc_chair", "finance_budget", "system_admin"):
+            client = self.client_for(self.make_user(code))
+            self.assertEqual(client.post("/api/budget/line-items/", row, format="json").status_code, 403, code)
+            self.assertEqual(client.patch(url, {"justification": "X"}, format="json").status_code, 403, code)
+            self.assertEqual(client.delete(url).status_code, 403, code)
+            self.assertEqual(client.post("/api/budget/budgets/", {"project": self.project.id}, format="json").status_code, 403, code)
+        self.assertEqual(self.client_for(self.leader).post("/api/budget/line-items/", row, format="json").status_code, 201)
+
+    def test_the_budget_officer_sees_a_lib_only_once_it_is_ready(self):
+        # Client Q10 (2026-10-21): nothing before Ready for Certification reaches the Budget Officer.
+        officer = self.client_for(self.officer)
+        for status, seen in (("draft", False), ("submitted", False), ("crc_processing", False), ("for_checking", False),
+                             ("returned", False), ("endorsed", True), ("certifying", True), ("certified", True)):
+            self.move_to(status)
+            listed = [b["id"] for b in officer.get("/api/budget/budgets/", {"project": self.project.id}).data]
+            self.assertEqual(self.budget.id in listed, seen, status)
+            self.assertEqual(officer.get(f"/api/budget/budgets/{self.budget.id}/").status_code, 200 if seen else 404, status)
+            items = [i["id"] for i in officer.get("/api/budget/line-items/", {"budget": self.budget.id}).data]
+            self.assertEqual(self.item.id in items, seen, status)
+
+    def test_other_roles_still_see_every_status(self):
+        self.move_to("for_checking")
+        for user in (self.leader, self.crc, self.make_user("system_admin")):
+            self.assertEqual(self.client_for(user).get(f"/api/budget/budgets/{self.budget.id}/").status_code, 200, user.role.code)
 
     def test_hold_needs_remarks(self):
         self.act(self.leader, "submit")
@@ -129,7 +152,7 @@ class LibWorkflowTests(RMISTestCase):
 
     def test_hold_belongs_to_the_level_holding_the_lib(self):
         self.move_to("submitted")
-        self.assertEqual(self.act(self.officer, "hold", remarks="x").status_code, 403)
+        self.assertEqual(self.act(self.officer, "hold", remarks="x").status_code, 404)  # Q10: not visible to Budget yet
         self.move_to("endorsed")
         self.assertEqual(self.act(self.crc, "hold", remarks="x").status_code, 403)
         for status in ("draft", "certified", "returned"):

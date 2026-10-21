@@ -11,11 +11,28 @@ from .serializers import LibItemSerializer, LineItemBudgetSerializer, LineItemSe
 # Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
 # ensure_in_scope. Certification stays with the Budget Officer (budget.certify).
 # Client 2026-10-11: finance_budget and system_admin only certify/approve, they don't add or edit line items.
+# Client Q9 2026-10-21 (accounts 0023): the Procurement Officer and Program Leaders don't encode LIBs either.
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-MANAGE_ROLES = ["procurement_officer_lib", "program_leader", "project_leader"]
+MANAGE_ROLES = ["project_leader"]
+# Client Q10 2026-10-21: the Budget Officer sees a LIB only from Ready for Certification on.
+BUDGET_OFFICER_STATUSES = ("endorsed", "certifying", "certified")
 
 
-class BudgetListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
+class ReadyForBudgetOfficerMixin:
+    """Hides LIBs (or their line items) that aren't Ready for Certification yet from the Budget Officer, in lists and
+    detail lookups alike (list() and get_object() both go through filter_queryset). Other roles are unaffected."""
+
+    status_lookup = "status"
+
+    def filter_queryset(self, queryset):
+        qs = super().filter_queryset(queryset)
+        user = self.request.user
+        if user.role and user.role.code == "finance_budget":
+            qs = qs.filter(**{f"{self.status_lookup}__in": BUDGET_OFFICER_STATUSES})
+        return qs
+
+
+class BudgetListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.ListCreateAPIView):
     serializer_class = LineItemBudgetSerializer
 
     @transaction.atomic
@@ -35,14 +52,15 @@ class BudgetListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class BudgetDetailView(BudgetScopedMixin, generics.RetrieveAPIView):
+class BudgetDetailView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.RetrieveAPIView):
     queryset = LineItemBudget.objects.select_related("project")
     serializer_class = LineItemBudgetSerializer
     permission_classes = [permissions.IsAuthenticated]
 
 
-class LineItemListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
+class LineItemListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.ListCreateAPIView):
     project_lookup = "budget__project"
+    status_lookup = "budget__status"
     serializer_class = LineItemSerializer
 
     @transaction.atomic
@@ -68,8 +86,9 @@ class LineItemListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class LineItemDetailView(BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+class LineItemDetailView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIView):
     project_lookup = "budget__project"
+    status_lookup = "budget__status"
     queryset = LineItem.objects.all()
     serializer_class = LineItemSerializer
 
@@ -113,7 +132,7 @@ HOLDS = {
 }
 
 
-class BudgetReviewView(BudgetScopedMixin, generics.GenericAPIView):
+class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.GenericAPIView):
     """POST budgets/<id>/<step>/ {"remarks"?}: one step of the LIB review workflow (TRANSITIONS, or "hold", which needs
     remarks). Submit and resubmit need the Grand Total to equal the Total Project/Study Cost. Out-of-scope LIBs 404."""
 
