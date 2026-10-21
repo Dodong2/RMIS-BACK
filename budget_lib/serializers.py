@@ -114,7 +114,7 @@ class BudgetReviewSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BudgetReview
-        fields = ["id", "action", "remarks", "acted_by", "acted_by_name", "acted_at"]
+        fields = ["id", "action", "remarks", "snapshot", "acted_by", "acted_by_name", "acted_at"]
 
 
 class LineItemBudgetSerializer(serializers.ModelSerializer):
@@ -124,15 +124,23 @@ class LineItemBudgetSerializer(serializers.ModelSerializer):
     certified_by_name = serializers.CharField(source="certified_by.display_name", read_only=True, default=None)
     total_amount = serializers.SerializerMethodField()
     exceeds_dry_cap = serializers.SerializerMethodField()
+    hold_level = serializers.SerializerMethodField()
 
     class Meta:
         model = LineItemBudget
         fields = [
             "id", "project", "version_number", "is_current", "status",
             "certified_by", "certified_at", "certified_by_name", "endorsed_by", "endorsed_at", "endorsed_by_name",
-            "created_at", "line_items", "total_amount", "exceeds_dry_cap", "reviews",
+            "created_at", "line_items", "total_amount", "exceeds_dry_cap", "hold_level", "reviews",
         ]
         read_only_fields = ["version_number", "is_current", "status", "certified_by", "certified_at", "endorsed_by", "endorsed_at"]
+
+    def get_hold_level(self, obj):
+        """Who put an On Hold LIB on hold: "crc" or "budget" (client Q2), None otherwise or for an older return."""
+        if obj.status != "returned":
+            return None
+        last = obj.reviews.filter(action__in=("held_crc", "held_budget", "returned")).order_by("-acted_at", "-id").first()
+        return {"held_crc": "crc", "held_budget": "budget"}.get(last.action) if last else None
 
     def get_total_amount(self, obj):
         return obj.line_items.aggregate(total=Sum("amount"))["total"] or 0
@@ -178,17 +186,22 @@ def total_cost_problem(budget):
     return None
 
 
-def review_budget(budget, user, action, remarks=""):
-    """Move a LIB one step along the endorsement chain and keep the step in its history. Caller has locked the row
-    and checked the current status and the user's right to take this step."""
+def review_budget(budget, user, status, action, remarks=""):
+    """Move a LIB one step along the review workflow and keep the step in its history (a submission also keeps a
+    snapshot of its line items). Caller has locked the row and checked the current status and the user's right."""
     now = timezone.now()
-    budget.status = {"endorsed": "endorsed", "returned": "returned", "resubmitted": "draft", "certified": "certified"}[action]
-    if action == "endorsed":
+    budget.status = status
+    if action == "ready":
         budget.endorsed_by, budget.endorsed_at = user, now
     elif action == "certified":
         budget.certified_by, budget.certified_at = user, now
-    elif action == "resubmitted":
+    elif action in ("submitted", "resubmitted"):
         budget.endorsed_by, budget.endorsed_at = None, None
     budget.save(update_fields=["status", "endorsed_by", "endorsed_at", "certified_by", "certified_at"])
-    BudgetReview.objects.create(budget=budget, action=action, remarks=remarks, acted_by=user)
+    snapshot = []
+    if action in ("submitted", "resubmitted"):
+        snapshot = [LineItemSerializer(item).data for item in budget.line_items.order_by("category", "id")]
+        for row in snapshot:
+            row.pop("budget", None)
+    BudgetReview.objects.create(budget=budget, action=action, remarks=remarks, acted_by=user, snapshot=snapshot)
     return budget

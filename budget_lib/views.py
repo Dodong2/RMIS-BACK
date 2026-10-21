@@ -93,12 +93,29 @@ class LineItemDetailView(BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIVie
         instance.delete()
 
 
+# Client 2026-10-21: every step of the LIB review workflow, as step -> (from statuses, who, to status, history
+# action). "leader" = the project's own leader (or acting replacement); the others are permission codes. Anything not
+# here is refused, so no stage can be skipped (Q5: always through For Checking; Q3/Q6: review and certification
+# start with a button, not by opening the LIB).
+TRANSITIONS = {
+    "submit": (("draft",), "leader", "submitted", "submitted"),
+    "start-review": (("submitted",), "budget.endorse", "crc_processing", "review_started"),
+    "for-checking": (("crc_processing",), "budget.endorse", "for_checking", "for_checking"),
+    "ready": (("for_checking",), "budget.endorse", "endorsed", "ready"),
+    "start-certification": (("endorsed",), "budget.certify", "certifying", "certification_started"),
+    "certify": (("certifying",), "budget.certify", "certified", "certified"),
+    "resubmit": (("returned",), "leader", "submitted", "resubmitted"),
+}
+# Put on Hold (Q1, Q2): the level holding the LIB sends it back to the Project Leader with remarks.
+HOLDS = {
+    **{status: ("budget.endorse", "held_crc", "CRC Chair") for status in LineItemBudget.CRC_STATUSES},
+    **{status: ("budget.certify", "held_budget", "Budget Officer") for status in LineItemBudget.BUDGET_STATUSES},
+}
+
+
 class BudgetReviewView(BudgetScopedMixin, generics.GenericAPIView):
-    """POST {"remarks"?}: one step of the LIB endorsement chain (client 2026-10-18).
-    endorse: CRC Chair (budget.endorse), draft -> endorsed. certify: Budget Officer (budget.certify), endorsed ->
-    certified. return: CRC Chair on a draft or the Budget Officer on an endorsed LIB, remarks required -> returned.
-    resubmit: the project's own leader (or acting replacement), returned -> draft. Endorse and resubmit need the
-    Grand Total to equal the Total Project/Study Cost. Out-of-scope LIBs 404."""
+    """POST budgets/<id>/<step>/ {"remarks"?}: one step of the LIB review workflow (TRANSITIONS, or "hold", which needs
+    remarks). Submit and resubmit need the Grand Total to equal the Total Project/Study Cost. Out-of-scope LIBs 404."""
 
     queryset = LineItemBudget.objects.select_related("project")
     permission_classes = [permissions.IsAuthenticated]
@@ -110,34 +127,32 @@ class BudgetReviewView(BudgetScopedMixin, generics.GenericAPIView):
         remarks = (request.data.get("remarks") or "").strip()
         user = request.user
 
-        if self.step == "returned":
-            if budget.status not in ("draft", "endorsed"):
-                return self.refuse(f"A {budget.get_status_display().lower()} LIB can't be returned.")
-            needed = "budget.endorse" if budget.status == "draft" else "budget.certify"
-            if not role_can(user, needed):
-                who = "CRC Chair" if budget.status == "draft" else "Budget Officer"
-                return self.refuse(f"Only the {who} can return this LIB now.", status.HTTP_403_FORBIDDEN)
+        if self.step == "hold":
+            if budget.status not in HOLDS:
+                return self.refuse(f"A LIB that is {budget.get_status_display().lower()} can't be put on hold.")
+            permission, action, who = HOLDS[budget.status]
+            if not role_can(user, permission):
+                return self.refuse(f"Only the {who} can put this LIB on hold now.", status.HTTP_403_FORBIDDEN)
             if not remarks:
-                return Response({"remarks": "Say what needs to be revised."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"remarks": "Say what the Project Leader needs to correct."}, status=status.HTTP_400_BAD_REQUEST)
+            to_status = "returned"
         else:
-            if self.step == "resubmitted":
+            from_statuses, who, to_status, action = TRANSITIONS[self.step]
+            if who == "leader":
                 allowed = budget.project.lead_id in [user.pk, *acting_for(user)]
             else:
-                allowed = role_can(user, "budget.endorse" if self.step == "endorsed" else "budget.certify")
+                allowed = role_can(user, who)
             if not allowed:
                 return self.refuse("You may not take this step on this LIB.", status.HTTP_403_FORBIDDEN)
-            expected = {"endorsed": "draft", "certified": "endorsed", "resubmitted": "returned"}[self.step]
-            if budget.status != expected:
-                return self.refuse(
-                    f"Only a LIB that is {dict(LineItemBudget.STATUS_CHOICES)[expected].lower()} can be "
-                    f"{self.step} (this one is {budget.get_status_display().lower()})."
-                )
-            if self.step in ("endorsed", "resubmitted"):
+            if budget.status not in from_statuses:
+                expected = " or ".join(dict(LineItemBudget.STATUS_CHOICES)[s].lower() for s in from_statuses)
+                return self.refuse(f"This step needs a LIB that is {expected} (this one is {budget.get_status_display().lower()}).")
+            if self.step in ("submit", "resubmit"):
                 problem = total_cost_problem(budget)
                 if problem:
                     return self.refuse(problem)
 
-        return Response(LineItemBudgetSerializer(review_budget(budget, user, self.step, remarks)).data)
+        return Response(LineItemBudgetSerializer(review_budget(budget, user, to_status, action, remarks)).data)
 
     def refuse(self, detail, code=status.HTTP_400_BAD_REQUEST):
         return Response({"detail": detail}, status=code)

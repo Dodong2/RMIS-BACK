@@ -24,15 +24,24 @@ def allocation_periods(project):
 
 
 class LineItemBudget(models.Model):
-    # Client 2026-10-18: CRC Chair endorses, then the Budget Officer certifies; either one can return it to the
-    # Project Leader, who edits and resubmits (back to draft). Only draft/returned LIBs can be edited.
+    # Client 2026-10-21 (replaces the 2026-10-18 endorse/return chain): the Project Leader submits; the CRC Chair
+    # reviews (Start Review -> For Checking -> Ready for Certification); the Budget Officer certifies (Start
+    # Certification -> Certify). Either level can put it On Hold for the Project Leader, who edits and resubmits to the
+    # CRC Chair. Only Draft and On Hold LIBs can be edited. Codes "endorsed" and "returned" are kept so older LIBs
+    # and Realignment (certified only) keep working.
     STATUS_CHOICES = (
         ("draft", "Draft"),
-        ("endorsed", "Endorsed by CRC Chair"),
-        ("returned", "Returned for Revision"),
+        ("submitted", "Awaiting CRC Chair"),
+        ("crc_processing", "Processing"),
+        ("for_checking", "For Checking"),
+        ("endorsed", "Ready for Certification"),
+        ("certifying", "In Progress"),
+        ("returned", "On Hold"),
         ("certified", "Certified"),
     )
     EDITABLE_STATUSES = ("draft", "returned")
+    CRC_STATUSES = ("submitted", "crc_processing", "for_checking")
+    BUDGET_STATUSES = ("endorsed", "certifying")
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="budgets")
     version_number = models.PositiveIntegerField()
@@ -58,18 +67,28 @@ class LineItemBudget(models.Model):
 
 
 class BudgetReview(models.Model):
-    """One row per endorsement step on a LIB (client 2026-10-18: full history of every return and resubmit)."""
+    """One row per review step on a LIB (client 2026-10-18: full history of every hold and resubmit). "endorsed" and
+    "returned" are the 2026-10-18 chain's steps, kept for older LIBs' history."""
 
     ACTION_CHOICES = (
-        ("endorsed", "Endorsed"),
-        ("returned", "Returned for Revision"),
+        ("submitted", "Submitted"),
+        ("review_started", "Review Started"),
+        ("for_checking", "For Checking"),
+        ("ready", "Ready for Certification"),
+        ("certification_started", "Certification Started"),
+        ("held_crc", "Put on Hold (CRC Chair)"),
+        ("held_budget", "Put on Hold (Budget Officer)"),
         ("resubmitted", "Resubmitted"),
         ("certified", "Certified"),
+        ("endorsed", "Endorsed"),
+        ("returned", "Put on Hold"),
     )
 
     budget = models.ForeignKey(LineItemBudget, on_delete=models.CASCADE, related_name="reviews")
-    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    action = models.CharField(max_length=25, choices=ACTION_CHOICES)
     remarks = models.TextField(blank=True)
+    # Client Q11 (2026-10-21): the line items as submitted/resubmitted, so editing an On Hold LIB keeps the record.
+    snapshot = models.JSONField(default=list, blank=True)
     acted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="budget_reviews")
     acted_at = models.DateTimeField(auto_now_add=True)
 
