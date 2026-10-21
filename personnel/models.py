@@ -5,7 +5,7 @@ from django.core.validators import MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
-from research_projects.models import Program, Project, Study
+from research_projects.models import Program, Project, Study, WorkPlanMilestone
 
 
 HOURS_PER_WORKING_DAY = 8
@@ -90,7 +90,18 @@ class Task(models.Model):
         if self.status != "pending" and self.started_at is None:
             self.started_at = timezone.now()
         self.completed_at = (self.completed_at or timezone.now()) if self.status == "done" else None
+        previous = Task.objects.filter(pk=self.pk).values_list("milestone_id", flat=True).first() if self.pk else None
         super().save(*args, **kwargs)
+        # The activity's status follows its tasks (client 2026-10-21), including the one a task moved away from.
+        for milestone in WorkPlanMilestone.objects.filter(pk__in={self.milestone_id, previous} - {None}):
+            milestone.sync_status()
+
+    def delete(self, *args, **kwargs):
+        milestone = self.milestone
+        result = super().delete(*args, **kwargs)
+        if milestone:
+            milestone.sync_status()
+        return result
 
     @property
     def logged_hours(self):

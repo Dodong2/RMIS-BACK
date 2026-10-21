@@ -178,19 +178,48 @@ class MilestoneTaskTests(RMISTestCase):
     def milestone_data(self):
         return self.client.get(f"/api/milestones/{self.milestone.pk}/").data
 
-    def test_progress_and_done_gate(self):
+    def test_status_follows_the_tasks(self):
+        # Client 2026-10-21: no dropdown; Not Started until a task reaches 100%, In Progress while some are, Done when
+        # all are, and In Progress again when the leader adds a task (4/4 -> 4/7).
+        self.assertEqual(self.milestone_data()["status"], "pending")
         first, second = self.add_task("Survey"), self.add_task("Interviews")
-        Task.objects.filter(pk=first).update(status="done")
+        staff = self.client_for(self.staff)
+        staff.post(f"/api/personnel/tasks/{first}/updates/", {"note": "Started", "hours": "8"}, format="json")
+        self.assertEqual(self.milestone_data()["status"], "pending")
 
+        staff.post(f"/api/personnel/tasks/{first}/updates/", {"note": "Finished", "hours": "32"}, format="json")
+        self.assertEqual(self.milestone_data()["status"], "in_progress")
+
+        staff.post(f"/api/personnel/tasks/{second}/updates/", {"note": "Finished", "hours": "40"}, format="json")
         data = self.milestone_data()
-        blocked = self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
-        Task.objects.filter(pk=second).update(status="done")
-        allowed = self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
+        self.assertEqual((data["status"], data["tasks_done"], data["tasks_total"], data["progress_pct"]), ("done", 2, 2, 100))
 
-        self.assertEqual((data["tasks_total"], data["tasks_done"], data["progress_pct"]), (2, 1, 50))
-        self.assertEqual(blocked.status_code, 400)
-        self.assertIn("not done", str(blocked.data))
-        self.assertEqual(allowed.status_code, 200)
+        third = self.add_task("Follow-up survey")
+        self.assertEqual(self.milestone_data()["status"], "in_progress")
+
+        self.client.delete(f"/api/personnel/tasks/{third}/")
+        self.assertEqual(self.milestone_data()["status"], "done")
+
+    def test_status_cannot_be_set_by_hand(self):
+        self.add_task("Survey")
+
+        self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
+
+        self.assertEqual(self.milestone_data()["status"], "pending")
+
+    def test_moving_a_task_updates_both_activities(self):
+        from research_projects.models import WorkPlanMilestone
+
+        other = WorkPlanMilestone.objects.create(project=self.project, title="Analysis", target_date=datetime.date(2026, 6, 30))
+        task = self.add_task("Survey")
+        Task.objects.filter(pk=task).update(status="done")
+        Task.objects.get(pk=task).save()
+        self.assertEqual(self.milestone_data()["status"], "done")
+
+        self.client.patch(f"/api/personnel/tasks/{task}/", {"milestone": other.pk}, format="json")
+
+        self.milestone.refresh_from_db(), other.refresh_from_db()
+        self.assertEqual((self.milestone.status, other.status), ("pending", "done"))
 
     def test_progress_is_the_average_of_the_task_percents(self):
         # Client 2026-10-21 (concern.png): a task at 100% left its activity at "0/4 tasks · 0%".
@@ -204,21 +233,11 @@ class MilestoneTaskTests(RMISTestCase):
 
         self.assertEqual((data["tasks_total"], data["tasks_done"], data["progress_pct"]), (4, 1, 30))  # (100+20+0+0)/4
 
-    def test_a_task_added_to_a_done_activity_reopens_it(self):
-        first = self.add_task("Survey")
-        Task.objects.filter(pk=first).update(status="done")
-        self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
-
-        self.add_task("Follow-up survey")
-
-        data = self.milestone_data()
-        self.assertEqual((data["status"], data["tasks_total"], data["tasks_done"], data["progress_pct"]), ("in_progress", 2, 1, 50))
-
-    def test_milestone_without_tasks_works_as_before(self):
+    def test_milestone_without_tasks_stays_not_started(self):
         response = self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["progress_pct"], 100)
+        self.assertEqual((response.data["status"], response.data["progress_pct"]), ("pending", 0))
 
     def test_milestone_must_be_in_the_same_project(self):
         other = Project.objects.create(title="O", project_code="O-1", funding_type="institutional", lead=self.leader)

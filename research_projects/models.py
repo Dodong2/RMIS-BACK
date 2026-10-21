@@ -305,5 +305,20 @@ class WorkPlanMilestone(models.Model):
     remarks = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def status_from_tasks(self):
+        """Client 2026-10-21: no dropdown. Not Started until a task reaches 100% (also with no tasks), In Progress while
+        some have, Done when all have; a newly added task makes a Done activity In Progress again (4/4 -> 4/7)."""
+        percents = [task.progress_pct for task in self.tasks.all()]
+        done = sum(pct >= 100 for pct in percents)
+        if not done:
+            return "pending"
+        return "done" if done == len(percents) else "in_progress"
+
+    def sync_status(self):
+        status = self.status_from_tasks()
+        if status != self.status:
+            self.status = status
+            self.save(update_fields=["status"])
+
     def __str__(self):
         return self.title

@@ -125,16 +125,7 @@ class TaskListCreateView(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        task = serializer.save(assigned_by=self.request.user)
-        reopen_milestone(task)
-        notify_assignee(task)
-
-
-def reopen_milestone(task):
-    """Client 2026-10-21: an activity marked Done gets a new task (4/4 -> 4/7), so it is In Progress again."""
-    if task.milestone and task.milestone.status == "done" and task.status != "done":
-        task.milestone.status = "in_progress"
-        task.milestone.save(update_fields=["status"])
+        notify_assignee(serializer.save(assigned_by=self.request.user))
 
 
 def notify_assignee(task):
@@ -164,7 +155,6 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_update(self, serializer):
         previous = serializer.instance.assignee_id
         task = serializer.save()
-        reopen_milestone(task)
         if task.assignee_id != previous:
             notify_assignee(task)
 

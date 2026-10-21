@@ -396,9 +396,9 @@ class StudySerializer(serializers.ModelSerializer):
 
 
 class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
-    """Client meeting 2026-10-01 (#14): personnel tasks are the activities under a milestone, and it can't be marked done
-    while any of them is open. Client 2026-10-21: its progress is the average of its tasks' % completed and tasks_done
-    counts tasks at 100%, so a staff's Work Logs move it. Milestones without tasks work as before."""
+    """Client meeting 2026-10-01 (#14): personnel tasks are the activities under a milestone. Client 2026-10-21: its
+    progress is the average of its tasks' % completed, tasks_done counts tasks at 100%, and its status follows them
+    (read-only, see WorkPlanMilestone.status_from_tasks)."""
 
     responsible_detail = LeadSerializer(source="responsible", read_only=True)
     tasks_total = serializers.SerializerMethodField()
@@ -411,6 +411,7 @@ class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
             "id", "project", "title", "start_date", "target_date", "status", "objective", "deliverable",
             "responsible", "responsible_detail", "remarks", "tasks_total", "tasks_done", "progress_pct", "created_at",
         ]
+        read_only_fields = ["status"]  # follows the tasks (WorkPlanMilestone.status_from_tasks)
 
     def get_tasks_total(self, obj):
         return obj.tasks.count()
@@ -423,18 +424,10 @@ class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
 
     def get_progress_pct(self, obj):
         percents = self.task_percents(obj)
-        if not percents:
-            return 100 if obj.status == "done" else 0
-        return round(sum(percents) / len(percents), 1)
+        return round(sum(percents) / len(percents), 1) if percents else 0
 
     def validate(self, attrs):
         ensure_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
-        if attrs.get("status") == "done" and self.instance:
-            still_open = self.instance.tasks.exclude(status="done").count()
-            if still_open:
-                raise serializers.ValidationError(
-                    {"status": f"{still_open} task(s) under this milestone are not done yet."}
-                )
         start = attrs.get("start_date", getattr(self.instance, "start_date", None))
         target = attrs.get("target_date", getattr(self.instance, "target_date", None))
         if start and target and start > target:
