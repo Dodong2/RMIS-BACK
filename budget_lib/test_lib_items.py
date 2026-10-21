@@ -16,11 +16,35 @@ class LibItemAdminTests(RMISTestCase):
         super().setUp()
         self.admin = self.client_for(self.make_user("system_admin"))
 
-    def test_starting_list_comes_from_uacs(self):
+    def test_list_is_the_official_2027_lib(self):
         honoraria = LibItem.objects.get(name="Honoraria")
 
-        self.assertEqual((honoraria.category, honoraria.uacs_code), ("ps", "5010210000"))
-        self.assertEqual(LibItem.objects.filter(category="co").count(), 5)
+        self.assertEqual((honoraria.category, honoraria.uacs_code), ("ps", "50102100"))
+        self.assertEqual(
+            [LibItem.objects.filter(category=c).count() for c in ("ps", "mooe", "co")], [4, 50, 20]
+        )
+
+    def test_official_list_replaces_the_old_starting_items(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        leader = self.make_user("project_leader")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
+        budget = LineItemBudget.objects.create(project=project, version_number=1)
+        LineItem.objects.create(budget=budget, category="mooe", description="Survey Expenses", amount=Decimal("100"))
+        LibItem.objects.create(category="mooe", name="Survey Expenses", uacs_code="5020701000")
+        LibItem.objects.create(category="ps", name="Overtime Pay", uacs_code="5010213001")
+        LibItem.objects.create(category="mooe", name="Seminar Kits")
+        LibItem.objects.filter(name="Honoraria").update(uacs_code="5010210000", is_active=False)
+
+        import_module("budget_lib.migrations.0011_official_lib_items").official_list(apps, None)
+
+        self.assertFalse(LibItem.objects.get(name="Survey Expenses").is_active)  # an LIB uses it
+        self.assertFalse(LibItem.objects.get(name="Overtime Pay").is_active)  # unused, still kept
+        self.assertTrue(LibItem.objects.filter(name="Seminar Kits").exists())  # the admin's own item stays
+        honoraria = LibItem.objects.get(name="Honoraria")
+        self.assertEqual((honoraria.uacs_code, honoraria.is_active), ("50102100", True))
 
     def test_admin_adds_an_item_under_one_class(self):
         response = self.admin.post(URL, {"category": "mooe", "name": " Seminar Kits ", "uacs_code": "5020399000"}, format="json")
@@ -41,7 +65,7 @@ class LibItemAdminTests(RMISTestCase):
 
         self.assertEqual(self.admin.delete(f"{URL}{item.pk}/").status_code, 400)
         self.assertEqual(self.admin.patch(f"{URL}{item.pk}/", {"is_active": False}, format="json").status_code, 200)
-        unused = LibItem.objects.get(name="Overtime Pay")
+        unused = LibItem.objects.get(name="Overtime and Night Pay")
         self.assertEqual(self.admin.delete(f"{URL}{unused.pk}/").status_code, 204)
 
     def test_other_roles_only_read(self):
