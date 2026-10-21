@@ -57,6 +57,9 @@ class LineItemSerializer(serializers.ModelSerializer):
         read_only_fields = ["is_app_flagged"]
 
     def validate(self, attrs):
+        # A row stays in its LIB; otherwise moving it to a draft would take it out of a locked one (audit 2026-10-21).
+        if self.instance is not None and "budget" in attrs and attrs["budget"].pk != self.instance.budget_id:
+            raise serializers.ValidationError({"budget": "A line item can't be moved to another LIB."})
         budget = attrs.get("budget", getattr(self.instance, "budget", None))
         ensure_in_scope(self, budget.project)
         # Locked (and re-read) so an item can't slip into a LIB that is being certified at the same moment.

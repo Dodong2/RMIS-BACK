@@ -120,3 +120,24 @@ class EndorsementTests(RMISTestCase):
         self.act(self.officer, "certify")
         self.assertEqual(self.act(self.officer, "certify").status_code, 400)
         self.assertEqual(self.act(self.officer, "return", remarks="x").status_code, 400)
+
+    def test_a_line_item_cannot_move_out_of_a_locked_lib(self):
+        # Audit 2026-10-21: PATCH {"budget": <a draft LIB>} only checked the new LIB, so an item could leave a
+        # certified one.
+        LineItemBudget.objects.filter(pk=self.budget.pk).update(status="certified")
+        draft = LineItemBudget.objects.create(project=self.project, version_number=2)
+
+        response = self.client_for(self.leader).patch(f"/api/budget/line-items/{self.item.id}/", {"budget": draft.id}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.budget_id, self.budget.id)
+
+    def test_a_line_item_stays_in_its_own_lib_even_while_draft(self):
+        other = LineItemBudget.objects.create(project=self.project, version_number=2)
+
+        response = self.client_for(self.leader).patch(f"/api/budget/line-items/{self.item.id}/", {"budget": other.id}, format="json")
+
+        self.assertIn("budget", response.data)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.budget_id, self.budget.id)
