@@ -337,8 +337,8 @@ class TaskScheduleTests(RMISTestCase):
         self.assertEqual(response.data["estimated_hours"], "12.00")
 
 
-class WorkLogProgressTests(RMISTestCase):
-    """Client 2026-10-19: % completed = the assignee's Work Log hours / planned hours (capped at 100), 100 once done."""
+class WorkLogFixture:
+    """A 40-planned-hour task (Mon-Fri) assigned by a leader to a staff member."""
 
     def setUp(self):
         super().setUp()
@@ -355,6 +355,10 @@ class WorkLogProgressTests(RMISTestCase):
 
     def task(self):
         return self.staff_client.get(f"/api/personnel/tasks/{self.task_id}/").data
+
+
+class WorkLogProgressTests(WorkLogFixture, RMISTestCase):
+    """Client 2026-10-19: % completed = the assignee's Work Log hours / planned hours (capped at 100), 100 once done."""
 
     def test_progress_follows_the_logged_hours(self):
         self.assertEqual(self.log(hours="8").status_code, 201)
@@ -423,3 +427,53 @@ class WorkLogProgressTests(RMISTestCase):
         task = Task.objects.get(pk=self.task_id)
         self.assertEqual(task.progress_as_of(timezone.now() + datetime.timedelta(days=1)), 20)
         self.assertEqual(task.progress_pct, 40)
+
+
+class TaskClosedAt100Tests(WorkLogFixture, RMISTestCase):
+    """Client 2026-10-21 (task_board.png): at 100% the task is closed for the staff (comments only, no status change),
+    the Work Log that reached 100% submits it for review, and its deliverables are ticked."""
+
+    def add_deliverable(self, text="Survey forms"):
+        return self.client_for(self.leader).post(f"/api/personnel/tasks/{self.task_id}/deliverables/", {"text": text}, format="json").data["id"]
+
+    def test_the_work_log_that_reaches_100_submits_the_task_and_ticks_its_deliverables(self):
+        self.add_deliverable()
+        self.log(hours="30")
+        self.assertEqual(self.task()["status"], "pending")
+
+        self.assertEqual(self.log(hours="15").status_code, 201)
+
+        data = self.task()
+        self.assertEqual((data["status"], data["progress_pct"], data["logged_hours"]), ("for_review", 100, "45.00"))
+        self.assertTrue(all(d["done"] for d in data["deliverables"]))
+
+    def test_at_100_the_staff_can_only_comment(self):
+        self.log(hours="40")
+
+        self.assertIn("kind", self.log(hours="5").data)
+        self.assertIn("kind", self.log(kind="blocker").data)
+        self.assertIn("kind", self.log(kind="completion").data)
+        self.assertEqual(self.log(kind="comment").status_code, 201)
+        self.assertEqual(self.task()["logged_hours"], "40.00")
+
+    def test_at_100_the_staff_cannot_change_the_status(self):
+        self.log(hours="40")
+
+        response = self.staff_client.patch(f"/api/personnel/tasks/{self.task_id}/", {"status": "in_progress"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("new_status", self.log(kind="comment", new_status="blocked").data)
+        self.assertEqual(self.task()["status"], "for_review")
+
+    def test_the_leader_still_reviews_a_closed_task(self):
+        self.log(hours="40")
+
+        response = self.client_for(self.leader).post(f"/api/personnel/tasks/{self.task_id}/review/", {"action": "approve"}, format="json")
+
+        self.assertEqual(response.data["status"], "done")
+
+    def test_only_an_assigner_ticks_deliverables(self):
+        deliverable = self.add_deliverable()
+        url = f"/api/personnel/task-deliverables/{deliverable}/"
+
+        self.assertEqual(self.staff_client.patch(url, {"done": True}, format="json").status_code, 403)
+        self.assertEqual(self.client_for(self.leader).patch(url, {"done": True}, format="json").status_code, 200)

@@ -132,6 +132,8 @@ class TaskSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("You may only update the status of your own tasks.")
             if attrs.get("status") == "done":
                 raise serializers.ValidationError({"status": "Submit the task for review; a leader marks it done."})
+            if self.instance.progress_pct >= 100:
+                raise serializers.ValidationError({"status": "This task is at 100% and waits for your leader's review."})
             return attrs
         study = attrs.get("study", getattr(self.instance, "study", None))
         project = attrs.get("project", getattr(self.instance, "project", None))
@@ -181,9 +183,19 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
         task = self.context["task"]
         if not role_can(user, "personnel.assign_tasks") and task.assignee_id != user.id:
             raise serializers.ValidationError("Only the assignee or a task assigner can post updates on this task.")
+        # Client 2026-10-21: at 100% the task is closed: no more Work Logs, and the staff may only comment.
+        kind = attrs.get("kind", "update")
+        if task.progress_pct >= 100:
+            if kind == "update":
+                raise serializers.ValidationError({"kind": "This task is at 100%, so no more Work Logs; post a comment instead."})
+            if not role_can(user, "personnel.assign_tasks"):
+                if kind != "comment":
+                    raise serializers.ValidationError({"kind": "This task is at 100%; you can only post comments."})
+                if attrs.get("new_status"):
+                    raise serializers.ValidationError({"new_status": "This task is at 100% and waits for your leader's review."})
         # Client 2026-10-19: hours are logged only in a Work Log ("update"), only by the assignee, and must be > 0.
         hours = attrs.get("hours") or 0
-        if attrs.get("kind", "update") == "update":
+        if kind == "update":
             if task.assignee_id != user.id:
                 raise serializers.ValidationError({"kind": "Only the assignee logs work on this task; post a comment instead."})
             if hours <= 0:

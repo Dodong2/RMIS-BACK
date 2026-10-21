@@ -177,7 +177,9 @@ class TaskUpdateListCreateView(generics.ListCreateAPIView):
     def get_serializer_context(self):
         context = super().get_serializer_context()
         if self.request.method == "POST":
-            context["task"] = self.get_task()
+            # Locked (create runs in a transaction, see @idempotent) so two Work Logs can't both pass the 100% check.
+            task = self.get_task()
+            context["task"] = lock(Task.objects.all(), pk=task.pk)
         return context
 
     @idempotent  # a retried Work Log is saved once, so its hours are counted once
@@ -187,17 +189,19 @@ class TaskUpdateListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         task = serializer.context["task"]
         update = serializer.save(task=task, author=self.request.user)
+        # Client 2026-10-21: the Work Log that reaches 100% ticks the deliverables and submits the task for review.
+        if update.kind == "update" and task.progress_pct >= 100:
+            task.deliverables.filter(done=False).update(done=True)
+            if task.status not in ("for_review", "done") and not update.new_status:
+                update.new_status = "for_review"
+                update.save(update_fields=["new_status"])
         if update.new_status and update.new_status != task.status:
             task.status = update.new_status
             task.save(update_fields=["status", "started_at", "completed_at"])
 
 
-def _can_touch_task(user, task):
-    return user.role and (role_can(user, "personnel.assign_tasks") or task.assignee_id == user.id)
-
-
 class TaskDeliverableListCreateView(generics.ListCreateAPIView):
-    """Checklist of one task. Assigners add items; the assignee (or an assigner) ticks them off."""
+    """Checklist of one task. Assigners add and tick items; a task reaching 100% ticks them all (client 2026-10-21)."""
 
     serializer_class = TaskDeliverableSerializer
 
@@ -223,8 +227,8 @@ class TaskDeliverableDetailView(generics.RetrieveUpdateDestroyAPIView):
         return [permissions.IsAuthenticated()]
 
     def perform_update(self, serializer):
-        if not _can_touch_task(self.request.user, serializer.instance.task):
-            raise PermissionDenied("Only the assignee or a task assigner can update this checklist.")
+        if not role_can(self.request.user, "personnel.assign_tasks"):
+            raise PermissionDenied("Deliverables are ticked when the task reaches 100%; only a task assigner can change them.")
         serializer.save()
 
 
