@@ -148,3 +148,22 @@ class ProcurementRequest(models.Model):
 
     def __str__(self):
         return f"{self.description} - {self.amount} ({self.status})"
+
+
+class ProcurementStatusEvent(models.Model):
+    """One status change of a procurement request, with the account that made it (Procurement dashboard Audit trail,
+    2026-10-22). from_status is blank for the submission itself. Recorded from 2026-10-22 on; older changes have only
+    the request's last updated_by."""
+
+    procurement = models.ForeignKey(ProcurementRequest, on_delete=models.CASCADE, related_name="events")
+    from_status = models.CharField(max_length=30, blank=True)
+    to_status = models.CharField(max_length=30)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="procurement_events")
+    remarks = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"PR-{self.procurement_id:04d}: {self.from_status or '-'} -> {self.to_status}"

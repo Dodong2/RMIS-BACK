@@ -172,3 +172,12 @@ class TaskDashboardView(APIView):
         return Response(services.compute_task_dashboard(
             project_id=request.query_params.get("project"), user=request.user,
         ))
+
+
+class ProcurementDashboardView(APIView):
+    """Procurement Officer - LIB dashboard (2026-10-22): the Procurement Office (and System Admin), any account."""
+
+    permission_classes = [HasRole("financial.update_procurement")]
+
+    def get(self, request):
+        return Response(services.compute_procurement_dashboard(request.user))

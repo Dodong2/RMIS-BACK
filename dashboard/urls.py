@@ -14,6 +14,7 @@ from .views import (
     PlanningTargetListCreateView,
     PerformanceDashboardView,
     PortfolioDashboardView,
+    ProcurementDashboardView,
     ProjectDashboardView,
     RdeThrustAlignmentView,
 )
@@ -27,6 +28,7 @@ urlpatterns = [
     path("funding-allocation/", FundingAllocationDashboardView.as_view()),
     path("tasks/", TaskDashboardView.as_view()),
     path("portfolio/", PortfolioDashboardView.as_view()),
+    path("procurement/", ProcurementDashboardView.as_view()),
     path("performance/", PerformanceDashboardView.as_view()),
     path("rde-thrust-alignment/", RdeThrustAlignmentView.as_view()),
     path("planning-targets/", PlanningTargetListCreateView.as_view()),

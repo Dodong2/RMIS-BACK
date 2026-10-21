@@ -14,7 +14,10 @@ from accounts.permissions import BudgetScopedMixin, HasRole, role_can, scoped_pr
 from budget_lib.models import LineItemBudget
 from config.concurrency import idempotent, lock
 from realtime.notify import notify, project_audience
-from .models import PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, BudgetRealignment, Disbursement, ProcurementRequest
+from .models import (
+    PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, BudgetRealignment, Disbursement, ProcurementRequest,
+    ProcurementStatusEvent,
+)
 from .serializers import (
     BudgetRealignmentSerializer,
     DisbursementSerializer,
@@ -26,6 +29,19 @@ from .serializers import (
     post_procurement_disbursement,
     review_realignment,
 )
+
+
+def in_scope(queryset, user, project_lookup):
+    """queryset limited to the user's scoped projects (campus-scoped Finance/Procurement), for the write endpoints that
+    lock a row by pk: without it a campus-scoped account could act on another campus's record by its id (2026-10-22)."""
+    projects = scoped_projects(user)
+    return queryset if projects is None else queryset.filter(**{f"{project_lookup}__in": projects})
+
+
+def record_procurement_event(procurement, from_status, user, remarks=""):
+    ProcurementStatusEvent.objects.create(
+        procurement=procurement, from_status=from_status, to_status=procurement.status, actor=user, remarks=remarks,
+    )
 
 
 class DisbursementListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
@@ -134,7 +150,7 @@ class RealignmentReviewView(APIView):
     @transaction.atomic
     def post(self, request, pk):
         # Locked so a double-click or a second reviewer waits, then sees it is no longer pending.
-        realignment = lock(BudgetRealignment.objects.all(), pk=pk)
+        realignment = lock(in_scope(BudgetRealignment.objects.all(), request.user, "from_line_item__budget__project"), pk=pk)
         if realignment.status not in ("pending_approval", "pending_bor"):
             return Response({"detail": "This realignment is not awaiting review."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -157,6 +173,9 @@ def procurement_signal(event_type, procurement):
     project = procurement.line_item.budget.project
     notify(project_audience(project, "financial.", procurement.requested_by_id), event_type,
            id=procurement.id, project=project.id, status=procurement.status)
+
+
+PR_PROJECT = "line_item__budget__project"
 
 
 class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
@@ -188,7 +207,9 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        procurement_signal("procurement.created", serializer.save(requested_by=self.request.user))
+        procurement = serializer.save(requested_by=self.request.user)
+        record_procurement_event(procurement, "", self.request.user)
+        procurement_signal("procurement.created", procurement)
 
 
 class ProcurementReceiveView(APIView):
@@ -198,13 +219,14 @@ class ProcurementReceiveView(APIView):
 
     @transaction.atomic
     def post(self, request, pk):
-        procurement = lock(ProcurementRequest.objects.all(), pk=pk)
+        procurement = lock(in_scope(ProcurementRequest.objects.all(), request.user, PR_PROJECT), pk=pk)
         if procurement.status != "requested":
             return Response({"detail": "Only a submitted request can be marked received."}, status=status.HTTP_400_BAD_REQUEST)
         procurement.status = "under_review"
         procurement.received_by = procurement.updated_by = request.user
         procurement.received_at = timezone.now()
         procurement.save()
+        record_procurement_event(procurement, "requested", request.user)
         procurement_signal("procurement.updated", procurement)
         return Response(ProcurementRequestSerializer(procurement).data)
 
@@ -217,7 +239,8 @@ class ProcurementStatusView(APIView):
     @transaction.atomic
     def post(self, request, pk):
         # Locked so two "Completed" clicks can't both pass the status check (one disbursement, then a clean 400).
-        procurement = lock(ProcurementRequest.objects.all(), pk=pk)
+        procurement = lock(in_scope(ProcurementRequest.objects.all(), request.user, PR_PROJECT), pk=pk)
+        previous = procurement.status
         serializer = ProcurementStatusSerializer(data=request.data, context={"procurement": procurement})
         serializer.is_valid(raise_exception=True)
         procurement.status = serializer.validated_data["status"]
@@ -227,6 +250,7 @@ class ProcurementStatusView(APIView):
             procurement.completed_at = timezone.now()
             post_procurement_disbursement(procurement)
         procurement.save()
+        record_procurement_event(procurement, previous, request.user, serializer.validated_data.get("remarks", ""))
         procurement_signal("procurement.updated", procurement)
         return Response(ProcurementRequestSerializer(procurement).data)
 
@@ -248,7 +272,9 @@ class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):
         data["remarks"] = request.data.get("remarks", "")  # the leader's note replaces the Procurement Office's return reason
         serializer = self.get_serializer(procurement, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
-        procurement_signal("procurement.updated", serializer.save(status="requested", received_by=None, received_at=None))
+        procurement = serializer.save(status="requested", received_by=None, received_at=None)
+        record_procurement_event(procurement, "returned_for_revision", request.user, data["remarks"])
+        procurement_signal("procurement.updated", procurement)
         return Response(serializer.data)
 
 

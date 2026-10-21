@@ -1,5 +1,7 @@
 from datetime import date
 
+from django.utils import timezone
+
 from django.db.models import Avg, Count, Q, Sum
 from django.db.models.functions import TruncMonth
 
@@ -14,7 +16,10 @@ from compliance.models import (
     SimilarityCheckRecord,
 )
 from decision_support.models import FundingRecommendationRun
-from financial_monitoring.models import Disbursement
+from financial_monitoring.models import (
+    PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, Disbursement, ProcurementRequest, ProcurementStatusEvent,
+)
+from financial_monitoring.serializers import line_item_balance, uncommitted_balance
 from forecasting.models import ForecastRun, MonthlyForecast
 from monitoring.models import MidtermReport, MonthlyProgressReport, TerminalReport
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
@@ -506,3 +511,85 @@ def compute_task_dashboard(project_id=None, user=None):
         {"project": r["project"], "project_code": r["project__project_code"], "open": r["open"], "overdue": r["overdue"], "done": r["done"]}
         for r in rows
     ]
+
+
+def compute_procurement_dashboard(user):
+    """Procurement Officer - LIB dashboard (Figma ProcurementOfficerDashboard, 2026-10-22): every procurement request
+    in the user's scope (scoped_projects: all, or the admin-set campus/college) with its LIB figures, plus the status
+    history. The same for every account of the role with the same scope. Totals and charts are computed from these
+    rows on the page (src/lib/procurementDashboard.ts) so its filters stay client-side."""
+    requests = ProcurementRequest.objects.select_related(
+        "line_item__budget__project", "requested_by", "received_by",
+    ).prefetch_related("events").order_by("-requested_at")
+    allowed = scoped_projects(user)
+    if allowed is not None:
+        requests = requests.filter(line_item__budget__project__in=allowed)
+
+    now = timezone.now()
+    released = dict(
+        Disbursement.objects.filter(procurement_request__in=requests).values_list("procurement_request_id", "amount")
+    )
+    items = {}  # line item figures, once per item
+    rows = []
+    for pr in requests:
+        item = pr.line_item
+        is_open = pr.status not in PROCUREMENT_CLOSED_STATUSES
+        if item.pk not in items:
+            items[item.pk] = {"adjusted": line_item_balance(item)["adjusted"], "uncommitted": uncommitted_balance(item)}
+        # What this request may use: the item's uncommitted balance with its own reservation put back while open.
+        available = uncommitted_balance(item, exclude_procurement_pk=pr.pk) if is_open else items[item.pk]["uncommitted"]
+        end = pr.completed_at if pr.status == "completed" else (now if is_open else None)
+        events = list(pr.events.all())
+        project = item.budget.project
+        rows.append({
+            "id": pr.pk,
+            "request_no": f"PR-{pr.pk:04d}",
+            "project": project.pk,
+            "project_code": project.project_code,
+            "project_title": project.title,
+            "campus": project.campus,
+            "college": project.college,
+            "line_item": item.pk,
+            "lib_item": item.description,
+            "category": item.category,
+            "description": pr.description,
+            "requester": pr.requested_by.display_name,
+            "amount": pr.amount,
+            "status": pr.status,
+            "status_label": pr.get_status_display(),
+            "remarks": pr.remarks,
+            "requested_at": pr.requested_at,
+            "received_at": pr.received_at,
+            "completed_at": pr.completed_at,
+            "updated_at": events[0].created_at if events else (pr.completed_at or pr.received_at or pr.requested_at),
+            "lib_adjusted": items[item.pk]["adjusted"],
+            "lib_uncommitted": items[item.pk]["uncommitted"],
+            "available": available,
+            "exceeds_available": is_open and pr.amount > available,
+            "released": released.get(pr.pk, 0),
+            "processing_days": (end - pr.requested_at).days if end else None,
+            "returned_count": sum(1 for e in events if e.to_status == "returned_for_revision"),
+        })
+
+    status_labels = dict(ProcurementRequest.STATUS_CHOICES)
+    events = ProcurementStatusEvent.objects.filter(procurement__in=requests).select_related(
+        "actor__role", "procurement__line_item__budget__project",
+    )
+    return {
+        "delay_days": PROCUREMENT_DELAY_DAYS,
+        "requests": rows,
+        "events": [{
+            "id": e.pk,
+            "procurement": e.procurement_id,
+            "request_no": f"PR-{e.procurement_id:04d}",
+            "campus": e.procurement.line_item.budget.project.campus,
+            "from_status": e.from_status,
+            "from_label": status_labels.get(e.from_status, ""),
+            "to_status": e.to_status,
+            "to_label": status_labels.get(e.to_status, e.to_status),
+            "actor": e.actor.display_name,
+            "actor_role": e.actor.role.name if e.actor.role else "",
+            "remarks": e.remarks,
+            "created_at": e.created_at,
+        } for e in events],
+    }

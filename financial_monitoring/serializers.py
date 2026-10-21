@@ -77,6 +77,7 @@ class DisbursementSerializer(serializers.ModelSerializer):
         document = attrs.get("supporting_document", getattr(self.instance, "supporting_document", None))
         if document and document.project_id != line_item.budget.project_id:
             raise serializers.ValidationError({"supporting_document": "Document belongs to a different project."})
+        ensure_in_scope(self, line_item.budget.project)
         amount = attrs.get("amount", getattr(self.instance, "amount", None))
         if line_item.budget.status != "certified":
             raise serializers.ValidationError("Disbursements can only be recorded against a certified budget.")
