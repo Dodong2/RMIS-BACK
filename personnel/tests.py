@@ -192,6 +192,28 @@ class MilestoneTaskTests(RMISTestCase):
         self.assertIn("not done", str(blocked.data))
         self.assertEqual(allowed.status_code, 200)
 
+    def test_progress_is_the_average_of_the_task_percents(self):
+        # Client 2026-10-21 (concern.png): a task at 100% left its activity at "0/4 tasks · 0%".
+        first, second = self.add_task("Survey"), self.add_task("Interviews")
+        self.add_task("Encoding"), self.add_task("Report")
+        staff = self.client_for(self.staff)
+        staff.post(f"/api/personnel/tasks/{first}/updates/", {"note": "All done", "hours": "40"}, format="json")
+        staff.post(f"/api/personnel/tasks/{second}/updates/", {"note": "Started", "hours": "8"}, format="json")
+
+        data = self.milestone_data()
+
+        self.assertEqual((data["tasks_total"], data["tasks_done"], data["progress_pct"]), (4, 1, 30))  # (100+20+0+0)/4
+
+    def test_a_task_added_to_a_done_activity_reopens_it(self):
+        first = self.add_task("Survey")
+        Task.objects.filter(pk=first).update(status="done")
+        self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
+
+        self.add_task("Follow-up survey")
+
+        data = self.milestone_data()
+        self.assertEqual((data["status"], data["tasks_total"], data["tasks_done"], data["progress_pct"]), ("in_progress", 2, 1, 50))
+
     def test_milestone_without_tasks_works_as_before(self):
         response = self.client.patch(f"/api/milestones/{self.milestone.pk}/", {"status": "done"}, format="json")
 
@@ -431,12 +453,13 @@ class WorkLogProgressTests(WorkLogFixture, RMISTestCase):
 
 class TaskClosedAt100Tests(WorkLogFixture, RMISTestCase):
     """Client 2026-10-21 (task_board.png): at 100% the task is closed for the staff (comments only, no status change),
-    the Work Log that reached 100% submits it for review, and its deliverables are ticked."""
+    the Work Log that reached 100% marks it Done (client 2026-10-21 follow-up, replaces For Review), and its
+    deliverables are ticked."""
 
     def add_deliverable(self, text="Survey forms"):
         return self.client_for(self.leader).post(f"/api/personnel/tasks/{self.task_id}/deliverables/", {"text": text}, format="json").data["id"]
 
-    def test_the_work_log_that_reaches_100_submits_the_task_and_ticks_its_deliverables(self):
+    def test_the_work_log_that_reaches_100_marks_the_task_done_and_ticks_its_deliverables(self):
         self.add_deliverable()
         self.log(hours="30")
         self.assertEqual(self.task()["status"], "pending")
@@ -444,7 +467,8 @@ class TaskClosedAt100Tests(WorkLogFixture, RMISTestCase):
         self.assertEqual(self.log(hours="15").status_code, 201)
 
         data = self.task()
-        self.assertEqual((data["status"], data["progress_pct"], data["logged_hours"]), ("for_review", 100, "45.00"))
+        self.assertEqual((data["status"], data["progress_pct"], data["logged_hours"]), ("done", 100, "45.00"))
+        self.assertIsNotNone(data["completed_at"])
         self.assertTrue(all(d["done"] for d in data["deliverables"]))
 
     def test_at_100_the_staff_can_only_comment(self):
@@ -461,15 +485,16 @@ class TaskClosedAt100Tests(WorkLogFixture, RMISTestCase):
 
         response = self.staff_client.patch(f"/api/personnel/tasks/{self.task_id}/", {"status": "in_progress"}, format="json")
         self.assertEqual(response.status_code, 400)
+        self.assertIn("new_status", self.log(kind="comment", new_status="in_progress").data)
+        self.assertEqual(self.task()["status"], "done")
+
+    def test_the_staff_picks_only_in_progress_or_for_review(self):
+        url = f"/api/personnel/tasks/{self.task_id}/"
+
+        self.assertEqual(self.staff_client.patch(url, {"status": "blocked"}, format="json").status_code, 400)
         self.assertIn("new_status", self.log(kind="comment", new_status="blocked").data)
-        self.assertEqual(self.task()["status"], "for_review")
-
-    def test_the_leader_still_reviews_a_closed_task(self):
-        self.log(hours="40")
-
-        response = self.client_for(self.leader).post(f"/api/personnel/tasks/{self.task_id}/review/", {"action": "approve"}, format="json")
-
-        self.assertEqual(response.data["status"], "done")
+        self.assertEqual(self.staff_client.patch(url, {"status": "in_progress"}, format="json").status_code, 200)
+        self.assertEqual(self.staff_client.patch(url, {"status": "for_review"}, format="json").status_code, 200)
 
     def test_only_an_assigner_ticks_deliverables(self):
         deliverable = self.add_deliverable()

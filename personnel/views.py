@@ -125,7 +125,16 @@ class TaskListCreateView(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        notify_assignee(serializer.save(assigned_by=self.request.user))
+        task = serializer.save(assigned_by=self.request.user)
+        reopen_milestone(task)
+        notify_assignee(task)
+
+
+def reopen_milestone(task):
+    """Client 2026-10-21: an activity marked Done gets a new task (4/4 -> 4/7), so it is In Progress again."""
+    if task.milestone and task.milestone.status == "done" and task.status != "done":
+        task.milestone.status = "in_progress"
+        task.milestone.save(update_fields=["status"])
 
 
 def notify_assignee(task):
@@ -155,6 +164,7 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_update(self, serializer):
         previous = serializer.instance.assignee_id
         task = serializer.save()
+        reopen_milestone(task)
         if task.assignee_id != previous:
             notify_assignee(task)
 
@@ -189,11 +199,12 @@ class TaskUpdateListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         task = serializer.context["task"]
         update = serializer.save(task=task, author=self.request.user)
-        # Client 2026-10-21: the Work Log that reaches 100% ticks the deliverables and submits the task for review.
+        # Client 2026-10-21: the Work Log that reaches 100% ticks the deliverables and marks the task Done (no leader
+        # approval at 100%; For Review is the staff's way to ask for one earlier).
         if update.kind == "update" and task.progress_pct >= 100:
             task.deliverables.filter(done=False).update(done=True)
-            if task.status not in ("for_review", "done") and not update.new_status:
-                update.new_status = "for_review"
+            if task.status != "done":
+                update.new_status = "done"
                 update.save(update_fields=["new_status"])
         if update.new_status and update.new_status != task.status:
             task.status = update.new_status

@@ -396,8 +396,9 @@ class StudySerializer(serializers.ModelSerializer):
 
 
 class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
-    """Client meeting 2026-10-01 (#14): personnel tasks are the activities under a milestone; its progress is the share
-    of done tasks, and it can't be marked done while any of them is open. Milestones without tasks work as before."""
+    """Client meeting 2026-10-01 (#14): personnel tasks are the activities under a milestone, and it can't be marked done
+    while any of them is open. Client 2026-10-21: its progress is the average of its tasks' % completed and tasks_done
+    counts tasks at 100%, so a staff's Work Logs move it. Milestones without tasks work as before."""
 
     responsible_detail = LeadSerializer(source="responsible", read_only=True)
     tasks_total = serializers.SerializerMethodField()
@@ -414,14 +415,17 @@ class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
     def get_tasks_total(self, obj):
         return obj.tasks.count()
 
+    def task_percents(self, obj):
+        return [task.progress_pct for task in obj.tasks.all()]
+
     def get_tasks_done(self, obj):
-        return obj.tasks.filter(status="done").count()
+        return sum(pct >= 100 for pct in self.task_percents(obj))
 
     def get_progress_pct(self, obj):
-        total = self.get_tasks_total(obj)
-        if not total:
+        percents = self.task_percents(obj)
+        if not percents:
             return 100 if obj.status == "done" else 0
-        return round(self.get_tasks_done(obj) * 100 / total)
+        return round(sum(percents) / len(percents), 1)
 
     def validate(self, attrs):
         ensure_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))

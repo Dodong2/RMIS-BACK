@@ -104,6 +104,10 @@ class TaskDeliverableSerializer(serializers.ModelSerializer):
         read_only_fields = ["task"]
 
 
+# Client 2026-10-21: what an assignee may pick; no Blocked, and Done comes from reaching 100% (or a leader's approval).
+ASSIGNEE_STATUSES = ("in_progress", "for_review")
+
+
 class TaskSerializer(serializers.ModelSerializer):
     assignee_detail = LeadSerializer(source="assignee", read_only=True)
     deliverables = TaskDeliverableSerializer(many=True, read_only=True)
@@ -130,10 +134,10 @@ class TaskSerializer(serializers.ModelSerializer):
             # MIT proposal: the Project Leader "approves task and activity submissions").
             if not self.instance or self.instance.assignee_id != user.id or set(attrs) - {"status"}:
                 raise serializers.ValidationError("You may only update the status of your own tasks.")
-            if attrs.get("status") == "done":
-                raise serializers.ValidationError({"status": "Submit the task for review; a leader marks it done."})
             if self.instance.progress_pct >= 100:
-                raise serializers.ValidationError({"status": "This task is at 100% and waits for your leader's review."})
+                raise serializers.ValidationError({"status": "This task is at 100%, so it is closed."})
+            if "status" in attrs and attrs["status"] not in ASSIGNEE_STATUSES:
+                raise serializers.ValidationError({"status": "Choose In Progress or For Review; the task is Done once your Work Logs reach 100%."})
             return attrs
         study = attrs.get("study", getattr(self.instance, "study", None))
         project = attrs.get("project", getattr(self.instance, "project", None))
@@ -192,7 +196,7 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
                 if kind != "comment":
                     raise serializers.ValidationError({"kind": "This task is at 100%; you can only post comments."})
                 if attrs.get("new_status"):
-                    raise serializers.ValidationError({"new_status": "This task is at 100% and waits for your leader's review."})
+                    raise serializers.ValidationError({"new_status": "This task is at 100%, so it is closed."})
         # Client 2026-10-19: hours are logged only in a Work Log ("update"), only by the assignee, and must be > 0.
         hours = attrs.get("hours") or 0
         if kind == "update":
@@ -202,8 +206,8 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"hours": "Enter the hours worked (more than 0)."})
         elif hours:
             raise serializers.ValidationError({"hours": "Hours are logged in a Work Log only."})
-        if attrs.get("new_status") == "done" and not role_can(user, "personnel.assign_tasks"):
-            raise serializers.ValidationError({"new_status": "Submit the task for review; a leader marks it done."})
+        if attrs.get("new_status") and attrs["new_status"] not in ASSIGNEE_STATUSES and not role_can(user, "personnel.assign_tasks"):
+            raise serializers.ValidationError({"new_status": "Choose In Progress or For Review; the task is Done once your Work Logs reach 100%."})
         return attrs
 
 
