@@ -282,7 +282,11 @@ def complete_change(change):
                 role_label=old.role_label, start_date=today,
             )
             scope = {"project": old.project} if old.project else {"study": old.study}
-            Task.objects.filter(assignee=change.outgoing, **scope).exclude(status="done").update(assignee=change.incoming)
+            moved = Task.objects.filter(assignee=change.outgoing, **scope).exclude(status="done")
+            first = moved.order_by("id").values_list("id", flat=True).first()
+            if moved.update(assignee=change.incoming):  # .update() skips the model receivers in personnel/signals.py
+                from .signals import task_signal
+                task_signal(old.project or old.study.project, first, change.outgoing_id, change.incoming_id)
         change.status = "completed"
         change.completed_at = timezone.now()
         change.save(update_fields=["status", "completed_at"])

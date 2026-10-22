@@ -41,6 +41,7 @@ Every message: `{"type": "<event>", "id": <record id>, "project": <project id>, 
 | `budget.lib.updated` | (none, no `status`: client Q10) | a LIB is created or moves one review step (submit … certify, hold, resubmit); to budget.* roles + project lead (added 2026-10-22) |
 | `financial.realignment.created` | | a realignment request is filed (one signal for a bulk request); to financial.* roles + project lead + requester (added 2026-10-22) |
 | `financial.realignment.reviewed` | | the Budget Officer approves/rejects one realignment (added 2026-10-22) |
+| `personnel.task.changed` | | a task, Work Log, review or deliverable is saved/deleted, or tasks are reassigned by a personnel change (model receivers in personnel/signals.py); to personnel.assign_tasks roles + project/program lead + assignee/assigner/study lead (added 2026-10-22) |
 | `pong` | | reply to the browser's `{"type": "ping"}` |
 
 Frontend-only (synthetic): `realtime.reconnected`, emitted after every (re)connect so pages refetch once.
