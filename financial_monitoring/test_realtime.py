@@ -65,3 +65,55 @@ class ProcurementSignalTests(RMISTestCase):
         ]
         self.assertEqual([r.status_code for r in responses], [400, 400, 403, 400])
         self.notify.assert_not_called()
+
+
+REALIGN_URL = "/api/financial/realignments/"
+
+
+class RealignmentSignalTests(RMISTestCase):
+    """2026-10-22: a filed realignment reaches the Budget Officer's bell, a review reaches the leader's Realignment tab."""
+
+    def setUp(self):
+        super().setUp()
+        self.notify = self._patch("financial_monitoring.views.notify")
+        self.leader = self.make_user("project_leader")
+        self.project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader)
+        budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="certified")
+        self.travel = LineItem.objects.create(budget=budget, category="mooe", description="Travel", amount=10000)
+        self.seminar = LineItem.objects.create(budget=budget, category="mooe", description="Seminar", amount=10000)
+        self.supplies = LineItem.objects.create(budget=budget, category="mooe", description="Supplies", amount=10000)
+        self.leader_client = self.client_for(self.leader)
+
+    def row(self, source, amount=1000):
+        return {"from_line_item": source.id, "to_line_item": self.seminar.id, "amount": str(amount), "justification": "x"}
+
+    def assert_signal(self, event_type, realignment_id):
+        self.assertEqual(self.notify.call_count, 1)
+        (groups, sent_type), data = self.notify.call_args
+        self.notify.reset_mock()
+        self.assertEqual(sent_type, event_type)
+        self.assertEqual(data, {"id": realignment_id, "project": self.project.id})
+        self.assertLessEqual({to_user(self.leader.pk), to_role("finance_budget"), to_role("system_admin")}, set(groups))
+        self.assertNotIn(to_role("project_leader"), groups)
+
+    def test_bulk_request_signals_once_and_review_signals(self):
+        response = self.leader_client.post(REALIGN_URL, [self.row(self.travel), self.row(self.supplies)], format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assert_signal("financial.realignment.created", response.data[0]["id"])
+
+        reviewer = self.client_for(self.make_user("finance_budget"))
+        pk = response.data[1]["id"]
+        self.assertEqual(reviewer.post(f"{REALIGN_URL}{pk}/review/", {"decision": "rejected"}).status_code, 200)
+        self.assert_signal("financial.realignment.reviewed", pk)
+
+    def test_single_request_signals(self):
+        response = self.leader_client.post(REALIGN_URL, self.row(self.travel), format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assert_signal("financial.realignment.created", response.data["id"])
+
+    def test_refused_writes_send_nothing(self):
+        self.assertEqual(self.leader_client.post(REALIGN_URL, [self.row(self.travel, 999999)], format="json").status_code, 400)
+        pk = self.leader_client.post(REALIGN_URL, self.row(self.travel), format="json").data["id"]
+        self.notify.reset_mock()
+        self.assertEqual(self.leader_client.post(f"{REALIGN_URL}{pk}/review/", {"decision": "approved"}).status_code, 403)
+        self.notify.assert_not_called()

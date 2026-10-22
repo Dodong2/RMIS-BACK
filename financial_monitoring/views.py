@@ -128,6 +128,8 @@ class RealignmentListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
                 )
 
         serializer.save(requested_by=request.user, batch=uuid.uuid4())
+        saved = serializer.instance if many else [serializer.instance]
+        realignment_signal("financial.realignment.created", saved[0])  # one signal per request, even for a bulk one
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -164,7 +166,17 @@ class RealignmentReviewView(APIView):
             realignment, request.user,
             serializer.validated_data["decision"],
         )
+        realignment_signal("financial.realignment.reviewed", realignment)
         return Response(BudgetRealignmentSerializer(realignment).data)
+
+
+def realignment_signal(event_type, realignment):
+    """Real-time "this project's realignments changed" (realtime/notify.py), sent after commit to the roles holding a
+    financial.* permission, the project lead and the requester, so the Budget Officer's bell and the leader's
+    Realignment tab refetch."""
+    project = realignment.from_line_item.budget.project
+    notify(project_audience(project, "financial.", realignment.requested_by_id), event_type,
+           id=realignment.id, project=project.id)
 
 
 def procurement_signal(event_type, procurement):
