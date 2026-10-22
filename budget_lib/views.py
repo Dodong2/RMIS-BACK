@@ -5,6 +5,7 @@ from rest_framework.response import Response
 
 from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_can
 from config.concurrency import lock
+from realtime.notify import notify, project_audience
 from .models import LibItem, LineItem, LineItemBudget
 from .serializers import LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, review_budget, total_cost_problem
 
@@ -32,12 +33,23 @@ class ReadyForBudgetOfficerMixin:
         return qs
 
 
+def lib_signal(budget):
+    """Real-time "this LIB changed" (realtime/notify.py), sent after commit to the roles holding a budget.* permission
+    (CRC Chair, Budget Officer, system_admin) and the project lead, so their Budget page and bell refetch. No status in
+    the payload: the Budget Officer must not learn about a LIB before Ready for Certification (client Q10)."""
+    notify(project_audience(budget.project, "budget."), "budget.lib.updated", id=budget.id, project=budget.project_id)
+
+
 class BudgetListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.ListCreateAPIView):
     serializer_class = LineItemBudgetSerializer
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        lib_signal(serializer.instance)
 
     def get_queryset(self):
         qs = LineItemBudget.objects.select_related("project").order_by("-created_at")
@@ -171,7 +183,9 @@ class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.G
                 if problem:
                     return self.refuse(problem)
 
-        return Response(LineItemBudgetSerializer(review_budget(budget, user, to_status, action, remarks)).data)
+        budget = review_budget(budget, user, to_status, action, remarks)
+        lib_signal(budget)
+        return Response(LineItemBudgetSerializer(budget).data)
 
     def refuse(self, detail, code=status.HTTP_400_BAD_REQUEST):
         return Response({"detail": detail}, status=code)

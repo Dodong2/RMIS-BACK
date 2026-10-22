@@ -38,6 +38,7 @@ Every message: `{"type": "<event>", "id": <record id>, "project": <project id>, 
 | `monitoring.quarterly.changed` | `status` | quarterly progress report created, edited, or moved (submit/review/return/endorse/approve) |
 | `procurement.created` | `status` | leader files a procurement request (added 2026-10-13, Carl's test) |
 | `procurement.updated` | `status` | Procurement Office receives / moves status / completes, or the leader resubmits |
+| `budget.lib.updated` | (none, no `status`: client Q10) | a LIB is created or moves one review step (submit … certify, hold, resubmit); to budget.* roles + project lead (added 2026-10-22) |
 | `pong` | | reply to the browser's `{"type": "ping"}` |
 
 Frontend-only (synthetic): `realtime.reconnected`, emitted after every (re)connect so pages refetch once.
