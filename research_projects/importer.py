@@ -22,7 +22,7 @@ from outputs.serializers import ExpectedOutputSerializer
 
 from .models import CollegeUnit, CooperatingAgency, FundingType, Program, Project, RdeThrust, ProjectEndorser, ProjectTeamMember
 from .serializers import (
-    ProjectSerializer, ProjectTeamMemberSerializer, StudySerializer, TargetBeneficiarySerializer,
+    ProjectEndorserSerializer, ProjectSerializer, ProjectTeamMemberSerializer, StudySerializer, TargetBeneficiarySerializer,
     WorkPlanMilestoneSerializer, leader_owns,
 )
 
@@ -484,6 +484,26 @@ def import_workbook(file_obj, request):
             "or one with a Study Component they lead."
         )})
     return project, errors
+
+
+def registration_draft(project, request):
+    """The imported project and its tables as the API returns them, for Manual Entry to load and edit before it
+    registers (client 2026-10-23). Read before the dry run rolls back; the frontend drops the ids."""
+    context = {"request": request}
+
+    def rows(serializer, queryset):
+        return serializer(queryset.order_by("id"), many=True, context=context).data
+
+    return {
+        "project": ProjectSerializer(project, context=context).data,
+        "team": rows(ProjectTeamMemberSerializer, project.team_members),
+        "studies": rows(StudySerializer, project.studies),
+        "outputs": rows(ExpectedOutputSerializer, project.expected_outputs),
+        "beneficiaries": rows(TargetBeneficiarySerializer, project.target_beneficiaries),
+        "milestones": rows(WorkPlanMilestoneSerializer, project.milestones),
+        "endorsers": rows(ProjectEndorserSerializer, project.endorsers),
+        "line_items": rows(LineItemSerializer, LineItem.objects.filter(budget__project=project)),
+    }
 
 
 def proposal_preview(project):

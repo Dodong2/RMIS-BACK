@@ -552,6 +552,40 @@ class ExcelImportTests(RMISTestCase):
         })
         self.assertEqual(counts(), before)
 
+    def test_dry_run_returns_an_editable_draft_and_saves_nothing(self):
+        """Client 2026-10-23: an uploaded workbook can be reviewed and edited in Manual Entry before + Register Project."""
+        self.fill_project(**{"Endorsed By (Dean/Associate Dean)": "Adriel G. Roman"})
+        self.workbook["Project Team"].append(["Co-Project Leader", "Archieval M. Jain", "Male", None])
+        self.workbook["Study Components"].append(["Study on soils", None])
+        self.workbook["Expected Outputs (6Ps)"].append(["Patent", "Novel technology", 1])
+        self.workbook["Target Beneficiaries"].append(["Farmers", "Rice farmers", 200])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", "pax", 4, 2500, None])
+        self.workbook["Work Plan"].append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+        counts = lambda: (Project.objects.count(), ProjectEndorser.objects.count(), LineItem.objects.count(), WorkPlanMilestone.objects.count())
+        before = counts()
+        buffer = io.BytesIO()
+        self.workbook.save(buffer)
+        buffer.seek(0)
+        buffer.name = "registration.xlsx"
+
+        response = self.client_for(self.leader).post("/api/projects/import/?dry_run=1", {"file": buffer}, format="multipart")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        draft = response.data["draft"]
+        self.assertEqual((draft["project"]["project_code"], draft["project"]["lead"]), ("LSPU-X1", self.leader.pk))
+        self.assertEqual(draft["project"]["sectors"], ["community_development", "education"])
+        self.assertEqual([(t["member_role"], t["name"], t["gender"]) for t in draft["team"]], [("co_leader", "Archieval M. Jain", "male")])
+        self.assertEqual([s["title"] for s in draft["studies"]], ["Study on soils"])
+        self.assertEqual([(o["category"], o["description"], o["target_count"]) for o in draft["outputs"]], [("patents", "Novel technology", 1)])
+        self.assertEqual([(b["group"], b["total"]) for b in draft["beneficiaries"]], [("Farmers", 200)])
+        self.assertEqual([(m["title"], m["start_date"], m["target_date"]) for m in draft["milestones"]], [("Logistic preparations", "2026-01-01", "2026-03-31")])
+        self.assertEqual([(e["name"], e["designation"]) for e in draft["endorsers"]], [("Adriel G. Roman", "Dean/Associate Dean")])
+        item = draft["line_items"][0]
+        self.assertEqual((item["category"], item["description"], item["unit"], item["quantity"], item["unit_cost"], item["amount"]),
+                         ("mooe", "Traveling Expenses - Local", "pax", "4.00", "2500.00", "10000.00"))
+        self.assertIn("preview", response.data)
+        self.assertEqual(counts(), before)
+
     def test_dry_run_with_errors_lists_them_like_a_real_upload(self):
         self.fill_project()
         self.workbook["Expected Outputs (6Ps)"].append(["Not a 6P", "x", 1])

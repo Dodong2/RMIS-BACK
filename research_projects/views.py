@@ -191,7 +191,8 @@ class ProjectImportTemplateView(APIView):
 class ProjectImportView(APIView):
     """POST multipart `file`: registers one project (plus team, studies, 6Ps, beneficiaries, LIB, work plan)
     from a filled template. All-or-nothing: any row error rolls the whole import back and lists every error.
-    `?dry_run=1` runs the same import, returns {"preview": ...} for the SF-018 preview, and always rolls back."""
+    `?dry_run=1` runs the same import, returns {"preview": ...} for the SF-018 preview and {"draft": ...} for Manual
+    Entry to load and edit before registering (client 2026-10-23), and always rolls back."""
 
     permission_classes = [HasRole("projects.register")]
     parser_classes = [MultiPartParser]
@@ -207,8 +208,9 @@ class ProjectImportView(APIView):
                 return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
             if request.query_params.get("dry_run") == "1":
                 preview = importer.proposal_preview(project)
+                draft = importer.registration_draft(project, request)
                 transaction.set_rollback(True)
-                return Response({"preview": preview})
+                return Response({"preview": preview, "draft": draft})
         return Response(ProjectSerializer(project).data, status=status.HTTP_201_CREATED)
 
 
