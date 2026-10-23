@@ -1,5 +1,6 @@
 import re
 
+import nh3
 from django.utils.text import slugify
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
@@ -8,6 +9,23 @@ from accounts.permissions import LEADER_ROLES, acting_for, ensure_in_scope, scop
 from .models import (
     CollegeUnit, CooperatingAgency, EndorserChoice, FundingType, Program, RdeThrust, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
+
+# Client 2026-10-23: proposal Sections II, IV, VI, VIII and IX are rich text from the TipTap editor (HTML). Only these
+# tags and attributes are kept, so pasted or posted markup can't carry scripts, event handlers or styles.
+RICH_TEXT_FIELDS = ("background", "methodology", "socio_economic_significance", "monitoring_evaluation", "references")
+RICH_TEXT_TAGS = {
+    "p", "br", "strong", "b", "em", "i", "u", "s", "h2", "h3", "h4", "ul", "ol", "li", "blockquote",
+    "table", "thead", "tbody", "tr", "th", "td", "a",
+}
+RICH_TEXT_ATTRIBUTES = {"a": {"href"}, "td": {"colspan", "rowspan"}, "th": {"colspan", "rowspan"}}
+HTML_TAG = re.compile(r"</?[a-zA-Z][^>]*>")
+
+
+def clean_rich_text(value):
+    """Sanitized HTML; text without any tag (older entries, Excel cells) is kept exactly as typed."""
+    if not value or not HTML_TAG.search(value):
+        return value
+    return nh3.clean(value, tags=RICH_TEXT_TAGS, attributes=RICH_TEXT_ATTRIBUTES, url_schemes={"http", "https", "mailto"})
 
 
 class AdminChoiceSerializer(serializers.ModelSerializer):
@@ -305,6 +323,9 @@ class ProjectSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        for field in RICH_TEXT_FIELDS:
+            if field in attrs:
+                attrs[field] = clean_rich_text(attrs[field])
         lead = attrs.get("lead", getattr(self.instance, "lead", None))
         funding_type = attrs.get("funding_type", getattr(self.instance, "funding_type", None))
         sectors = attrs.get("sectors", getattr(self.instance, "sectors", []))

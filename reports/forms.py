@@ -26,6 +26,8 @@ from xml.sax.saxutils import escape
 from monitoring.models import MidtermReport, TerminalReport
 from outputs.serializers import COMPUTED_6P
 
+from .richtext import rich_text_lines
+
 UNIVERSITY = ["Republic of the Philippines", "Laguna State Polytechnic University", "Province of Laguna"]
 HEADER_FILL = "BDD7EE"  # the light blue of the printed SF-017 headers
 # 6P wording of the LSPU forms (SF-017/SF-018), not the RMIS labels
@@ -121,12 +123,12 @@ def appendix_f_form(project_id):
     objectives = "\n".join(f"{i}. {text}" for i, text in enumerate(_objectives(project), start=1))
     main_text = [
         ("Introduction", "", 1),
-        ("Project Rationale", project.background, 1),
+        ("Project Rationale", rich_text_lines(project.background), 1),
         ("Research Framework", "", 1),
         ("Objectives of the Project/Study", objectives, 1),
         ("Conceptual Model", "", 1),
-        ("Significance of the Project/Study", project.socio_economic_significance, 1),
-        ("Research Methodology", project.methodology, 1),
+        ("Significance of the Project/Study", rich_text_lines(project.socio_economic_significance), 1),
+        ("Research Methodology", rich_text_lines(project.methodology), 1),
         ("Research/Experimental Design", "", 2),
         ("Sampling Design (if applicable)", "", 2),
         ("Instruments and Procedures", "", 2),
@@ -135,7 +137,7 @@ def appendix_f_form(project_id):
         ("Summary of Findings", "", 1),
         ("Conclusion/s", "", 1),
         ("Recommendation/s", "", 1),
-        ("Literature Cited", project.references, 1),
+        ("Literature Cited", rich_text_lines(project.references), 1),
     ]
     contents = ["Acknowledgement", "Mentoring Beneficiaries", "Executive Summary"] + [h for h, _, _ in main_text]
     blocks = [
@@ -347,9 +349,9 @@ def proposal_form(project_id):
         _section("RESEARCH PRIORITY AREA", "\n".join(_box(code == data["research_priority_area"], label) for code, label in Project.PRIORITY_AREA_CHOICES)),
         _section("RESEARCH TYPOLOGY", "\n".join(_box(code in data["research_typology"], label) for code, label in Project.TYPOLOGY_CHOICES)),
         _section("SUSTAINABLE DEVELOPMENT GOALS (SDGs)", "; ".join(f"SDG {n} — {SDG_LABELS[n - 1]}" for n in data["sdgs"]) or "None selected"),
-        _section("II. BACKGROUND OF THE STUDY", data["background"]),
+        _section("II. BACKGROUND OF THE STUDY", rich_text_lines(data["background"])),
         _section("III. OBJECTIVES OF THE STUDY", "\n".join(f"{i}. {o}" for i, o in enumerate(data["objectives"], start=1))),
-        _section("IV. PROJECT DESCRIPTIONS/METHODOLOGY", data["methodology"]),
+        _section("IV. PROJECT DESCRIPTIONS/METHODOLOGY", rich_text_lines(data["methodology"])),
         {
             "kind": "table",
             "header": [["V. QUANTIFIABLE EXPECTED OUTPUTS: 6Ps", "", ""], ["ITEM", "PARTICULARS", "QUANTITY"]],
@@ -358,7 +360,7 @@ def proposal_form(project_id):
             "rows": outputs or [["Set under Research Outputs after registration, or through the Excel upload.", "", ""]],
             "widths": [25, 60, 15],
         },
-        _section("VI. SOCIO-ECONOMIC SIGNIFICANCE", data["socio_economic_significance"]),
+        _section("VI. SOCIO-ECONOMIC SIGNIFICANCE", rich_text_lines(data["socio_economic_significance"])),
         {
             "kind": "table",
             "header": [["VII. TARGET BENEFICIARIES", ""], ["Target Beneficiaries", "Total"]],
@@ -367,8 +369,8 @@ def proposal_form(project_id):
             "rows": beneficiaries or [["None listed", ""]],
             "widths": [85, 15],
         },
-        _section("VIII. MONITORING/EVALUATION", data["monitoring_evaluation"]),
-        _section("IX. LIST OF REFERENCES", data["references"]),
+        _section("VIII. MONITORING/EVALUATION", rich_text_lines(data["monitoring_evaluation"])),
+        _section("IX. LIST OF REFERENCES", rich_text_lines(data["references"])),
         {
             "kind": "table",
             "header": [["X. BUDGET REQUIREMENTS"] + [""] * (budget_columns - 1),

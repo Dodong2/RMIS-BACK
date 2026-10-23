@@ -1016,3 +1016,71 @@ class NotApplicableClassificationTests(RMISTestCase):
         self.assertIn("[/] Applied Research", text)
         self.assertIn("[/] Wet Research (i.e., with laboratory)", text)
         self.assertIn("[ ] Dry Research", text)
+
+
+class RichTextProposalTests(RMISTestCase):
+    """Client 2026-10-23: Sections II, IV, VI, VIII and IX are rich text (TipTap HTML). It is sanitized on save, older
+    plain text stays as it is, and the downloaded SF-018 / Appendix F show it as readable text."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader")
+        self.project = Project.objects.create(
+            title="P", project_code="RT-1", funding_type="core_funded", lead=self.leader, sectors=["education"], sdgs=[4],
+        )
+        self.url = f"/api/projects/{self.project.pk}/"
+
+    def save(self, **fields):
+        response = self.client_for(self.leader).patch(self.url, fields, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data
+
+    def test_unsafe_html_is_removed_and_formatting_kept(self):
+        data = self.save(background='<p onclick="steal()">Hi <strong>there</strong> <em>and</em> <u>you</u></p>'
+                                    '<script>alert(1)</script><p><a href="javascript:alert(1)">x</a></p>')
+
+        self.assertEqual(data["background"], "<p>Hi <strong>there</strong> <em>and</em> <u>you</u></p><p><a rel=\"noopener noreferrer\">x</a></p>")
+
+    def test_lists_headings_and_tables_are_kept(self):
+        html = ("<h2>Design</h2><ul><li><p>One</p></li></ul><ol><li><p>First</p></li></ol>"
+                "<table><tbody><tr><th><p>Item</p></th><td colspan=\"2\"><p>Cost</p></td></tr></tbody></table>")
+
+        self.assertEqual(self.save(methodology=html)["methodology"], html)
+
+    def test_every_rich_section_is_sanitized(self):
+        fields = ("background", "methodology", "socio_economic_significance", "monitoring_evaluation", "references")
+        data = self.save(**{f: "<p>ok</p><img src=x onerror=alert(1)>" for f in fields})
+
+        self.assertEqual([data[f] for f in fields], ["<p>ok</p>"] * 5)
+
+    def test_plain_text_stays_as_it_is(self):
+        text = "Rice & corn yields\n2. Farmers < 50 years old"
+
+        self.assertEqual(self.save(background=text)["background"], text)
+
+    def test_sf018_shows_rich_text_as_readable_lines(self):
+        from reports.forms import proposal_form, render_form_csv
+
+        Project.objects.filter(pk=self.project.pk).update(
+            methodology="<h2>Design</h2><p>We <strong>survey</strong> farms &amp; fisheries.</p>"
+                        "<ul><li><p>One</p></li><li><p>Two</p></li></ul><ol><li><p>First</p></li><li><p>Second</p></li></ol>"
+                        "<table><tbody><tr><th><p>Item</p></th><th><p>Cost</p></th></tr><tr><td><p>Seeds</p></td><td><p>500</p></td></tr></tbody></table>",
+            references="Plain reference, 2020.\nAnother, 2021.",
+        )
+
+        text = render_form_csv(proposal_form(self.project.pk)).decode()
+        for line in ("Design", "We survey farms & fisheries.", "• One", "• Two", "1. First", "2. Second", "Item | Cost", "Seeds | 500"):
+            self.assertIn(line, text)
+        self.assertIn("Plain reference, 2020.\nAnother, 2021.", text)
+        self.assertNotIn("<", text.split("IV. PROJECT DESCRIPTIONS/METHODOLOGY")[1].split("VI.")[0])
+
+    def test_appendix_f_shows_rich_text_as_readable_lines(self):
+        from monitoring.models import TerminalReport
+        from reports.forms import appendix_f_form, render_form_csv
+
+        Project.objects.filter(pk=self.project.pk).update(background="<p>Why <em>this</em> matters</p><ul><li><p>Food</p></li></ul>")
+        TerminalReport.objects.create(project=self.project, submitted_by=self.leader)
+
+        text = render_form_csv(appendix_f_form(self.project.pk)).decode()
+        self.assertIn("Why this matters\n• Food", text)
+        self.assertNotIn("<p>", text)
