@@ -8,7 +8,7 @@ Django 6 + DRF + SimpleJWT (dj-rest-auth) + Postgres (Supabase-hosted) + Brevo f
 source venv/bin/activate
 python manage.py runserver
 ```
-Migrations: `python manage.py makemigrations <app> && python manage.py migrate`
+Migrations: `python manage.py makemigrations <app>` only. Never run `migrate`: local and prod share one DB. Give Carl the command (`./venv/bin/python manage.py migrate`) and he runs it.
 
 ## Apps and what they own
 - `accounts` — custom User, Role, auth (email/password + Google-via-Supabase bridge), RBAC (`HasRole` permission class), admin confirmation flow (pending → active)

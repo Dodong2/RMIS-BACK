@@ -1,3 +1,5 @@
+> **STALE (2026-10-23):** the branch/push/migration workflow below is outdated. Work is on `main`, Carl pushes and runs every `migrate`, and tasks are gated by `dss/CLAUDE.md` (parent folder, `../CLAUDE.md`) (GO TASK N). Use this file only for module history.
+
 # RMIS Backend — Current Status
 
 ## Client changes 2026-10-01/02 — READ THIS FIRST
