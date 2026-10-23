@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from corsheaders.defaults import default_headers
@@ -125,6 +126,19 @@ DATABASES = {
         "OPTIONS": {"sslmode": "require"},  # Supabase requires SSL
     }
 }
+
+# `manage.py test` only: with TEST_DB_HOST set (local .env), tests run on a local Postgres (Docker, same major version
+# as Supabase) instead of Supabase, so they are fast and never touch the Supabase server. The app and `migrate` always
+# use the Supabase settings above. Unset = tests on Supabase's test_<DB_NAME> as before.
+TEST_DB_HOST = env("TEST_DB_HOST", default="")
+if TEST_DB_HOST and sys.argv[1:2] == ["test"]:
+    DATABASES["default"].update({
+        "HOST": TEST_DB_HOST,
+        "PORT": env("TEST_DB_PORT", default="5433"),
+        "USER": env("TEST_DB_USER", default="postgres"),
+        "PASSWORD": env("TEST_DB_PASSWORD", default="postgres"),
+        "OPTIONS": {"sslmode": "disable"},
+    })
 
 # Same as Django's default, written out so it's clear: per-process memory, no Redis. Production runs ONE Daphne
 # process, so DRF throttle counters kept here are accurate.
