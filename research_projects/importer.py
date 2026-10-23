@@ -151,9 +151,13 @@ TABLE_SHEETS = {
     "Work Plan": [
         ("Activity", "title", "text", None),
         ("Start Date", "start_date", "date", None),
-        ("Target Date", "target_date", "date", None),
+        ("End Date", "target_date", "date", None),
     ],
 }
+# Templates downloaded before 2026-10-23 still say "Target Date"; read it as the End Date.
+OLD_TABLE_HEADERS = {"Work Plan": {"target_date": "Target Date"}}
+# Typed dates besides real date cells: YYYY-MM-DD, MM/DD/YYYY (Excel's Philippine default), "March 1, 2027"
+DATE_FORMATS = ("%m/%d/%Y", "%B %d, %Y", "%b %d, %Y")
 TABLE_SERIALIZERS = {
     "Project Team": ProjectTeamMemberSerializer,
     "Study Components": StudySerializer,
@@ -183,10 +187,17 @@ def _convert(raw, kind, choices):
             return raw.date()
         if isinstance(raw, datetime.date):
             return raw
+        text = re.sub(r"\s+", " ", str(raw)).strip()
         try:
-            return datetime.date.fromisoformat(str(raw).strip())
+            return datetime.date.fromisoformat(text)
         except ValueError:
-            raise CellError(f"'{raw}' is not a date (use YYYY-MM-DD).")
+            pass
+        for fmt in DATE_FORMATS:
+            try:
+                return datetime.datetime.strptime(text, fmt).date()
+            except ValueError:
+                continue
+        raise CellError(f"'{raw}' is not a date (use YYYY-MM-DD, MM/DD/YYYY or March 1, 2027).")
     if kind in ("int", "decimal"):
         text = str(raw).replace(",", "").strip()
         try:
@@ -341,8 +352,11 @@ def _read_table(ws, name, errors):
     headers = [_norm(h) if h is not None else "" for h in next(rows, [])]
     index = {}
     for header, field, kind, choices in columns:
-        if _norm(header) in headers:
-            index[field] = (headers.index(_norm(header)), header, kind, choices)
+        old = OLD_TABLE_HEADERS.get(name, {}).get(field)
+        for label in (header, old) if old else (header,):
+            if _norm(label) in headers:
+                index[field] = (headers.index(_norm(label)), header, kind, choices)
+                break
     out = []
     for row_number, row in enumerate(rows, start=2):
         if not any(v is not None and str(v).strip() for v in row):
@@ -358,6 +372,20 @@ def _read_table(ws, name, errors):
                 data[field] = value
         out.append((row_number, data))
     return out
+
+
+def _check_work_plan(rows, errors):
+    """Every activity needs its End Date, and the same activity with the same dates can't be listed twice
+    (client 2026-10-23: the upload must match the template, without silently dropped or doubled rows)."""
+    seen = {}
+    for row_number, data in rows:
+        if "target_date" not in data:
+            errors.append({"sheet": "Work Plan", "row": row_number, "field": "End Date", "message": "End Date is required."})
+        key = (_norm(data.get("title", "")), data.get("start_date"), data.get("target_date"))
+        if key[0] and key in seen:
+            errors.append({"sheet": "Work Plan", "row": row_number, "field": "Activity",
+                           "message": f"Same activity and dates as row {seen[key]}."})
+        seen.setdefault(key, row_number)
 
 
 def _serializer_errors(sheet, row, serializer_errors, labels):
@@ -383,6 +411,7 @@ def import_workbook(file_obj, request):
     context = {"request": request, "defer_scope": True}
     project_data = _read_project_sheet(wb["Project"], errors)
     tables = {name: _read_table(wb[name], name, errors) for name in TABLE_SHEETS if name in wb.sheetnames}
+    _check_work_plan(tables.get("Work Plan", []), errors)
     if errors:
         return None, errors
 

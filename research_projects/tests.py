@@ -5,7 +5,7 @@ import openpyxl
 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LibItem, LineItem, LineItemBudget
-from research_projects.models import CollegeUnit, CooperatingAgency, Project, ProjectEndorser, RdeThrust
+from research_projects.models import CollegeUnit, CooperatingAgency, Project, ProjectEndorser, RdeThrust, WorkPlanMilestone
 from research_projects.rde_agenda import seed_rde_agenda
 
 
@@ -429,6 +429,79 @@ class ExcelImportTests(RMISTestCase):
         self.fill_project()
 
         self.assertIs(self.upload().data["is_dry_research"], True)
+
+    def work_plan(self):
+        return list(WorkPlanMilestone.objects.order_by("id").values_list("title", "start_date", "target_date"))
+
+    def test_work_plan_rows_keep_their_order_activities_and_dates(self):
+        # Client 2026-10-23: the uploaded Work Plan must match the template, so nobody re-encodes it.
+        self.fill_project()
+        sheet = self.workbook["Work Plan"]
+        self.assertEqual([c.value for c in sheet[1]], ["Activity", "Start Date", "End Date"])
+        sheet.append(["Logistic preparations", datetime.datetime(2026, 1, 1), datetime.datetime(2026, 3, 31)])
+        sheet.append(["Data gathering", "2026-04-01", "2026-06-30"])
+        sheet.append(["Data analysis", "07/01/2026", "09/30/2026"])
+        sheet.append(["Final report", "October 1, 2026", "Dec 15, 2026"])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        d = datetime.date
+        self.assertEqual(self.work_plan(), [
+            ("Logistic preparations", d(2026, 1, 1), d(2026, 3, 31)),
+            ("Data gathering", d(2026, 4, 1), d(2026, 6, 30)),
+            ("Data analysis", d(2026, 7, 1), d(2026, 9, 30)),
+            ("Final report", d(2026, 10, 1), d(2026, 12, 15)),
+        ])
+
+    def test_an_old_template_with_target_date_still_imports(self):
+        self.fill_project()
+        sheet = self.workbook["Work Plan"]
+        sheet["C1"] = "Target Date"
+        sheet.append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+
+        self.assertEqual(self.upload().status_code, 201)
+        self.assertEqual(self.work_plan()[0][2], datetime.date(2026, 3, 31))
+
+    def test_work_plan_errors_name_the_row_and_save_nothing(self):
+        self.fill_project()
+        sheet = self.workbook["Work Plan"]
+        sheet.append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+        sheet.append(["Data gathering", "2026-04-01", None])
+        sheet.append(["Data analysis", "31/12/2026", "2026-12-31"])
+        sheet.append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 400)
+        errors = {(e["row"], e["field"]): e["message"] for e in response.data["errors"] if e["sheet"] == "Work Plan"}
+        self.assertEqual(errors[(3, "End Date")], "End Date is required.")
+        self.assertIn("is not a date", errors[(4, "Start Date")])
+        self.assertIn("row 2", errors[(5, "Activity")])
+        self.assertFalse(Project.objects.exists())
+
+    def test_an_activity_ending_before_it_starts_names_its_row(self):
+        self.fill_project()
+        self.workbook["Work Plan"].append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+        self.workbook["Work Plan"].append(["Reporting", "06/01/2026", "05/01/2026"])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual([(e["sheet"], e["row"], e["field"]) for e in response.data["errors"]], [("Work Plan", 3, "Start Date")])
+        self.assertFalse(Project.objects.exists())
+
+    def test_the_preview_shows_the_work_plan_that_would_be_saved(self):
+        self.fill_project()
+        self.workbook["Work Plan"].append(["Data analysis", "07/01/2026", "09/30/2026"])
+        buffer = io.BytesIO()
+        self.workbook.save(buffer)
+        buffer.seek(0)
+        buffer.name = "registration.xlsx"
+
+        response = self.client_for(self.admin).post("/api/projects/import/?dry_run=1", {"file": buffer}, format="multipart")
+
+        self.assertEqual(response.data["preview"]["work_plan"], [{"title": "Data analysis", "start_date": "2026-07-01", "target_date": "2026-09-30"}])
 
     def test_annex_a_on_the_project_sheet_becomes_endorser_rows(self):
         self.fill_project(**{"Endorsed By (Dean/Associate Dean)": "Adriel G. Roman", "Recommending Approval (VPRDE)": "Robert C. Agatep"})
