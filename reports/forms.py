@@ -338,8 +338,9 @@ def proposal_form(project_id):
         _section("RESEARCH PROPOSAL CLASSIFICATION", "\n".join([
             f"{_box(not data['is_continuing'], 'New Proposal')}    {_box(data['is_continuing'], continuing)}",
             f"{_box(False, 'Program*')}    {_box(True, 'Project**')}    {_box(False, 'Study')}",
-            _boxes(Project.RESEARCH_TYPE_CHOICES, [data["research_type"]]),
-            f"{_box(not data['is_dry_research'], 'Wet Research (i.e., with laboratory)')}    {_box(data['is_dry_research'], 'Dry Research')}",
+            # "Not Applicable" (client 2026-10-23) has no box on the form; it leaves both pairs unchecked
+            _boxes([c for c in Project.RESEARCH_TYPE_CHOICES if c[0] != "not_applicable"], [data["research_type"]]),
+            f"{_box(data['is_dry_research'] is False, 'Wet Research (i.e., with laboratory)')}    {_box(data['is_dry_research'] is True, 'Dry Research')}",
         ])),
         _section("STUDY COMPONENT TITLES", "\n".join(f"Study {i}: {t}" for i, t in enumerate(data["study_titles"] or ["", ""], start=1))),
         _section("RDE AGENDA", f"RDE THRUST: {data['rde_thrust'] or '—'}\nRDE PRIORITY AREA: {data['rde_priority'] or '—'}"),

@@ -416,6 +416,20 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(sorted(LineItem.objects.values_list("category", flat=True)), ["co", "co", "mooe", "ps"])
 
+    def test_not_applicable_research_classification_imports(self):
+        # Client 2026-10-23: Wet/Dry and Basic/Applied may both be "Not Applicable"; a blank Wet/Dry is still Dry.
+        self.fill_project(**{"Wet or Dry Research": "Not Applicable", "Basic or Applied Research": "Not Applicable"})
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual((response.data["is_dry_research"], response.data["research_type"]), (None, "not_applicable"))
+
+    def test_blank_wet_or_dry_is_still_dry(self):
+        self.fill_project()
+
+        self.assertIs(self.upload().data["is_dry_research"], True)
+
     def test_annex_a_on_the_project_sheet_becomes_endorser_rows(self):
         self.fill_project(**{"Endorsed By (Dean/Associate Dean)": "Adriel G. Roman", "Recommending Approval (VPRDE)": "Robert C. Agatep"})
 
@@ -794,3 +808,64 @@ class LibAllocationTests(RMISTestCase):
 
         self.assertFalse(ok.data["exceeds_dry_cap"])
         self.assertTrue(over.data["exceeds_dry_cap"])
+
+    def test_not_applicable_wet_or_dry_has_no_dry_cap(self):
+        leader, project = self.make_project(datetime.date(2026, 1, 1), datetime.date(2027, 12, 31), is_dry_research=None)
+        Project.objects.filter(pk=project.pk).update(funding_type="institutional")
+        over = [{"period": "Y1Q1", "amount": "60000"}, {"period": "Y1Q4", "amount": "60000"}, {"period": "Y2Q1", "amount": "40000"}]
+
+        response = self.client_for(leader).post(f"/api/projects/{project.id}/lib/", {"line_items": [self.row(over, "160000")]}, format="json")
+
+        self.assertFalse(response.data["exceeds_dry_cap"])
+
+
+class NotApplicableClassificationTests(RMISTestCase):
+    """Client 2026-10-23: "Not Applicable" for Wet or Dry Research and for Basic or Applied Research."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader")
+        self.project = Project.objects.create(
+            title="P", project_code="NA-1", funding_type="core_funded", lead=self.leader, sectors=["education"], sdgs=[4],
+        )
+        self.client_ = self.client_for(self.leader)
+        self.url = f"/api/projects/{self.project.pk}/"
+
+    def test_not_applicable_is_saved_and_read_back(self):
+        saved = self.client_.patch(self.url, {"is_dry_research": None, "research_type": "not_applicable"}, format="json")
+
+        read = self.client_.get(self.url).data
+        self.assertEqual(saved.status_code, 200, saved.data)
+        self.assertEqual((read["is_dry_research"], read["research_type"]), (None, "not_applicable"))
+
+    def test_the_existing_values_still_save(self):
+        for dry, kind in ((False, "basic"), (True, "applied"), (True, "")):
+            response = self.client_.patch(self.url, {"is_dry_research": dry, "research_type": kind}, format="json")
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual((response.data["is_dry_research"], response.data["research_type"]), (dry, kind))
+
+    def test_a_new_project_is_still_dry_by_default(self):
+        self.assertIs(Project.objects.get(pk=self.project.pk).is_dry_research, True)
+
+    def test_unknown_research_type_is_rejected(self):
+        self.assertEqual(self.client_.patch(self.url, {"research_type": "mixed"}, format="json").status_code, 400)
+
+    def test_sf018_leaves_every_box_unchecked_when_not_applicable(self):
+        from reports.forms import proposal_form, render_form_csv
+
+        Project.objects.filter(pk=self.project.pk).update(is_dry_research=None, research_type="not_applicable")
+
+        text = render_form_csv(proposal_form(self.project.pk)).decode()
+        for label in ("Basic Research", "Applied Research", "Wet Research (i.e., with laboratory)", "Dry Research"):
+            self.assertIn(f"[ ] {label}", text)
+        self.assertNotIn("Not Applicable", text)
+
+    def test_sf018_still_ticks_the_chosen_boxes(self):
+        from reports.forms import proposal_form, render_form_csv
+
+        Project.objects.filter(pk=self.project.pk).update(is_dry_research=False, research_type="applied")
+
+        text = render_form_csv(proposal_form(self.project.pk)).decode()
+        self.assertIn("[/] Applied Research", text)
+        self.assertIn("[/] Wet Research (i.e., with laboratory)", text)
+        self.assertIn("[ ] Dry Research", text)

@@ -27,7 +27,7 @@ from .serializers import (
 )
 
 NEW_OR_CONTINUING = (("new", "New Proposal"), ("continuing", "Continuing"))
-WET_OR_DRY = (("wet", "Wet Research"), ("dry", "Dry Research"))
+WET_OR_DRY = (("wet", "Wet Research"), ("dry", "Dry Research"), ("not_applicable", "Not Applicable"))
 
 # One dropdown since client feedback 2026-10-06; saved to both college and implementing_unit, like manual entry.
 COLLEGE_UNIT_LABEL = "College Unit - Implementing Unit"
@@ -327,7 +327,7 @@ def _read_project_sheet(ws, errors):
     if "is_continuing" in data:
         data["is_continuing"] = data["is_continuing"] == "continuing"
     if "is_dry_research" in data:
-        data["is_dry_research"] = data["is_dry_research"] == "dry"
+        data["is_dry_research"] = None if data["is_dry_research"] == "not_applicable" else data["is_dry_research"] == "dry"
     if "implementing_unit" in data:
         data["college"] = data["implementing_unit"]
     data.setdefault("funding_type", "institutional")

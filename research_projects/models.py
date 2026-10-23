@@ -111,7 +111,7 @@ class Project(models.Model):
     ntp_number = models.CharField(max_length=50, blank=True)
     ntp_date = models.DateField(null=True, blank=True)
     toe_signed_date = models.DateField(null=True, blank=True)
-    is_dry_research = models.BooleanField(default=True)
+    is_dry_research = models.BooleanField(default=True, null=True)  # None = Not Applicable (client 2026-10-23)
     lead = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="led_projects")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     start_date = models.DateField(null=True, blank=True)
@@ -128,7 +128,9 @@ class Project(models.Model):
         ("politics", "Politics"),
         ("others", "Others"),
     )
-    RESEARCH_TYPE_CHOICES = (("basic", "Basic Research"), ("applied", "Applied Research"))
+    RESEARCH_TYPE_CHOICES = (
+        ("basic", "Basic Research"), ("applied", "Applied Research"), ("not_applicable", "Not Applicable"),
+    )
     PRIORITY_AREA_CHOICES = (
         ("science_math", "Science and Mathematics"),
         ("education_teacher_training", "Education and Teacher's Training"),
@@ -154,7 +156,7 @@ class Project(models.Model):
 
     is_continuing = models.BooleanField(default=False)  # False = New Proposal
     continuing_year = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Year 2, Year 3, ... when continuing")
-    research_type = models.CharField(max_length=10, choices=RESEARCH_TYPE_CHOICES, blank=True)
+    research_type = models.CharField(max_length=20, choices=RESEARCH_TYPE_CHOICES, blank=True)
     sectors = models.JSONField(default=list, blank=True)  # list of SECTOR_CHOICES codes; the form allows several
     sector_other = models.CharField(max_length=150, blank=True)
     research_priority_area = models.CharField(max_length=40, choices=PRIORITY_AREA_CHOICES, blank=True)
