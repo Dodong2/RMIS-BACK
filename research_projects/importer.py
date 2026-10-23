@@ -375,17 +375,43 @@ def _read_table(ws, name, errors):
 
 
 def _check_work_plan(rows, errors):
-    """Every activity needs its End Date, and the same activity with the same dates can't be listed twice
-    (client 2026-10-23: the upload must match the template, without silently dropped or doubled rows)."""
+    """Every activity needs its name and End Date, can't end before it starts, and the same activity with the same
+    dates can't be listed twice (client 2026-10-23: the upload must match the template, without silently dropped or
+    doubled rows). Also run for Manual Entry's Work Plan import, which saves nothing itself."""
     seen = {}
     for row_number, data in rows:
+        if not data.get("title"):
+            errors.append({"sheet": "Work Plan", "row": row_number, "field": "Activity", "message": "Activity is required."})
         if "target_date" not in data:
             errors.append({"sheet": "Work Plan", "row": row_number, "field": "End Date", "message": "End Date is required."})
+        elif data.get("start_date") and data["start_date"] > data["target_date"]:
+            errors.append({"sheet": "Work Plan", "row": row_number, "field": "Start Date",
+                           "message": "Start date cannot be after the end date."})
         key = (_norm(data.get("title", "")), data.get("start_date"), data.get("target_date"))
         if key[0] and key in seen:
             errors.append({"sheet": "Work Plan", "row": row_number, "field": "Activity",
                            "message": f"Same activity and dates as row {seen[key]}."})
         seen.setdefault(key, row_number)
+
+
+def read_work_plan(file_obj):
+    """The Work Plan sheet of a workbook (the registration template or any file with that sheet) as rows for Manual
+    Entry Step 5 (client 2026-10-23). Returns (rows, errors); nothing is saved."""
+    try:
+        wb = openpyxl.load_workbook(file_obj, data_only=True)
+    except Exception as exc:  # not an xlsx, or corrupted
+        return [], [{"sheet": None, "row": None, "field": "file", "message": f"Could not read workbook: {exc}"}]
+    if "Work Plan" not in wb.sheetnames:
+        return [], [{"sheet": None, "row": None, "field": "file", "message": "Missing the 'Work Plan' sheet; use the RMIS template."}]
+    errors = []
+    rows = _read_table(wb["Work Plan"], "Work Plan", errors)
+    _check_work_plan(rows, errors)
+    if errors:
+        return [], errors
+    return [
+        {"title": data["title"], "start_date": str(data.get("start_date") or ""), "target_date": str(data["target_date"])}
+        for _, data in rows
+    ], []
 
 
 def _serializer_errors(sheet, row, serializer_errors, labels):

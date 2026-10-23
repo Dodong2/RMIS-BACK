@@ -600,6 +600,80 @@ class ExcelImportTests(RMISTestCase):
         self.assertFalse(Project.objects.exists())
 
 
+class WorkPlanExcelTests(RMISTestCase):
+    """Client 2026-10-23: Manual Entry Step 5 fills XI. Work Plan from the template's Work Plan sheet; nothing is saved."""
+
+    URL = "/api/projects/import-work-plan/"
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.make_user("system_admin")
+        self.workbook = openpyxl.Workbook()
+        self.sheet = self.workbook.active
+        self.sheet.title = "Work Plan"
+        self.sheet.append(["Activity", "Start Date", "End Date"])
+
+    def post(self, user=None, workbook=None):
+        buffer = io.BytesIO()
+        (workbook or self.workbook).save(buffer)
+        buffer.seek(0)
+        buffer.name = "work_plan.xlsx"
+        return self.client_for(user or self.admin).post(self.URL, {"file": buffer}, format="multipart")
+
+    def test_rows_come_back_in_order_with_their_dates_and_nothing_is_saved(self):
+        self.sheet.append(["Logistic preparations", datetime.datetime(2026, 1, 1), datetime.datetime(2026, 3, 31)])
+        self.sheet.append(["Data analysis", "07/01/2026", "September 30, 2026"])
+        self.sheet.append(["Reporting", None, "2026-12-15"])
+
+        response = self.post()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["rows"], [
+            {"title": "Logistic preparations", "start_date": "2026-01-01", "target_date": "2026-03-31"},
+            {"title": "Data analysis", "start_date": "2026-07-01", "target_date": "2026-09-30"},
+            {"title": "Reporting", "start_date": "", "target_date": "2026-12-15"},
+        ])
+        self.assertFalse(WorkPlanMilestone.objects.exists())
+
+    def test_the_full_registration_template_works_too(self):
+        template = openpyxl.load_workbook(io.BytesIO(self.client_for(self.admin).get("/api/projects/import-template/").content))
+        template["Work Plan"].append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+
+        response = self.post(workbook=template)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual([r["title"] for r in response.data["rows"]], ["Logistic preparations"])
+
+    def test_errors_name_the_row(self):
+        self.sheet.append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+        self.sheet.append(["Data gathering", "2026-04-01", None])
+        self.sheet.append(["Data analysis", "31/12/2026", "2026-12-31"])
+        self.sheet.append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+        self.sheet.append(["Reporting", "2026-06-01", "2026-05-01"])
+        self.sheet.append([None, "2026-06-01", "2026-06-30"])
+
+        response = self.post()
+
+        self.assertEqual(response.status_code, 400)
+        fields = sorted((e["row"], e["field"]) for e in response.data["errors"])
+        self.assertEqual(fields, [(3, "End Date"), (4, "Start Date"), (5, "Activity"), (6, "Start Date"), (7, "Activity")])
+
+    def test_a_workbook_without_the_work_plan_sheet_or_not_a_workbook_is_rejected(self):
+        self.sheet.title = "Sheet1"
+        self.assertEqual(self.post().status_code, 400)
+
+        buffer = io.BytesIO(b"not an excel file")
+        buffer.name = "notes.xlsx"
+        self.assertEqual(self.client_for(self.admin).post(self.URL, {"file": buffer}, format="multipart").status_code, 400)
+
+    def test_only_registrants_can_use_it(self):
+        self.sheet.append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+
+        self.assertEqual(self.post(self.make_user("project_leader")).status_code, 200)
+        for code in ("project_staff", "study_leader", "finance_budget"):
+            self.assertEqual(self.post(self.make_user(code)).status_code, 403, code)
+
+
 class ProjectReadScopeTests(RMISTestCase):
     """Strict RBAC (client meeting 2026-10-01): leaders and staff read only projects they lead or belong to."""
 

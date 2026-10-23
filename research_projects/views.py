@@ -212,6 +212,23 @@ class ProjectImportView(APIView):
         return Response(ProjectSerializer(project).data, status=status.HTTP_201_CREATED)
 
 
+class WorkPlanImportView(APIView):
+    """POST multipart `file`: the workbook's Work Plan sheet as {"rows": [{title, start_date, target_date}]} for
+    Manual Entry Step 5 (client 2026-10-23), checked with the Excel import's rules; saves nothing."""
+
+    permission_classes = [HasRole("projects.register")]
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response({"file": "Upload the .xlsx with the Work Plan sheet as `file`."}, status=status.HTTP_400_BAD_REQUEST)
+        rows, errors = importer.read_work_plan(file_obj)
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"rows": rows})
+
+
 class ProjectChildListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
     """List (?project=) and create rows of a project's form table; writes need projects.edit."""
 
