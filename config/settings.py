@@ -205,8 +205,8 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_THROTTLE_RATES": {
         "user": "300/min",            # every endpoint
-        "login": "5/min",             # password guessing
-        "register": "3/hour",         # each registration e-mails every sysadmin through Brevo
+        "login": "20/min",            # password guessing; one shared Wi-Fi = one IP for everyone on it
+        "register": "10/hour",        # each registration e-mails every sysadmin through Brevo
         "google": "10/min",           # Google request + exchange
         "token_refresh": "30/min",
         "password_change": "5/min",
