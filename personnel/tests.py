@@ -145,6 +145,25 @@ class StaffNotificationTests(RMISTestCase):
         self.assertEqual((rows[submitted.pk]["hours"], rows[submitted.pk]["status"]), (6, "for_review"))
         self.assertEqual(rows[submitted.pk]["project_code"], "BRIDGI-1")
 
+    def test_a_reassigned_task_stays_in_the_old_staffs_report_with_their_hours(self):
+        # Client 2026-10-23: a staff's logged hours "disappeared" once the task went to someone else.
+        task = self.make_task_with_update(timezone.make_aware(datetime.datetime(2026, 9, 15)), hours=6)
+        Task.objects.filter(pk=task.pk).update(assignee=self.make_user("project_staff"))
+
+        response = self.client_for(self.staff).get("/api/reports/accomplishment/summary/", {"month": "2026-09"})
+
+        self.assertEqual([(r["id"], r["hours"], r["progress_pct"]) for r in response.data["rows"]], [(task.pk, 6, 50)])
+        self.assertEqual((response.data["total_hours"], response.data["accomplished"]), (6, 0))
+
+    def test_a_reassigned_task_done_by_the_new_staff_is_not_the_old_staffs_accomplishment(self):
+        task = self.make_task_with_update(timezone.make_aware(datetime.datetime(2026, 9, 15)), hours=6)
+        Task.objects.filter(pk=task.pk).update(assignee=self.make_user("project_staff"), status="done",
+                                               completed_at=timezone.make_aware(datetime.datetime(2026, 9, 20)))
+
+        response = self.client_for(self.staff).get("/api/reports/accomplishment/summary/", {"month": "2026-09"})
+
+        self.assertEqual((response.data["accomplished"], response.data["total_hours"]), (0, 6))
+
     def test_accomplishment_summary_scope(self):
         self.make_task_with_update(timezone.make_aware(datetime.datetime(2026, 9, 15)))
         params = {"user": self.staff.pk, "month": "2026-09"}
@@ -578,3 +597,22 @@ class WorkLogLeaderFlowTests(WorkLogFixture, RMISTestCase):
 
         self.assertEqual(self.staff_client.delete(f"/api/personnel/tasks/{self.task_id}/").status_code, 403)
         self.assertEqual(TaskUpdate.objects.filter(task_id=self.task_id).count(), 1)
+
+    def test_a_reassigned_task_keeps_the_hours_already_logged(self):
+        self.log(hours="8")
+        other = self.make_user("project_staff")
+
+        self.leader_client.patch(f"/api/personnel/tasks/{self.task_id}/", {"assignee": other.pk}, format="json")
+
+        data = self.leader_client.get(f"/api/personnel/tasks/{self.task_id}/").data
+        self.assertEqual((data["logged_hours"], data["progress_pct"]), ("8.00", 20))
+
+    def test_the_work_logs_of_both_assignees_count(self):
+        self.log(hours="8")
+        other = self.make_user("project_staff")
+        self.leader_client.patch(f"/api/personnel/tasks/{self.task_id}/", {"assignee": other.pk}, format="json")
+
+        self.log(self.client_for(other), hours="8")
+
+        data = self.leader_client.get(f"/api/personnel/tasks/{self.task_id}/").data
+        self.assertEqual((data["logged_hours"], data["progress_pct"]), ("16.00", 40))

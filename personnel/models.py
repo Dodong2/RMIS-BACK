@@ -108,15 +108,16 @@ class Task(models.Model):
         return self.updates.aggregate(total=models.Sum("hours"))["total"] or 0
 
     def progress_as_of(self, moment=None):
-        """% completed up to `moment`: the assignee's Work Log hours / planned hours, capped at 100; 100 once done;
+        """% completed up to `moment`: the task's Work Log hours / planned hours, capped at 100; 100 once done;
         0 without planned hours (client 2026-10-19, replaces the self-reported % of 2026-10-02). One decimal, so a day's
-        log on a year-long task shows 0.4% instead of 0% (client 2026-10-20). The monthly accomplishment report still
-        pulls this."""
+        log on a year-long task shows 0.4% instead of 0% (client 2026-10-20). Every assignee's logs count, so a
+        reassigned task keeps the hours already worked (client 2026-10-23); only an assignee can log work. The monthly
+        accomplishment report still pulls this."""
         if self.status == "done" and (moment is None or (self.completed_at and self.completed_at <= moment)):
             return 100
         if not self.estimated_hours:
             return 0
-        logs = self.updates.filter(kind="update", author_id=self.assignee_id)
+        logs = self.updates.filter(kind="update")
         if moment is not None:
             logs = logs.filter(created_at__lte=moment)
         hours = logs.aggregate(total=models.Sum("hours"))["total"] or 0

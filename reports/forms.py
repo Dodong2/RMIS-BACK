@@ -431,7 +431,8 @@ def month_bounds(month):
 def accomplishment_rows(user, month, projects=None):
     """Client follow-up 2026-10-02: instead of the staff recalling what they did, the report is pulled from their
     tasks: % completed (latest progress by month end), hours logged that month and what they noted. Covers tasks with
-    an update that month or still open at month end. `projects` limits it to the requester's scope. Shared by the
+    an update that month or still open at month end, plus tasks since reassigned that they logged work on that month
+    (client 2026-10-23). `projects` limits it to the requester's scope. Shared by the
     downloaded form and the Accomplishment Report page (client 2026-10-21), so both show the same numbers."""
     from django.db.models import Q, Sum
 
@@ -439,9 +440,10 @@ def accomplishment_rows(user, month, projects=None):
 
     start, end = month_bounds(month)
     tasks = (
-        Task.objects.filter(assignee=user, created_at__lt=end)
-        .filter(Q(updates__created_at__gte=start, updates__created_at__lt=end) | ~Q(status="done")
-                | Q(completed_at__gte=start, completed_at__lt=end))
+        Task.objects.filter(created_at__lt=end)
+        .filter(Q(assignee=user) & (Q(updates__created_at__gte=start, updates__created_at__lt=end) | ~Q(status="done")
+                                    | Q(completed_at__gte=start, completed_at__lt=end))
+                | Q(updates__author=user, updates__kind="update", updates__created_at__gte=start, updates__created_at__lt=end))
         .select_related("project__lead").distinct().order_by("project__project_code", "due_date", "id")
     )
     if projects is not None:
@@ -454,7 +456,8 @@ def accomplishment_rows(user, month, projects=None):
             "hours": month_updates.filter(author=user).aggregate(total=Sum("hours"))["total"] or 0,
             "progress": task.progress_as_of(end),
             "notes": "; ".join(u.note for u in month_updates if u.note),
-            "accomplished": task.status == "done" and task.completed_at is not None and start <= task.completed_at < end,
+            "accomplished": task.assignee_id == user.pk and task.status == "done" and task.completed_at is not None
+            and start <= task.completed_at < end,
         })
     return rows
 
