@@ -182,6 +182,23 @@ REST_FRAMEWORK = {
     # Throttling identifies clients by REMOTE_ADDR only (set from CF-Connecting-IP, config/client_ip.py), never by the
     # client-writable X-Forwarded-For.
     "NUM_PROXIES": 0,
+    # Rate limits. Counters live in the default LocMem cache, accurate because production runs ONE Daphne process
+    # (more processes need a shared cache such as Redis). Anonymous requests are keyed by IP, logged-in ones by user.
+    # A view opts into a stricter limit with `throttle_scope`; over the limit the API answers 429.
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "user": "300/min",            # every endpoint
+        "login": "5/min",             # password guessing
+        "register": "3/hour",         # each registration e-mails every sysadmin through Brevo
+        "google": "10/min",           # Google request + exchange
+        "token_refresh": "30/min",
+        "password_change": "5/min",
+        "dj_rest_auth": "30/min",     # dj-rest-auth's own scope, still on logout
+        "compute": "10/min",          # forecast, funding recommendation, AHP finalize, sensitivity
+    },
 }
 
 BREVO_API_KEY = env("BREVO_API_KEY")

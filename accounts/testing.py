@@ -5,6 +5,7 @@ import threading
 import time
 from unittest import mock
 
+from django.core.cache import cache
 from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase, TransactionTestCase, override_settings
@@ -21,6 +22,7 @@ class TestHelpers:
     """Shared by RMISTestCase and ConcurrencyTestCase."""
 
     def setUp(self):
+        cache.clear()  # throttle counters (LocMem) would otherwise carry over between tests
         self.brevo_post = self._patch("accounts.emails.requests.post")
         self.supabase_get = self._patch("accounts.views.http.get")
         self.upload_document = self._patch("document_management.serializers.upload_document")

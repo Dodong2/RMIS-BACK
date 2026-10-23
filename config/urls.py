@@ -11,13 +11,18 @@ from django.http import JsonResponse
 def health(request):
     return JsonResponse({"status": "ok"})
 
+
+class TokenRefreshView(get_refresh_view()):
+    throttle_scope = "token_refresh"
+
+
 auth_urlpatterns = [
-    path("login/", LoginView.as_view(), name="rest_login"),
+    path("login/", LoginView.as_view(throttle_scope="login"), name="rest_login"),
     path("logout/", LogoutView.as_view(), name="rest_logout"),
     path("user/", UserDetailsView.as_view(), name="rest_user_details"),
-    path("password/change/", PasswordChangeView.as_view(), name="rest_password_change"),
+    path("password/change/", PasswordChangeView.as_view(throttle_scope="password_change"), name="rest_password_change"),
     path("token/verify/", TokenVerifyView.as_view(), name="token_verify"),
-    path("token/refresh/", get_refresh_view().as_view(), name="token_refresh"),
+    path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 ]
 
 urlpatterns = [

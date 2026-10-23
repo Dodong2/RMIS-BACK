@@ -84,6 +84,7 @@ class AHPComparisonSubmitView(APIView):
 
 class AHPMatrixRunFinalizeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "compute"
 
     def post(self, request, pk):
         if not role_can(request.user, "dss.manage"):
@@ -117,6 +118,7 @@ class AHPMatrixRunFinalizeView(APIView):
 
 class FundingRecommendationRunTriggerView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "compute"
 
     def post(self, request):
         if not role_can(request.user, "dss.manage"):
@@ -170,6 +172,7 @@ class FundingRecommendationRunDetailView(generics.RetrieveAPIView):
 
 class SensitivityAnalysisView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "compute"
 
     def get(self, request, pk):
         run = get_object_or_404(FundingRecommendationRun, pk=pk)

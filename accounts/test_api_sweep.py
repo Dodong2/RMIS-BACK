@@ -32,6 +32,8 @@ def allowed_methods(callback):
 class ApiSweepTests(RMISTestCase):
     def setUp(self):
         super().setUp()
+        # The sweep sends hundreds of requests per user; a 429 would hide a 5xx behind it. Throttling has its own tests.
+        self._patch("rest_framework.throttling.SimpleRateThrottle.allow_request", return_value=True)
         self.users = {code: self.make_user(code) for code in SWEEP_ROLES}
         leader = self.users["project_leader"]
         program = Program.objects.create(title="Program", funding_type="core_funded", lead=self.make_user("program_leader"))

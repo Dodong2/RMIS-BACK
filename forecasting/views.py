@@ -13,6 +13,7 @@ from .serializers import ForecastRunSerializer
 
 class ForecastRunTriggerView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "compute"
 
     def post(self, request):
         if not role_can(request.user, "forecasting.run"):

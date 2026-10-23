@@ -21,6 +21,7 @@ from .emails import notify_admins_new_registration, send_role_confirmation_email
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = "register"
 
     def post(self, request):
         email = request.data.get("email", "").strip().lower()
@@ -61,6 +62,7 @@ class RegisterView(APIView):
 
 class GoogleRequestView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = "google"
 
     def post(self, request):
         token = request.data.get("supabase_access_token")
@@ -108,6 +110,7 @@ class GoogleRequestView(APIView):
 
 class GoogleExchangeView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = "google"
 
     def post(self, request):
         token = request.data.get("supabase_access_token")
