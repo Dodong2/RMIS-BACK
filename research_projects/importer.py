@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from accounts.models import User
 from accounts.permissions import LEADER_ROLES
-from budget_lib.models import LineItem, allocation_periods
+from budget_lib.models import LibItem, LineItem, allocation_periods
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer, line_total
 from outputs.models import SIX_PS
 from outputs.serializers import ExpectedOutputSerializer
@@ -97,6 +97,10 @@ PROJECT_FIELDS = [
 # Table sheets: sheet name -> [(column header, serializer field, kind, choices)]
 TEAM_ROLES = ProjectTeamMember.ROLE_CHOICES
 CATEGORIES = LineItem.CATEGORY_CHOICES + (("mooe", "MOOE"), ("co", "Equipment Outlay"), ("ps", "PS"))
+# Legend sheet rows (client 2026-10-23): code shown, meaning as the LIB step labels it. A separate sheet, because any
+# filled cell on the Budget Requirements sheet would be read as a budget row.
+CATEGORY_LEGEND = (("ps", "PS", "Personal Services"), ("mooe", "MOOE", "Maintenance and Other Operating Expenses"),
+                   ("co", "CO", "Equipment Outlay / Capital Outlay"))
 # The form's own 6P wording (Section V), accepted alongside the RMIS labels
 SIX_P_CHOICES = SIX_PS + (
     ("patents", "Patent"), ("places_partnerships", "Places/Partnerships"), ("policies", "Policy Recommendations"),
@@ -249,6 +253,25 @@ def fill_line_item_amount(data):
     return data
 
 
+def _add_category_legend(wb):
+    sheet = wb.create_sheet("Legend")
+    sheet.append(["Budget Requirements - Category column"])
+    sheet.append(["Category", "Meaning", "Accepted values in the Category column",
+                  "Particulars: the active LIB Items of the category (System Admin > LIB Items)"])
+    for code, short, meaning in CATEGORY_LEGEND:
+        accepted = ", ".join(dict.fromkeys([short, *(label for c, label in CATEGORIES if c == code)]))
+        items = "; ".join(LibItem.objects.filter(category=code, is_active=True).order_by("name").values_list("name", flat=True))
+        sheet.append([short, meaning, accepted, items])
+    sheet.append([])
+    sheet.append(["Particulars must match one of the LIB Items of the row's category exactly."])
+    sheet["A1"].font = Font(bold=True)
+    for column, width in zip("ABCD", (12, 40, 45, 90)):
+        sheet.column_dimensions[column].width = width
+    for row in sheet.iter_rows(min_row=3, max_row=5):
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+
 def build_template():
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -274,7 +297,9 @@ def build_template():
             sheet.column_dimensions[get_column_letter(i + 1)].width = max(18, len(header) + 4)
             allowed = _allowed(kind, choices)
             if allowed:
-                sheet.cell(row=1, column=i + 1).comment = Comment(f"Allowed: {allowed}", "RMIS")
+                legend = ". See the Legend sheet." if name == "Budget Requirements" and header == "Category" else ""
+                sheet.cell(row=1, column=i + 1).comment = Comment(f"Allowed: {allowed}{legend}", "RMIS")
+    _add_category_legend(wb)
     for sheet in wb.worksheets:
         for cell in sheet[1]:
             cell.font = Font(bold=True)
