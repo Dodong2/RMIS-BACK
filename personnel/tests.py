@@ -521,3 +521,60 @@ class TaskClosedAt100Tests(WorkLogFixture, RMISTestCase):
 
         self.assertEqual(self.staff_client.patch(url, {"done": True}, format="json").status_code, 403)
         self.assertEqual(self.client_for(self.leader).patch(url, {"done": True}, format="json").status_code, 200)
+
+
+class WorkLogLeaderFlowTests(WorkLogFixture, RMISTestCase):
+    """Client 2026-10-23: a staff member's Work Log hours "disappeared". The log, the hours and the % must stay and
+    reach the leader through reloads, leader edits, review and reassignment."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader_client = self.client_for(self.leader)
+
+    def test_the_leader_sees_the_staffs_work_log_and_hours(self):
+        self.log(hours="8", note="Tapos na")
+
+        logs = self.leader_client.get(f"/api/personnel/tasks/{self.task_id}/updates/").data
+        board = self.leader_client.get(f"/api/personnel/tasks/?project={self.project.pk}").data
+        self.assertEqual([(u["note"], u["hours"], u["author"]) for u in logs], [("Tapos na", "8.00", self.staff.pk)])
+        self.assertEqual([(t["logged_hours"], t["progress_pct"]) for t in board], [("8.00", 20)])
+
+    def test_the_staff_still_sees_the_work_log_after_a_reload(self):
+        self.log(hours="8")
+
+        reloaded = self.client_for(self.staff)
+        self.assertEqual(len(reloaded.get(f"/api/personnel/tasks/{self.task_id}/updates/").data), 1)
+        self.assertEqual([t["logged_hours"] for t in reloaded.get("/api/personnel/tasks/").data], ["8.00"])
+
+    def test_leader_edits_keep_the_work_logs(self):
+        self.log(hours="8")
+
+        self.leader_client.patch(f"/api/personnel/tasks/{self.task_id}/", {"title": "Survey (revised)", "priority": "high"}, format="json")
+        self.leader_client.patch(f"/api/personnel/tasks/{self.task_id}/", {"due_date": "2026-10-30"}, format="json")
+
+        data = self.task()
+        self.assertEqual(TaskUpdate.objects.filter(task_id=self.task_id, kind="update").count(), 1)
+        self.assertEqual((data["logged_hours"], data["estimated_hours"], data["progress_pct"]), ("8.00", "80.00", 10))
+
+    def test_for_review_approved_by_the_leader_is_done_with_the_logs_kept(self):
+        self.log(hours="8", new_status="for_review")
+
+        response = self.leader_client.post(f"/api/personnel/tasks/{self.task_id}/review/", {"action": "approve"}, format="json")
+
+        data = self.task()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((data["status"], data["progress_pct"], data["logged_hours"]), ("done", 100, "8.00"))
+
+    def test_a_returned_task_takes_more_work_logs(self):
+        self.log(hours="8", new_status="for_review")
+        self.leader_client.post(f"/api/personnel/tasks/{self.task_id}/review/", {"action": "return"}, format="json")
+
+        self.assertEqual(self.log(hours="8").status_code, 201)
+        data = self.task()
+        self.assertEqual((data["status"], data["progress_pct"], data["logged_hours"]), ("in_progress", 40, "16.00"))
+
+    def test_the_staff_cannot_delete_the_task_or_its_logs(self):
+        self.log(hours="8")
+
+        self.assertEqual(self.staff_client.delete(f"/api/personnel/tasks/{self.task_id}/").status_code, 403)
+        self.assertEqual(TaskUpdate.objects.filter(task_id=self.task_id).count(), 1)
