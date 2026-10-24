@@ -8,7 +8,7 @@ class LeaderCapConcurrencyTests(ConcurrencyTestCase):
     def test_two_simultaneous_registrations_cannot_exceed_the_institutional_leader_cap(self):
         """Manual: a leader may lead only one active institutional project at a time."""
         leader = self.make_user("project_leader")
-        registrar_a, registrar_b = self.make_user("system_admin"), self.make_user("crc_chair")
+        registrar_a, registrar_b = self.make_user("system_admin"), self.make_user("riuh")
         self.widen("research_projects.serializers.validate_lead_concurrency")
 
         def register(registrar, code):

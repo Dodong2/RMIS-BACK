@@ -336,9 +336,9 @@ class AuditLogTests(RMISTestCase):
         self.assertEqual((log.actor, log.method, log.status_code, log.error_detail), (admin, "PATCH", 200, ""))
 
     def test_a_rejected_write_keeps_the_validation_message(self):
-        crc_chair = self.make_user("crc_chair")
+        riuh = self.make_user("riuh")  # a registrant (the CRC Chair no longer registers, client 2026-10-24)
 
-        self.client_for(crc_chair).post("/api/projects/", {"title": "No code"}, format="json")
+        self.client_for(riuh).post("/api/projects/", {"title": "No code"}, format="json")
 
         log = AuditLog.objects.get()
         self.assertEqual(log.status_code, 400)

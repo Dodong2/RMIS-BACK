@@ -52,12 +52,15 @@ class ManualRegistrationTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_crc_chair_can_register_a_project(self):
+    def test_crc_chair_no_longer_registers_a_project(self):
+        """Client 2026-10-24 (Carl, 1b): the CRC Chair reviews submitted projects; registering is the Project Leader's,
+        RIUH's, DRD's or the System Admin's job, so a CRC Chair's draft can't hide from the CRC Chair."""
         leader = self.make_user("project_leader")
+        crc = self.client_for(self.make_user("crc_chair"))
 
-        response = self.client_for(self.make_user("crc_chair")).post("/api/projects/", project_payload(leader), format="json")
-
-        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(crc.post("/api/projects/", project_payload(leader), format="json").status_code, 403)
+        self.assertEqual(crc.get("/api/projects/import-template/").status_code, 403)
+        self.assertFalse(Project.objects.exists())
 
     def test_project_leader_can_register_a_project_they_lead(self):
         """Client meeting 2026-10-01: the Project Leader registers their own approved project."""
@@ -172,19 +175,19 @@ class ManualRegistrationTests(RMISTestCase):
     def test_registration_lib_step_creates_draft_lib_v1(self):
         """Client meeting 2026-10-01 (#11): the LIB is part of registration, for every registration role."""
         leader = self.make_user("project_leader")
-        crc_project = Project.objects.create(title="A", project_code="A-1", funding_type="core_funded", lead=leader)
+        riuh_project = Project.objects.create(title="A", project_code="A-1", funding_type="core_funded", lead=leader)
         own_project = Project.objects.create(title="B", project_code="B-1", funding_type="core_funded", lead=leader)
         rows = [
             {"category": "mooe", "description": "Traveling Expenses - Local", "fiscal_year": 2026, "unit": "pax", "quantity": "4", "unit_cost": "2500"},
             {"category": "co", "description": "Information and Communication Technology Equipment", "fiscal_year": 2026, "unit": "unit", "quantity": "1", "unit_cost": "7500"},
         ]
 
-        by_crc = self.client_for(self.make_user("crc_chair")).post(f"/api/projects/{crc_project.id}/lib/", {"line_items": rows}, format="json")
+        by_riuh = self.client_for(self.make_user("riuh")).post(f"/api/projects/{riuh_project.id}/lib/", {"line_items": rows}, format="json")
         by_leader = self.client_for(leader).post(f"/api/projects/{own_project.id}/lib/", {"line_items": rows}, format="json")
         again = self.client_for(leader).post(f"/api/projects/{own_project.id}/lib/", {"line_items": rows}, format="json")
         finance = self.client_for(self.make_user("finance_budget")).post(f"/api/projects/{own_project.id}/lib/", {"line_items": rows}, format="json")
 
-        self.assertEqual(by_crc.status_code, 201, by_crc.data)
+        self.assertEqual(by_riuh.status_code, 201, by_riuh.data)
         self.assertEqual(by_leader.status_code, 201, by_leader.data)
         self.assertEqual((by_leader.data["version_number"], by_leader.data["status"]), (1, "draft"))
         self.assertEqual(float(by_leader.data["total_amount"]), 17500)

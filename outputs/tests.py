@@ -22,11 +22,11 @@ class RegistrationRowsTests(RMISTestCase):
             "project": self.project.pk, "title": "Logistic preparations", "target_date": datetime.date(2026, 3, 31),
         }, format="json")
 
-    def test_crc_chair_registering_a_project_can_add_its_6ps_and_work_plan(self):
-        crc = self.make_user("crc_chair")
+    def test_a_registrant_registering_a_project_can_add_its_6ps_and_work_plan(self):
+        riuh = self.make_user("riuh")  # the CRC Chair no longer registers (client 2026-10-24)
 
-        self.assertEqual(self.add_output(crc).status_code, 201)
-        self.assertEqual(self.add_milestone(crc).status_code, 201)
+        self.assertEqual(self.add_output(riuh).status_code, 201)
+        self.assertEqual(self.add_milestone(riuh).status_code, 201)
 
     def test_particulars_take_the_forms_full_text(self):
         response = self.add_output(self.leader)
