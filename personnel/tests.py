@@ -332,6 +332,7 @@ class PersonnelTransitionsHappenOnceTests(RMISTestCase):
         self.assertEqual(ProjectAssignment.objects.filter(user=self.incoming).count(), 1)
 
     def test_task_review_is_decided_once(self):
+        certify(self.project)  # a review is work on the project (D5)
         task = Task.objects.create(project=self.project, title="Survey", assignee=self.staff, assigned_by=self.leader,
                                    due_date=datetime.date(2026, 12, 31), status="for_review")
         url = f"/api/personnel/tasks/{task.id}/review/"

@@ -21,6 +21,8 @@ class WorkGateTests(RMISTestCase):
         )
         self.budget = LineItemBudget.objects.create(project=self.project, version_number=1)
         self.task = Task.objects.create(project=self.project, title="Old task", assignee=self.staff, assigned_by=self.leader)
+        self.review_task = Task.objects.create(project=self.project, title="Sent for review", assignee=self.staff,
+                                               assigned_by=self.leader, status="for_review")
         self.output = ExpectedOutput.objects.create(project=self.project, category="people_services", description="D")
 
     def certify(self):
@@ -33,6 +35,7 @@ class WorkGateTests(RMISTestCase):
             "task": lambda: leader.post("/api/personnel/tasks/", {"project": p, "title": "T", "assignee": self.staff.pk,
                                                                   "start_date": today, "due_date": "2026-10-31"}, format="json"),
             "deliverable": lambda: leader.post(f"/api/personnel/tasks/{self.task.pk}/deliverables/", {"text": "Draft report"}, format="json"),
+            "task review": lambda: leader.post(f"/api/personnel/tasks/{self.review_task.pk}/review/", {"action": "approve"}, format="json"),
             "work log": lambda: staff.post(f"/api/personnel/tasks/{self.task.pk}/updates/", {"note": "Did it", "hours": "2"}, format="json"),
             "assignment": lambda: admin.post("/api/personnel/assignments/", {"user": self.staff.pk, "project": p, "start_date": today}, format="json"),
             "monthly report": lambda: admin.post("/api/monitoring/monthly-reports/", {"project": p, "period": today}, format="json"),
@@ -55,7 +58,8 @@ class WorkGateTests(RMISTestCase):
 
                 self.assertEqual(response.status_code, 400, f"{status} {name}: {getattr(response, 'data', '')}")
                 self.assertIn("Work on it starts once its reviews are completed", str(response.data), f"{status} {name}")
-        self.assertEqual(Task.objects.count(), 1)
+        self.assertEqual(Task.objects.count(), 2)
+        self.assertEqual(Task.objects.get(pk=self.review_task.pk).status, "for_review")
 
     def test_work_starts_once_the_lib_is_certified(self):
         self.certify()

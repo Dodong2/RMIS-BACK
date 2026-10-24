@@ -13,6 +13,7 @@ from accounts.models import User
 from accounts.permissions import HasRole, role_can
 from config.concurrency import AtomicMutationMixin, idempotent, lock
 from research_projects.models import Project
+from research_projects.workflow import ensure_work_allowed
 from . import notifications
 from .models import PersonnelChange, ProjectAssignment, StaffProfile, Task, TaskDeliverable, TaskUpdate
 from .serializers import (
@@ -254,6 +255,7 @@ class TaskReviewView(APIView):
             return Response({"action": "must be 'approve' or 'return'."}, status=status.HTTP_400_BAD_REQUEST)
         if task.status != "for_review":
             return Response({"detail": "Only a task in For Review can be approved or returned."}, status=status.HTTP_400_BAD_REQUEST)
+        ensure_work_allowed(task.project)  # saves without a serializer, so the work gate (D5) is checked here
         task.status = "done" if action == "approve" else "in_progress"
         task.save()
         remarks = request.data.get("remarks", "")
