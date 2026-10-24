@@ -36,9 +36,14 @@ class RiskAlertTests(RMISTestCase):
         self.assertEqual(self.alerts_for(self.leader), {("CRIT", "critical"), ("MED", "medium")})
 
     def test_riuh_and_crc_get_high_and_critical(self):
+        from budget_lib.models import LineItemBudget
+
         expected = {("CRIT", "critical"), ("HIGH", "high")}
 
         self.assertEqual(self.alerts_for(self.make_user("riuh")), expected)
+        self.assertEqual(self.alerts_for(self.make_user("crc_chair")), set())  # all Drafts, hidden from the CRC Chair (D2)
+        for project in (self.critical, self.high, self.medium):
+            LineItemBudget.objects.create(project=project, version_number=1, status="submitted")
         self.assertEqual(self.alerts_for(self.make_user("crc_chair")), expected)
 
     def test_vp_and_drd_get_critical_only(self):

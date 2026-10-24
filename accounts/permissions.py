@@ -47,6 +47,18 @@ def acting_for(user):
     ).values_list("suspended_user_id", flat=True))
 
 
+# Client 2026-10-24 (D2): a Draft, i.e. a project its Project Leader hasn't submitted (no LIB yet, or a Draft LIB,
+# research_projects.workflow), is not shown to the CRC Chair or the Budget Officer anywhere.
+DRAFT_HIDDEN_ROLES = ("crc_chair", "finance_budget")
+
+
+def without_drafts(projects):
+    from django.db.models import Exists, OuterRef
+    from budget_lib.models import LineItemBudget
+
+    return projects.filter(Exists(LineItemBudget.objects.filter(project=OuterRef("pk"), is_current=True).exclude(status="draft")))
+
+
 def scoped_projects(user):
     """Project queryset this user may see budget data for, or None for no restriction."""
     from django.db.models import Q
@@ -68,7 +80,9 @@ def scoped_projects(user):
             qs = qs.filter(campus__iexact=scope["campus"])
         if scope.get("college"):
             qs = qs.filter(college__iexact=scope["college"])
-        return qs
+        return without_drafts(qs) if code in DRAFT_HIDDEN_ROLES else qs
+    if code in DRAFT_HIDDEN_ROLES:
+        return without_drafts(Project.objects.all())
     return None
 
 

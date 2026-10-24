@@ -253,6 +253,9 @@ class ProposalFormTests(RMISTestCase):
             self.assertEqual(self.client_for(self.make_user(role)).get(f"/api/documents/documents/{doc.pk}/").status_code, 200, role)
 
     def test_only_the_leader_riuh_crc_chair_and_system_admin_see_it(self):
+        from budget_lib.models import LineItemBudget
+
+        LineItemBudget.objects.update(status="submitted")  # the CRC Chair sees a project once it is submitted (D2)
         self.save()
         from datetime import date
 

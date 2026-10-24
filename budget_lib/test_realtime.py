@@ -50,8 +50,8 @@ class LibSignalTests(RMISTestCase):
                 self.assert_signal()
 
     def test_refused_step_sends_nothing(self):
-        self.assertEqual(self.act(self.crc, "start-review").status_code, 400)  # still Draft
-        self.assertEqual(self.act(self.crc, "submit").status_code, 403)  # not the leader
+        self.assertEqual(self.act(self.crc, "start-review").status_code, 404)  # still Draft, hidden from the CRC Chair (D2)
+        self.assertEqual(self.act(self.crc, "submit").status_code, 404)  # not the leader; the Draft is hidden from them (D2)
         self.act(self.leader, "submit")
         self.notify.reset_mock()
         self.assertEqual(self.act(self.crc, "hold").status_code, 400)  # remarks required

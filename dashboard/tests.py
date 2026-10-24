@@ -3,9 +3,20 @@ from research_projects.models import Project
 
 
 class PortfolioDashboardTests(RMISTestCase):
-    def test_program_leader_sees_counts_for_every_project(self):
-        other = self.make_user("project_leader")
+    def test_a_scoped_role_counts_only_the_projects_it_is_involved_in(self):
+        """Client 2026-10-24 (replaces 2026-10-13's "every project"): Portfolio, Performance and Appendix G count only
+        the projects the user is involved in (visible_projects)."""
         program_leader = self.make_user("program_leader")
+        mine = Project.objects.create(title="Mine", project_code="M-1", funding_type="core_funded", lead=program_leader, sdgs=[4])
+        Project.objects.create(title="Other", project_code="O-1", funding_type="core_funded", lead=self.make_user("project_leader"), sdgs=[9])
+        client = self.client_for(program_leader)
+
+        self.assertEqual(client.get("/api/dashboard/portfolio/").data["by_sdg"], {4: 1})
+        self.assertEqual(client.get("/api/dashboard/portfolio/").data["total_projects"], 1)
+        self.assertEqual([row["project_code"] for row in client.get("/api/dashboard/performance/").data["projects"]], [mine.project_code])
+
+    def test_university_wide_roles_count_every_project(self):
+        other = self.make_user("project_leader")
         Project.objects.create(
             title="A", project_code="A-1", funding_type="core_funded", lead=other, research_priority_area="ict",
             sdgs=[4, 9], campus="San Pablo City", college="CCS - College of Computer Studies",
@@ -15,7 +26,7 @@ class PortfolioDashboardTests(RMISTestCase):
             sdgs=[9], campus="San Pablo City", college="CCS - College of Computer Studies",
         )
 
-        response = self.client_for(program_leader).get("/api/dashboard/portfolio/")
+        response = self.client_for(self.make_user("vprei")).get("/api/dashboard/portfolio/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["total_projects"], 2)
@@ -335,7 +346,11 @@ class DashboardRoleScopeTests(RMISTestCase):
         self.assertEqual(self.get(self.leader, "dashboard/forecasting/")["projects_in_scope"], 1)
 
     def test_campus_scoped_role_counts_only_its_campus(self):
+        from budget_lib.models import LineItemBudget
+
         crc = self.make_user("crc_chair", scope={"campus": "Siniloan"})
+        for project in (self.mine, self.other):  # submitted: a Draft is hidden from the CRC Chair (D2)
+            LineItemBudget.objects.create(project=project, version_number=1, status="submitted")
 
         self.assertEqual(self.get(crc, "dashboard/projects/")["by_campus"], {"Siniloan": 1})
         self.assertEqual(self.get(crc, "dashboard/compliance/")["ai_use_declarations"], 1)
@@ -345,3 +360,41 @@ class DashboardRoleScopeTests(RMISTestCase):
             user = self.make_user(role)
             self.assertEqual(self.get(user, "dashboard/projects/")["total_projects"], 2)
             self.assertEqual(self.get(user, "risk/dashboard/")["total_projects"], 2)
+
+
+class DraftsHiddenFromReviewersTests(RMISTestCase):
+    """Client 2026-10-24 (D2): a Draft (its Project Leader hasn't submitted it) isn't shown to the CRC Chair or the
+    Budget Officer: not in Projects, the Dashboard, Analytics, Appendix G or Budget. Other roles see it as before."""
+
+    def setUp(self):
+        super().setUp()
+        from budget_lib.models import LineItemBudget
+
+        leader = self.make_user("project_leader")
+        self.draft = Project.objects.create(title="Draft", project_code="D-1", funding_type="core_funded", lead=leader, sdgs=[4])
+        self.no_lib = Project.objects.create(title="No LIB", project_code="N-1", funding_type="core_funded", lead=leader, sdgs=[4])
+        self.submitted = Project.objects.create(title="Submitted", project_code="S-1", funding_type="core_funded", lead=leader, sdgs=[9])
+        LineItemBudget.objects.create(project=self.draft, version_number=1)
+        LineItemBudget.objects.create(project=self.submitted, version_number=1, status="submitted")
+
+    def test_crc_chair_and_budget_officer_see_only_submitted_projects(self):
+        for role in ("crc_chair", "finance_budget"):
+            client = self.client_for(self.make_user(role))
+
+            self.assertEqual([p["project_code"] for p in client.get("/api/projects/").data], ["S-1"], role)
+            self.assertEqual(client.get(f"/api/projects/{self.draft.pk}/").status_code, 404, role)
+            self.assertEqual(client.get("/api/dashboard/projects/").data["total_projects"], 1, role)
+
+    def test_crc_chair_analytics_and_budget_list_skip_drafts(self):
+        client = self.client_for(self.make_user("crc_chair"))
+
+        self.assertEqual(client.get("/api/dashboard/portfolio/").data["by_sdg"], {9: 1})
+        self.assertEqual([r["project_code"] for r in client.get("/api/dashboard/performance/").data["projects"]], ["S-1"])
+        self.assertEqual([b["project"] for b in client.get("/api/budget/budgets/").data], [self.submitted.pk])
+
+    def test_other_roles_still_see_drafts(self):
+        for role in ("system_admin", "vprei", "riuh", "drd"):
+            client = self.client_for(self.make_user(role))
+
+            self.assertEqual(len(client.get("/api/projects/").data), 3, role)
+            self.assertEqual(client.get("/api/dashboard/portfolio/").data["total_projects"], 3, role)

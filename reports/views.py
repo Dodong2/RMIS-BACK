@@ -163,7 +163,7 @@ class AppendixGReportView(APIView):
     def get(self, request):
         campus = request.query_params.get("campus")
         year = request.query_params.get("year")
-        data = dashboard_services.appendix_g_export(campus=campus, year=int(year) if year else None)
+        data = dashboard_services.appendix_g_export(campus=campus, year=int(year) if year else None, user=request.user)
         response, error = build_report_response(
             request, "appendix_g", "Appendix G - R&D Accomplishment Report", data, filters={"campus": campus, "year": year}
         )

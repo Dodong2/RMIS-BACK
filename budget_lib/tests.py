@@ -57,7 +57,7 @@ class LibWorkflowTests(RMISTestCase):
                          ["submitted", "review_started", "for_checking", "ready", "certification_started", "certified"])
 
     def test_steps_cannot_be_skipped(self):
-        self.assertEqual(self.act(self.crc, "start-review").status_code, 400)  # not submitted yet
+        self.assertEqual(self.act(self.crc, "start-review").status_code, 404)  # not submitted yet: a Draft is hidden from the CRC Chair (D2)
         self.act(self.leader, "submit")
         for action in ("for-checking", "ready"):
             self.assertEqual(self.act(self.crc, action).status_code, 400, action)
@@ -165,9 +165,9 @@ class LibWorkflowTests(RMISTestCase):
         self.assertEqual(self.act(self.officer, "hold", remarks="x").status_code, 404)  # Q10: not visible to Budget yet
         self.move_to("endorsed")
         self.assertEqual(self.act(self.crc, "hold", remarks="x").status_code, 403)
-        for status in ("draft", "certified", "returned"):
+        for status, code in (("draft", 404), ("certified", 400), ("returned", 400)):  # a Draft is hidden from the CRC Chair (D2)
             self.move_to(status)
-            self.assertEqual(self.act(self.crc, "hold", remarks="x").status_code, 400, status)
+            self.assertEqual(self.act(self.crc, "hold", remarks="x").status_code, code, status)
 
     def test_the_leader_edits_an_on_hold_lib_and_resubmits_to_the_crc_chair(self):
         self.act(self.leader, "submit")

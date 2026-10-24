@@ -143,11 +143,10 @@ def compute_output_dashboard(year=None, campus=None, college=None, user=None):
     }
 
 
-def compute_portfolio_dashboard(campus=None, college=None):
+def compute_portfolio_dashboard(campus=None, college=None, user=None):
     """Analytics > Portfolio (client request 2026-10-13): project counts by research priority area, SDG and college.
-    Counts only, over every project, so roles whose project list is scoped (Program Leader) still see the whole
-    university portfolio."""
-    projects = _scoped_projects(campus, college=college)
+    Client 2026-10-24: only the projects the user is involved in (visible_projects; university-wide roles: all)."""
+    projects = _scoped_projects(campus, college=college, user=user)
     priority_labels = dict(Project.PRIORITY_AREA_CHOICES)
     by_priority_area = {
         priority_labels.get(code, "Unspecified"): count
@@ -236,11 +235,11 @@ def _latest_12_months(disbursements):
     ]
 
 
-def compute_performance_dashboard(campus=None, college=None):
+def compute_performance_dashboard(campus=None, college=None, user=None):
     """Analytics per-project progress rows plus College, Campus and Project Leader performance rankings
-    (client 2026-10-14, important.png)."""
+    (client 2026-10-14, important.png). Client 2026-10-24: only the projects the user is involved in."""
     projects = (
-        _scoped_projects(campus, college=college)
+        _scoped_projects(campus, college=college, user=user)
         .select_related("lead")
         .annotate(
             milestones_total=Count("milestones", distinct=True),
@@ -402,13 +401,13 @@ def appendix_f_export(project_id):
     }
 
 
-def appendix_g_export(campus=None, year=None):
+def appendix_g_export(campus=None, year=None, user=None):
     """Structured data matching Appendix G (R&D Accomplishment Report) —
     the summary RIUH compiles per the Manual's 'Reporting of R&D
     Accomplishments' section. Aggregated from what RMIS already tracks;
     does not model plantilla positions/academic rank (Planning Office's own
-    methodology, outside RMIS's scope)."""
-    projects = _scoped_projects(campus)
+    methodology, outside RMIS's scope). Client 2026-10-24: only the projects the user is involved in."""
+    projects = _scoped_projects(campus, user=user)
     pubs = PublicationRecord.objects.filter(project__in=projects)
     ip_records = IPRecord.objects.filter(project__in=projects)
     creative_works = CreativeWorkRecord.objects.filter(project__in=projects)

@@ -878,6 +878,11 @@ class EditRegisteredProjectTests(RMISTestCase):
         self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"project_code": "LSPU-10"}, format="json").status_code, 400)
 
     def test_only_the_system_admin_and_the_projects_leader_edit_it(self):
+        from budget_lib.models import BudgetReview
+
+        # Returned for revision: visible to the CRC Chair (D2) and open for edits (D6)
+        budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="returned")
+        BudgetReview.objects.create(budget=budget, action="held_crc", acted_by=self.make_user("crc_chair"))
         for code in ("crc_chair", "drd", "riuh"):
             c = self.client_for(self.make_user(code))
             self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"title": "Changed"}, format="json").status_code, 403, code)

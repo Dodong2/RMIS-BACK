@@ -80,7 +80,7 @@ class PortfolioDashboardView(APIView):
 
     def get(self, request):
         return Response(services.compute_portfolio_dashboard(
-            campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+            campus=request.query_params.get("campus"), college=request.query_params.get("college"), user=request.user,
         ))
 
 
@@ -91,7 +91,7 @@ class PerformanceDashboardView(APIView):
 
     def get(self, request):
         return Response(services.compute_performance_dashboard(
-            campus=request.query_params.get("campus"), college=request.query_params.get("college"),
+            campus=request.query_params.get("campus"), college=request.query_params.get("college"), user=request.user,
         ))
 
 
@@ -139,6 +139,7 @@ class AppendixGExportView(APIView):
             services.appendix_g_export(
                 campus=request.query_params.get("campus"),
                 year=int(year) if year else None,
+                user=request.user,
             )
         )
 
