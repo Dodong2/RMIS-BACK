@@ -5,6 +5,7 @@ import docx
 import openpyxl
 
 from accounts.testing import RMISTestCase
+from budget_lib.models import LineItemBudget
 from monitoring.models import MidtermReport, TerminalReport
 from outputs.models import ExpectedOutput
 from research_projects.models import Project, ProjectEndorser
@@ -27,6 +28,11 @@ def text_of(fmt, content):
     return ""
 
 
+def certify(project):
+    """Work on a project starts once its LIB is certified (Carl 2026-10-24, D5)."""
+    LineItemBudget.objects.create(project=project, version_number=1, status="certified")
+
+
 class FormExportTests(RMISTestCase):
     """Client follow-up 2026-10-02: Appendix E follows LSPU-RDO-SF-017 and Appendix F follows SF-16, in every format."""
 
@@ -39,6 +45,7 @@ class FormExportTests(RMISTestCase):
             lead=self.leader, objectives="1. Evaluate the status\n2. Prepare a report", background="Extension matters.",
             references="CHED. (2016). CMO 52.",
         )
+        certify(self.project)
         ExpectedOutput.objects.create(project=self.project, category="publications", description="Journal articles", target_count=10)
         ProjectEndorser.objects.create(project=self.project, name="Adriel G. Roman", designation="Dean/Associate Dean")
 

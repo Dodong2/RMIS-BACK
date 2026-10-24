@@ -6,10 +6,16 @@ from django.core.management import call_command
 from django.utils import timezone
 
 from accounts.testing import RMISTestCase
+from budget_lib.models import LineItemBudget
 from monitoring.models import MidtermReport
 from research_projects.models import Project
 
 from .models import Task, TaskUpdate, working_days
+
+
+def certify(project):
+    """Work on a project starts once its LIB is certified (Carl 2026-10-24, D5)."""
+    LineItemBudget.objects.create(project=project, version_number=1, status="certified")
 
 
 class StaffNotificationTests(RMISTestCase):
@@ -20,6 +26,7 @@ class StaffNotificationTests(RMISTestCase):
         self.leader = self.make_user("project_leader", first_name="Aimee", last_name="Chavez")
         self.staff = self.make_user("project_staff", email="staff@lspu.test", first_name="Dan", last_name="Agustin")
         self.project = Project.objects.create(title="Bridging Academia", project_code="BRIDGI-1", funding_type="institutional", lead=self.leader)
+        certify(self.project)
 
     def sent(self):
         """(to, subject, html) of every Brevo call so far."""
@@ -183,6 +190,7 @@ class MilestoneTaskTests(RMISTestCase):
         self.leader = self.make_user("project_leader")
         self.staff = self.make_user("project_staff")
         self.project = Project.objects.create(title="P", project_code="P-1", funding_type="institutional", lead=self.leader)
+        certify(self.project)
         self.milestone = WorkPlanMilestone.objects.create(project=self.project, title="Data gathering", target_date=datetime.date(2026, 6, 30))
         self.client = self.client_for(self.leader)
 
@@ -341,6 +349,7 @@ class TaskScheduleTests(RMISTestCase):
         self.leader = self.make_user("project_leader")
         self.staff = self.make_user("project_staff")
         self.project = Project.objects.create(title="P", project_code="P-1", funding_type="institutional", lead=self.leader)
+        certify(self.project)
         self.client = self.client_for(self.leader)
 
     def create(self, start, due, **fields):
@@ -405,6 +414,7 @@ class WorkLogFixture:
         self.leader = self.make_user("project_leader")
         self.staff = self.make_user("project_staff")
         self.project = Project.objects.create(title="P", project_code="P-1", funding_type="institutional", lead=self.leader)
+        certify(self.project)
         self.task_id = self.client_for(self.leader).post("/api/personnel/tasks/", {
             "project": self.project.pk, "title": "Survey", "assignee": self.staff.pk, "start_date": "2026-10-19", "due_date": "2026-10-23",
         }, format="json").data["id"]

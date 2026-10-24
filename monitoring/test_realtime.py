@@ -3,11 +3,17 @@ the project lead and the submitter. The browser refetches through DRF, so the si
 import datetime
 
 from accounts.testing import RMISTestCase
+from budget_lib.models import LineItemBudget
 from monitoring.models import ExtensionRequest, ProjectEvaluation, RenewalApplication, TerminalReport
 from realtime.notify import to_role, to_user
 from research_projects.models import Project
 
 MONITORING_ROLES = {"system_admin", "riuh", "vprei", "drd", "crc_chair", "university_admin"}
+
+
+def certify(project):
+    """Work on a project starts once its LIB is certified (Carl 2026-10-24, D5)."""
+    LineItemBudget.objects.create(project=project, version_number=1, status="certified")
 
 
 class MonitoringSignalTests(RMISTestCase):
@@ -18,6 +24,7 @@ class MonitoringSignalTests(RMISTestCase):
         self.staff = self.make_user("project_staff")
         self.project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader,
                                               target_end_date=datetime.date(2030, 12, 31))
+        certify(self.project)
         self.admin = self.client_for(self.make_user("system_admin"))
 
     def sent(self):

@@ -10,6 +10,7 @@ from research_projects.serializers import (
     validate_lead_concurrency,
     validate_lead_role,
 )
+from research_projects.workflow import WorkAfterReviewMixin
 from .models import (
     HOURS_PER_WORKING_DAY, PersonnelChange, ProjectAssignment, PropertyClearance, StaffProfile, Task, TaskDeliverable,
     TaskUpdate, working_days,
@@ -75,7 +76,7 @@ class LeaderAssignmentSerializer(serializers.Serializer):
         return record
 
 
-class ProjectAssignmentSerializer(serializers.ModelSerializer):
+class ProjectAssignmentSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     user_detail = LeadSerializer(source="user", read_only=True)
     is_active = serializers.BooleanField(read_only=True)
 
@@ -97,7 +98,7 @@ class ProjectAssignmentSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class TaskDeliverableSerializer(serializers.ModelSerializer):
+class TaskDeliverableSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = TaskDeliverable
         fields = ["id", "task", "text", "done"]
@@ -108,7 +109,7 @@ class TaskDeliverableSerializer(serializers.ModelSerializer):
 ASSIGNEE_STATUSES = ("in_progress", "for_review")
 
 
-class TaskSerializer(serializers.ModelSerializer):
+class TaskSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     assignee_detail = LeadSerializer(source="assignee", read_only=True)
     deliverables = TaskDeliverableSerializer(many=True, read_only=True)
     logged_hours = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
@@ -172,7 +173,7 @@ class TaskSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class TaskUpdateSerializer(serializers.ModelSerializer):
+class TaskUpdateSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     author_email = serializers.EmailField(source="author.email", read_only=True)
     author_name = serializers.CharField(source="author.display_name", read_only=True)
 

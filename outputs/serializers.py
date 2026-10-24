@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from accounts.permissions import ensure_in_scope
 
-from research_projects.workflow import ensure_registration_open, registration_changes
+from research_projects.workflow import WorkAfterReviewMixin, ensure_registration_open, ensure_work_allowed, registration_changes
 from .models import CreativeWorkRecord, IPRecord, PublicationRecord, SenseRankedPublisher, ExpectedOutput, ProjectOutcome
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
@@ -74,7 +74,7 @@ class SenseRankedPublisherSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "created_at"]
 
 
-class PublicationRecordSerializer(serializers.ModelSerializer):
+class PublicationRecordSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     estimated_incentive = serializers.SerializerMethodField()
 
     class Meta:
@@ -94,7 +94,7 @@ class PublicationRecordSerializer(serializers.ModelSerializer):
         return validate_study_belongs_to_project(attrs, self.instance)
 
 
-class IPRecordSerializer(serializers.ModelSerializer):
+class IPRecordSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     incentive_eligible = serializers.SerializerMethodField()
 
     class Meta:
@@ -114,7 +114,7 @@ class IPRecordSerializer(serializers.ModelSerializer):
         return validate_study_belongs_to_project(attrs, self.instance)
 
 
-class CreativeWorkRecordSerializer(serializers.ModelSerializer):
+class CreativeWorkRecordSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = CreativeWorkRecord
         fields = [
@@ -147,10 +147,12 @@ class ExpectedOutputSerializer(serializers.ModelSerializer):
         ensure_in_scope(self, project)
         # Section V is part of the registration (client 2026-10-24); the actual count is M&E, not registration
         ensure_registration_open(project, registration_changes(self, attrs, exclude=("manual_actual_count",)))
+        if "manual_actual_count" in attrs and registration_changes(self, attrs, fields=["manual_actual_count"]):
+            ensure_work_allowed(project)  # the actual count is M&E work (D5)
         return attrs
 
 
-class ProjectOutcomeSerializer(serializers.ModelSerializer):
+class ProjectOutcomeSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = ProjectOutcome
         fields = ["id", "project", "kind", "description", "observed_on", "evidence", "recorded_by", "created_at"]

@@ -1,6 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
+from research_projects.workflow import WorkAfterReviewMixin
 from .models import (
     AI_CONTENT_THRESHOLD,
     ComplianceRequirement,
@@ -25,7 +26,7 @@ def validate_study_belongs_to_project(attrs, instance):
     return attrs
 
 
-class EthicsReviewReferenceSerializer(serializers.ModelSerializer):
+class EthicsReviewReferenceSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = EthicsReviewReference
         fields = [
@@ -38,7 +39,7 @@ class EthicsReviewReferenceSerializer(serializers.ModelSerializer):
         return validate_study_belongs_to_project(attrs, self.instance)
 
 
-class SimilarityCheckRecordSerializer(serializers.ModelSerializer):
+class SimilarityCheckRecordSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = SimilarityCheckRecord
         fields = [
@@ -51,7 +52,7 @@ class SimilarityCheckRecordSerializer(serializers.ModelSerializer):
         return validate_study_belongs_to_project(attrs, self.instance)
 
 
-class AIUseDeclarationSerializer(serializers.ModelSerializer):
+class AIUseDeclarationSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     exceeds_ai_threshold = serializers.SerializerMethodField()
 
     def get_exceeds_ai_threshold(self, obj):
@@ -74,7 +75,7 @@ class AIUseDeclarationSerializer(serializers.ModelSerializer):
         return validate_study_belongs_to_project(attrs, self.instance)
 
 
-class ConflictOfInterestDisclosureSerializer(serializers.ModelSerializer):
+class ConflictOfInterestDisclosureSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = ConflictOfInterestDisclosure
         fields = [
@@ -84,7 +85,7 @@ class ConflictOfInterestDisclosureSerializer(serializers.ModelSerializer):
         read_only_fields = ["recorded_by", "verified_by", "verified_at"]
 
 
-class MisconductCaseReferenceSerializer(serializers.ModelSerializer):
+class MisconductCaseReferenceSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = MisconductCaseReference
         fields = [

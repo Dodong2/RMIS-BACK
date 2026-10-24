@@ -4,6 +4,7 @@ project's review status is read from its current LIB's workflow (budget_lib TRAN
 LIB's Submit is the project's Submit and there is no second status to keep in step."""
 
 from rest_framework import serializers
+from rest_framework.fields import empty
 
 REVIEW_STATUS_LABELS = {
     "draft": "Draft",
@@ -70,3 +71,40 @@ def ensure_registration_open(project, changed=True):
         raise serializers.ValidationError(
             f"This project is {REVIEW_STATUS_LABELS[current]} and can't be edited until it is returned for revision."
         )
+
+
+def ensure_work_allowed(project):
+    """Carl 2026-10-24 (D5): no work on a project (tasks, Work Logs, assignments, monitoring reports, outputs,
+    compliance records) until its reviews are completed, i.e. the Budget Officer certified its LIB. Every role."""
+    if project is None:
+        return
+    current = review_status(project)
+    if current != "reviews_completed":
+        raise serializers.ValidationError(
+            f"This project is {REVIEW_STATUS_LABELS[current]}. Work on it starts once its reviews are completed "
+            "(the Budget Officer certifies its LIB)."
+        )
+
+
+class WorkAfterReviewMixin:
+    """For serializers of a project's work records: creating or changing one runs ensure_work_allowed. Hooks
+    run_validation so a serializer's own validate() needn't call it. The project comes from the row (project, or its
+    study or task) or, for a task's Work Logs and deliverables, from context["task"]."""
+
+    def work_project(self, attrs):
+        def get(field):
+            return attrs.get(field, getattr(self.instance, field, None))
+
+        for source in (get("project"), getattr(get("study"), "project", None), getattr(get("task"), "project", None),
+                       getattr(self.context.get("task"), "project", None)):
+            if source is not None:
+                return source
+        return None
+
+    def run_validation(self, data=empty):
+        attrs = super().run_validation(data)
+        try:
+            ensure_work_allowed(self.work_project(attrs))
+        except serializers.ValidationError as exc:  # shaped like validate()'s errors ({"non_field_errors": [...]})
+            raise serializers.ValidationError(serializers.as_serializer_error(exc))
+        return attrs

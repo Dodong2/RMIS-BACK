@@ -4,12 +4,18 @@ the task. A write can save several rows, so tests check that a signal went out a
 import datetime
 
 from accounts.testing import RMISTestCase
+from budget_lib.models import LineItemBudget
 from realtime.notify import to_role, to_user
 from research_projects.models import Program, Project
 
 from .models import PersonnelChange, ProjectAssignment, PropertyClearance, Task
 
 ASSIGNER_ROLES = {"system_admin", "crc_chair", "drd", "riuh"}  # leaders are reached per user
+
+
+def certify(project):
+    """Work on a project starts once its LIB is certified (Carl 2026-10-24, D5)."""
+    LineItemBudget.objects.create(project=project, version_number=1, status="certified")
 
 
 class TaskSignalTests(RMISTestCase):
@@ -22,6 +28,7 @@ class TaskSignalTests(RMISTestCase):
         program = Program.objects.create(title="Prog", lead=self.program_leader)
         self.project = Project.objects.create(title="P", project_code="P-1", funding_type="institutional",
                                               lead=self.leader, program=program)
+        certify(self.project)
         self.leader_client = self.client_for(self.leader)
 
     def assert_signalled(self, task_id, *users):

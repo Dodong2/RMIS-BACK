@@ -5,6 +5,7 @@ from rest_framework import serializers
 from budget_lib.models import LineItem
 from financial_monitoring.models import Disbursement
 
+from research_projects.workflow import WorkAfterReviewMixin
 from . import quarterly
 from .models import (
     EvaluationCriterion, EvaluationScore, ExtensionRequest, MidtermReport, MonthlyProgressReport, ProjectEvaluation,
@@ -79,14 +80,14 @@ def compute_renewal_eligible(project, has_justification):
     return False
 
 
-class MonthlyProgressReportSerializer(serializers.ModelSerializer):
+class MonthlyProgressReportSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = MonthlyProgressReport
         fields = ["id", "project", "period", "narrative", "document", "submitted_by", "submitted_at"]
         read_only_fields = ["submitted_by"]
 
 
-class MidtermReportSerializer(serializers.ModelSerializer):
+class MidtermReportSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = MidtermReport
         fields = [
@@ -120,7 +121,7 @@ class MidtermReportSerializer(serializers.ModelSerializer):
         return cleaned
 
 
-class TerminalReportSerializer(serializers.ModelSerializer):
+class TerminalReportSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = TerminalReport
         fields = [
@@ -176,7 +177,7 @@ class EvaluationScoreSerializer(serializers.ModelSerializer):
         return criterion
 
 
-class RenewalApplicationSerializer(serializers.ModelSerializer):
+class RenewalApplicationSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     renewal_eligible = serializers.SerializerMethodField()
     budget_used_pct = serializers.SerializerMethodField()
     deliverables_pct = serializers.SerializerMethodField()
@@ -242,7 +243,7 @@ def extension_deadline_passed(project, today=None):
     return (project.target_end_date - today).days < EXTENSION_MIN_LEAD_DAYS
 
 
-class ExtensionRequestSerializer(serializers.ModelSerializer):
+class ExtensionRequestSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = ExtensionRequest
         fields = [
@@ -285,7 +286,7 @@ class QuarterlyIssueSerializer(serializers.Serializer):
     target_resolution_date = serializers.CharField(required=False, allow_blank=True, default="")
 
 
-class QuarterlyProgressReportSerializer(serializers.ModelSerializer):
+class QuarterlyProgressReportSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
     accomplishments = QuarterlyAccomplishmentSerializer(many=True, required=False)
     issues = QuarterlyIssueSerializer(many=True, required=False)
     period = serializers.SerializerMethodField()
