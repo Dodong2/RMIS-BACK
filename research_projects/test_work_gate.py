@@ -32,6 +32,7 @@ class WorkGateTests(RMISTestCase):
         return {
             "task": lambda: leader.post("/api/personnel/tasks/", {"project": p, "title": "T", "assignee": self.staff.pk,
                                                                   "start_date": today, "due_date": "2026-10-31"}, format="json"),
+            "deliverable": lambda: leader.post(f"/api/personnel/tasks/{self.task.pk}/deliverables/", {"text": "Draft report"}, format="json"),
             "work log": lambda: staff.post(f"/api/personnel/tasks/{self.task.pk}/updates/", {"note": "Did it", "hours": "2"}, format="json"),
             "assignment": lambda: admin.post("/api/personnel/assignments/", {"user": self.staff.pk, "project": p, "start_date": today}, format="json"),
             "monthly report": lambda: admin.post("/api/monitoring/monthly-reports/", {"project": p, "period": today}, format="json"),

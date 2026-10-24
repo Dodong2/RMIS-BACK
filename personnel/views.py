@@ -214,8 +214,15 @@ class TaskDeliverableListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         return TaskDeliverable.objects.filter(task_id=self.kwargs["pk"]).order_by("id")
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if self.request.method == "POST":
+            # The serializer's work gate (WorkAfterReviewMixin) reads the project from context["task"].
+            context["task"] = generics.get_object_or_404(Task, pk=self.kwargs["pk"])
+        return context
+
     def perform_create(self, serializer):
-        serializer.save(task=generics.get_object_or_404(Task, pk=self.kwargs["pk"]))
+        serializer.save(task=serializer.context["task"])
 
 
 class TaskDeliverableDetailView(generics.RetrieveUpdateDestroyAPIView):
