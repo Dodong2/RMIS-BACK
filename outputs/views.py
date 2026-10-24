@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 
 from accounts.permissions import HasRole, role_can
 from research_projects.models import Project
+from research_projects.workflow import ensure_registration_open
 from .models import (
     SIX_PS, CreativeWorkRecord, ExpectedOutput, IPRecord, ProjectOutcome, PublicationRecord, SenseRankedPublisher,
 )
@@ -101,6 +102,10 @@ class ExpectedOutputListCreateView(RoleWritesMixin, ProjectScopedMixin, generics
 class ExpectedOutputDetailView(RoleWritesMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = ExpectedOutput.objects.select_related("project")
     serializer_class = ExpectedOutputSerializer
+
+    def perform_destroy(self, instance):
+        ensure_registration_open(instance.project)
+        instance.delete()
 
 
 class ProjectOutcomeListCreateView(RoleWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):

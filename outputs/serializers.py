@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from accounts.permissions import ensure_in_scope
 
+from research_projects.workflow import ensure_registration_open, registration_changes
 from .models import CreativeWorkRecord, IPRecord, PublicationRecord, SenseRankedPublisher, ExpectedOutput, ProjectOutcome
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
@@ -142,7 +143,10 @@ class ExpectedOutputSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         # Strict RBAC (client meeting 2026-10-01): leaders add 6Ps only to their own projects.
-        ensure_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        ensure_in_scope(self, project)
+        # Section V is part of the registration (client 2026-10-24); the actual count is M&E, not registration
+        ensure_registration_open(project, registration_changes(self, attrs, exclude=("manual_actual_count",)))
         return attrs
 
 

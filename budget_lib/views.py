@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_can
 from config.concurrency import lock
 from realtime.notify import notify, project_audience
+from research_projects.workflow import missing_approval_documents
 from .models import LibItem, LineItem, LineItemBudget
 from .serializers import LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, review_budget, total_cost_problem
 
@@ -182,6 +183,10 @@ class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.G
                 problem = total_cost_problem(budget)
                 if problem:
                     return self.refuse(problem)
+                # Submitting the LIB submits the project (client 2026-10-24, D1): Step 7's attachments must be there
+                missing = missing_approval_documents(budget.project)
+                if missing:
+                    return self.refuse(f"Attach the {', '.join(missing)} under Edit Registration before submitting the project.")
 
         budget = review_budget(budget, user, to_status, action, remarks)
         lib_signal(budget)

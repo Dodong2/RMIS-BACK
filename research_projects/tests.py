@@ -1173,3 +1173,112 @@ class DuplicateTitleTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("title", response.data)
+
+
+class ProjectReviewWorkflowTests(RMISTestCase):
+    """Client 2026-10-24 (Figma ProjectReviewWorkflow, PL-after-submit.png): a project is a Draft until its Project
+    Leader submits it (with its LIB, D1/D3) and the Notice of Approval, NTP and MOA (Task 8); once submitted nobody
+    edits its registration until the CRC Chair or Budget Officer returns it (D6, Carl: every role)."""
+
+    def setUp(self):
+        super().setUp()
+        from outputs.models import ExpectedOutput
+        from research_projects.models import ProjectTeamMember, Study
+
+        self.admin, self.leader, self.crc = self.make_user("system_admin"), self.make_user("project_leader"), self.make_user("crc_chair")
+        self.project = Project.objects.create(
+            title="Bridging", project_code="LSPU-7", funding_type="core_funded", lead=self.leader, sectors=["education"], sdgs=[4],
+            total_cost=50000,
+        )
+        self.budget = LineItemBudget.objects.create(project=self.project, version_number=1)
+        LineItem.objects.create(budget=self.budget, category="mooe", description="Travel Expenses", amount=50000)
+        self.member = ProjectTeamMember.objects.create(project=self.project, member_role="member", name="A")
+        self.study = Study.objects.create(project=self.project, title="S1")
+        self.output = ExpectedOutput.objects.create(project=self.project, category="publications", description="D")
+        self.milestone = WorkPlanMilestone.objects.create(project=self.project, title="M", target_date=datetime.date(2026, 5, 1))
+
+    def attach(self, *types):
+        from document_management.models import Document
+
+        for t in types:
+            Document.objects.create(project=self.project, document_type=t, version_number=1, storage_path=f"x/{t}", file_name=f"{t}.pdf",
+                                    file_size=1, uploaded_by=self.leader)
+
+    def review_status(self):
+        return self.client_for(self.leader).get(f"/api/projects/{self.project.pk}/").data["review_status"]
+
+    def lib_status(self, status, hold=None):
+        from budget_lib.models import BudgetReview
+
+        LineItemBudget.objects.filter(pk=self.budget.pk).update(status=status)
+        if hold:
+            BudgetReview.objects.create(budget=self.budget, action=hold, acted_by=self.crc)
+
+    def test_the_review_status_follows_the_lib(self):
+        for status, hold, expected in (
+            ("draft", None, "draft"), ("submitted", None, "submitted"), ("crc_processing", None, "pending_research_review"),
+            ("for_checking", None, "pending_research_review"), ("returned", "held_crc", "returned_research"),
+            ("endorsed", None, "pending_budget_review"), ("certifying", None, "pending_budget_review"),
+            ("returned", "held_budget", "returned_budget"), ("certified", None, "reviews_completed"),
+        ):
+            self.lib_status(status, hold)
+            self.assertEqual(self.review_status(), expected, status)
+        response = self.client_for(self.leader).get(f"/api/projects/{self.project.pk}/")
+        self.assertEqual(response.data["review_status_label"], "Reviews Completed")
+
+    def test_a_project_without_a_lib_is_a_draft(self):
+        LineItemBudget.objects.all().delete()
+
+        self.assertEqual(self.review_status(), "draft")
+
+    def test_submitting_needs_the_notice_of_approval_ntp_and_moa(self):
+        self.attach("ntp")
+
+        response = self.client_for(self.leader).post(f"/api/budget/budgets/{self.budget.pk}/submit/")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Notice of Approval", response.data["detail"])
+        self.assertIn("Memorandum of Agreement (MOA)", response.data["detail"])
+        self.assertNotIn("Notice to Proceed", response.data["detail"])
+        self.attach("notice_of_approval", "moa")
+        self.assertEqual(self.client_for(self.leader).post(f"/api/budget/budgets/{self.budget.pk}/submit/").status_code, 200)
+        self.assertEqual(self.review_status(), "submitted")
+
+    def test_nobody_edits_a_submitted_registration(self):
+        self.lib_status("submitted")
+        for user in (self.leader, self.admin):
+            c = self.client_for(user)
+            responses = {
+                "project": c.patch(f"/api/projects/{self.project.pk}/", {"title": "New"}, format="json"),
+                "team add": c.post("/api/project-team/", {"project": self.project.pk, "member_role": "member", "name": "B"}, format="json"),
+                "team edit": c.patch(f"/api/project-team/{self.member.pk}/", {"name": "B"}, format="json"),
+                "team remove": c.delete(f"/api/project-team/{self.member.pk}/"),
+                "study": c.patch(f"/api/studies/{self.study.pk}/", {"title": "S2"}, format="json"),
+                "study add": c.post("/api/studies/", {"project": self.project.pk, "title": "S3"}, format="json"),
+                "6P": c.patch(f"/api/outputs/expected-outputs/{self.output.pk}/", {"target_count": 3}, format="json"),
+                "6P add": c.post("/api/outputs/expected-outputs/", {"project": self.project.pk, "category": "patents", "description": "E"}, format="json"),
+                "6P remove": c.delete(f"/api/outputs/expected-outputs/{self.output.pk}/"),
+                "work plan": c.patch(f"/api/milestones/{self.milestone.pk}/", {"title": "M2"}, format="json"),
+                "work plan add": c.post("/api/milestones/", {"project": self.project.pk, "title": "M3", "target_date": "2026-06-01"}, format="json"),
+                "work plan remove": c.delete(f"/api/milestones/{self.milestone.pk}/"),
+            }
+            for name, response in responses.items():
+                self.assertEqual(response.status_code, 400, f"{user.role.code} {name}: {getattr(response, 'data', '')}")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.title, "Bridging")
+
+    def test_closure_status_and_6p_actual_counts_still_change_after_submitting(self):
+        self.lib_status("certified")
+        c = self.client_for(self.admin)
+
+        self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"status": "completed"}, format="json").status_code, 200)
+        self.assertEqual(c.patch(f"/api/outputs/expected-outputs/{self.output.pk}/", {"manual_actual_count": 2}, format="json").status_code, 200)
+        self.assertEqual(c.patch(f"/api/studies/{self.study.pk}/", {"status": "completed"}, format="json").status_code, 200)
+
+    def test_a_returned_project_can_be_edited_again(self):
+        for hold in ("held_crc", "held_budget"):
+            self.lib_status("returned", hold)
+
+            response = self.client_for(self.leader).patch(f"/api/projects/{self.project.pk}/", {"title": f"Fixed {hold}"}, format="json")
+
+            self.assertEqual(response.status_code, 200, response.data)

@@ -11,6 +11,15 @@ from research_projects.models import Project
 from .models import LineItem, LineItemBudget
 
 
+def attach_approval_documents(project, user):
+    """Step 7's Notice of Approval, NTP and MOA, which submitting the project's LIB needs (client 2026-10-24)."""
+    from document_management.models import Document
+
+    for document_type in ("notice_of_approval", "ntp", "moa"):
+        Document.objects.create(project=project, document_type=document_type, version_number=1, storage_path=f"x/{document_type}",
+                                file_name=f"{document_type}.pdf", file_size=1, uploaded_by=user)
+
+
 class LibWorkflowTests(RMISTestCase):
     def setUp(self):
         super().setUp()
@@ -23,6 +32,7 @@ class LibWorkflowTests(RMISTestCase):
         )
         self.budget = LineItemBudget.objects.create(project=self.project, version_number=1)
         self.item = LineItem.objects.create(budget=self.budget, category="mooe", description="Travel", amount=Decimal("1000"))
+        attach_approval_documents(self.project, self.leader)
 
     def act(self, user, action, **data):
         return self.client_for(user).post(f"/api/budget/budgets/{self.budget.id}/{action}/", data, format="json")

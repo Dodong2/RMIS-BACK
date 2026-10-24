@@ -6,6 +6,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 from accounts.models import Role, User
 from accounts.permissions import LEADER_ROLES, acting_for, ensure_in_scope, scoped_projects
+from .workflow import REVIEW_STATUS_LABELS, ensure_registration_open, registration_changes, review_status
 from .models import (
     CollegeUnit, CooperatingAgency, EndorserChoice, FundingType, Program, RdeThrust, Project, ProjectEndorser, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
 )
@@ -281,6 +282,9 @@ class ProgramSerializer(serializers.ModelSerializer):
 
 class ProjectSerializer(serializers.ModelSerializer):
     lead_detail = LeadSerializer(source="lead", read_only=True)
+    # Client 2026-10-24: Draft until the Project Leader submits, then the CRC Chair's and Budget Officer's reviews
+    review_status = serializers.SerializerMethodField()
+    review_status_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
@@ -297,8 +301,14 @@ class ProjectSerializer(serializers.ModelSerializer):
             "endorsed_by_dean", "endorsed_by_dean_on", "noted_by_rds_director", "noted_by_rds_director_on",
             "recommended_by_campus_director", "recommended_by_campus_director_on",
             "recommended_by_vprde", "recommended_by_vprde_on", "approved_by_president",
-            "created_at",
+            "created_at", "review_status", "review_status_label",
         ]
+
+    def get_review_status(self, obj):
+        return review_status(obj)
+
+    def get_review_status_label(self, obj):
+        return REVIEW_STATUS_LABELS[review_status(obj)]
 
     def validate_title(self, value):
         """Client 2026-10-24: a title that already exists (any status) can't be registered again; spacing and
@@ -358,6 +368,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         ensure_leader_keeps(self, attrs, ["project_code", "lead", "program"])
         if self.instance is not None:
             ensure_registration_editor(self, self.instance, attrs)
+            ensure_registration_open(self.instance, registration_changes(self, attrs, exclude=("status",)))
         program = attrs.get("program", getattr(self.instance, "program", None))
         ensure_registrant_in_scope(self, self.instance, leads=[lead, program.lead if program else None])
         validate_lead_concurrency(
@@ -376,6 +387,7 @@ class ProjectTeamMemberSerializer(serializers.ModelSerializer):
         project = attrs.get("project", getattr(self.instance, "project", None))
         ensure_registrant_in_scope(self, project)
         ensure_registration_editor(self, project, attrs)
+        ensure_registration_open(project, registration_changes(self, attrs))
         return attrs
 
 
@@ -388,6 +400,7 @@ class ProjectEndorserSerializer(serializers.ModelSerializer):
         project = attrs.get("project", getattr(self.instance, "project", None))
         ensure_registrant_in_scope(self, project)
         ensure_registration_editor(self, project, attrs)
+        ensure_registration_open(project, registration_changes(self, attrs))
         role_code = attrs.get("role_code", getattr(self.instance, "role_code", ""))
         user = attrs.get("user", getattr(self.instance, "user", None))
         if role_code and not Role.objects.filter(code=role_code).exists():
@@ -406,6 +419,7 @@ class TargetBeneficiarySerializer(serializers.ModelSerializer):
         project = attrs.get("project", getattr(self.instance, "project", None))
         ensure_registrant_in_scope(self, project)
         ensure_registration_editor(self, project, attrs)
+        ensure_registration_open(project, registration_changes(self, attrs))
         return attrs
 
 
@@ -425,6 +439,7 @@ class StudySerializer(serializers.ModelSerializer):
         program_lead = project.program.lead if project.program else None
         ensure_registrant_in_scope(self, project, leads=[lead, project.lead, program_lead])
         ensure_registration_editor(self, project, attrs, fields=["title"])
+        ensure_registration_open(project, registration_changes(self, attrs, fields=["project", "title", "lead"]))
         return attrs
 
 
@@ -460,7 +475,9 @@ class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
         return round(sum(percents) / len(percents), 1) if percents else 0
 
     def validate(self, attrs):
-        ensure_in_scope(self, attrs.get("project", getattr(self.instance, "project", None)))
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        ensure_in_scope(self, project)
+        ensure_registration_open(project, registration_changes(self, attrs))
         start = attrs.get("start_date", getattr(self.instance, "start_date", None))
         target = attrs.get("target_date", getattr(self.instance, "target_date", None))
         if start and target and start > target:
