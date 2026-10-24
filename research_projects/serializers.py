@@ -300,6 +300,18 @@ class ProjectSerializer(serializers.ModelSerializer):
             "created_at",
         ]
 
+    def validate_title(self, value):
+        """Client 2026-10-24: a title that already exists (any status) can't be registered again; spacing and
+        capitals don't make it a different title. Covers Manual Entry, the Excel import and Edit."""
+        def same(title):
+            return " ".join(title.split()).casefold()
+
+        others = Project.objects.exclude(pk=self.instance.pk) if self.instance else Project.objects.all()
+        existing = next((t for t in others.values_list("title", flat=True) if same(t) == same(value)), None)
+        if existing is not None:
+            raise serializers.ValidationError(f'A project titled "{existing}" already exists.')
+        return value
+
     def validate_funding_type(self, value):
         return validate_funding_type(value)
 

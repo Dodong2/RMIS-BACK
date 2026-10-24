@@ -634,6 +634,19 @@ class ExcelImportTests(RMISTestCase):
         self.assertFalse(Project.objects.exists())
 
 
+    def test_a_workbook_with_an_existing_title_is_refused(self):
+        """Client 2026-10-24: an existing title can't be registered again, from Excel either."""
+        Project.objects.create(title="Bridging Academia and Communities", project_code="OLD-1", funding_type="core_funded",
+                               lead=self.make_user("project_leader"), sectors=["education"], sdgs=[4])
+        self.fill_project(Title="  bridging academia   and COMMUNITIES ")
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual([e["field"] for e in response.data["errors"]], ["Title"])
+        self.assertFalse(Project.objects.filter(project_code="LSPU-X1").exists())
+
+
 class WorkPlanExcelTests(RMISTestCase):
     """Client 2026-10-23: Manual Entry Step 5 fills XI. Work Plan from the template's Work Plan sheet; nothing is saved."""
 
@@ -1118,3 +1131,45 @@ class RichTextProposalTests(RMISTestCase):
         text = render_form_csv(appendix_f_form(self.project.pk)).decode()
         self.assertIn("Why this matters\n• Food", text)
         self.assertNotIn("<p>", text)
+
+
+class DuplicateTitleTests(RMISTestCase):
+    """Client 2026-10-24: a project whose title already exists can't be registered; spacing and capitals don't count."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin, self.leader = self.make_user("system_admin"), self.make_user("project_leader")
+        self.existing = Project.objects.create(
+            title="Bridging Academia and Communities", project_code="OLD-1", funding_type="core_funded", lead=self.leader,
+            sectors=["education"], sdgs=[4], status="archived",
+        )
+
+    def test_the_same_title_is_refused_even_with_other_spacing_or_capitals(self):
+        for title in ("Bridging Academia and Communities", "  bridging academia   AND communities "):
+            response = self.client_for(self.admin).post("/api/projects/", project_payload(self.leader, title=title, project_code="NEW-1"), format="json")
+
+            self.assertEqual(response.status_code, 400, title)
+            self.assertEqual(str(response.data["title"][0]), "A project titled \"Bridging Academia and Communities\" already exists.")
+        self.assertFalse(Project.objects.filter(project_code="NEW-1").exists())
+
+    def test_a_different_title_registers(self):
+        response = self.client_for(self.admin).post(
+            "/api/projects/", project_payload(self.leader, title="Bridging Academia and Communities 2", project_code="NEW-1"), format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_editing_a_project_keeps_its_own_title(self):
+        response = self.client_for(self.admin).patch(
+            f"/api/projects/{self.existing.pk}/", {"title": "Bridging Academia and Communities", "description": "x"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_editing_a_project_cannot_take_another_projects_title(self):
+        other = Project.objects.create(title="Other", project_code="OLD-2", funding_type="core_funded", lead=self.leader, sectors=["education"], sdgs=[4])
+
+        response = self.client_for(self.admin).patch(f"/api/projects/{other.pk}/", {"title": "BRIDGING academia and communities"}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("title", response.data)
