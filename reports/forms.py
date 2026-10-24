@@ -213,7 +213,9 @@ def _money(n):
 
 
 def _section(title, body):
-    return {"kind": "table", "header": [[title]], "rows": [[body or "Not provided"]], "widths": [100], "header_fill": PROPOSAL_FILL}
+    # "split": the PDF gives each line its own row so a section longer than a page can break across pages
+    return {"kind": "table", "header": [[title]], "rows": [[body or "Not provided"]], "widths": [100], "header_fill": PROPOSAL_FILL,
+            "split": True}
 
 
 def _work_plan_block(data):
@@ -245,7 +247,7 @@ def _work_plan_block(data):
     if not rows:
         rows = [["Set under Work Plan after registration, or through the Excel upload."] + [""] * (width - 1)]
     return {"kind": "table", "header": header, "rows": rows, "spans": spans, "widths": [26, 8, 8] + [3] * months,
-            "header_fill": PROPOSAL_FILL, "cell_fills": fills, "bold_first": True}
+            "header_fill": PROPOSAL_FILL, "cell_fills": fills, "bold_first": True, "narrow_from": 3}
 
 
 def proposal_form(project_id):
@@ -868,19 +870,31 @@ def render_form_pdf(form):
             def body_cell(r, c, v):
                 return Paragraph(f"<b>{escape(v or '')}</b>", small) if _cell_style(block, r, c)[1] else p(v, small)
 
-            body = [[body_cell(r, c, v) for c, v in enumerate(row)] for r, row in enumerate(block["rows"])]
+            rows = block["rows"]
+            if block.get("split"):
+                # ReportLab can't break one table cell across pages (LayoutError, FRN-2026-005 2026-10-22)
+                rows = [[line] for line in rows[0][0].split("\n")]
+            body = [[body_cell(r, c, v) for c, v in enumerate(row)] for r, row in enumerate(rows)]
             widths = block.get("widths") or [100 / width] * width
             usable = pagesize[0] - 80
             table = Table(header + body or [[""] * width], colWidths=[usable * w / sum(widths) for w in widths],
                           repeatRows=len(header))
-            style = [("GRID", (0, 0), (-1, -1), 0.5, colors.black), ("VALIGN", (0, 0), (-1, -1), "TOP")]
+            if block.get("split"):
+                # Lines of one section: outer box and header rule only, so it still reads as one cell
+                style = [("BOX", (0, 0), (-1, -1), 0.5, colors.black), ("LINEBELOW", (0, len(header) - 1), (-1, len(header) - 1), 0.5, colors.black),
+                         ("VALIGN", (0, 0), (-1, -1), "TOP")]
+            else:
+                style = [("GRID", (0, 0), (-1, -1), 0.5, colors.black), ("VALIGN", (0, 0), (-1, -1), "TOP")]
             if header:
                 style.append(("BACKGROUND", (0, 0), (-1, len(header) - 1), colors.HexColor(f"#{block.get('header_fill', HEADER_FILL)}")))
-            for r, values in enumerate(block["rows"]):
+            for r, values in enumerate(rows):
                 for c in range(len(values)):
                     cell_fill = _cell_style(block, r, c)[0]
                     if cell_fill:
                         style.append(("BACKGROUND", (c, len(header) + r), (c, len(header) + r), colors.HexColor(f"#{cell_fill}")))
+            if "narrow_from" in block:
+                # Month columns of a multi-year Gantt are ~10pt wide, less than the default 6+6pt padding (FRN-2026-005)
+                style += [("LEFTPADDING", (block["narrow_from"], 0), (-1, -1), 1), ("RIGHTPADDING", (block["narrow_from"], 0), (-1, -1), 1)]
             for span_row, first, last in block.get("spans", []):
                 style.append(("SPAN", (first, span_row), (last, span_row)))
             table.setStyle(TableStyle(style))

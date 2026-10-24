@@ -210,6 +210,33 @@ class ProposalFormTests(RMISTestCase):
                              "GRAND TOTAL", "1. Data gathering", "ADRIEL G. ROMAN"):
                 self.assertIn(expected, text, fmt)
 
+    def test_a_section_longer_than_a_page_still_saves_the_pdf(self):
+        """FRN-2026-005 (2026-10-22): a long Background, plain text or editor HTML, made the PDF fail (ReportLab
+        LayoutError, one table cell taller than a page) and Register Project said the form could not be saved."""
+        paragraphs = [f"Paragraph {i}: " + "The study examines research operations in state universities. " * 6 for i in range(40)]
+        for background in ("\n".join(paragraphs), "".join(f"<p>{text}</p>" for text in paragraphs)):
+            type(self.project).objects.filter(pk=self.project.pk).update(background=background)
+            response = self.save()
+            self.assertEqual(response.status_code, 201, background[:20])
+            self.assertTrue(self.upload_document.call_args.args[0].read().startswith(b"%PDF"))
+
+    def test_a_work_plan_over_three_calendar_years_still_saves_the_pdf(self):
+        """FRN-2026-005 (2026-11-01 to 2028-11-01): 36 month columns left the Gantt cells narrower than their padding
+        (ReportLab "negative availWidth")."""
+        from datetime import date
+
+        type(self.project).objects.filter(pk=self.project.pk).update(start_date=date(2026, 11, 1), target_end_date=date(2028, 11, 1))
+        self.assertEqual(self.save().status_code, 201)
+        self.assertTrue(self.upload_document.call_args.args[0].read().startswith(b"%PDF"))
+
+    def test_long_sections_stay_one_cell_in_word_and_excel(self):
+        """The PDF splits a long section across pages; the Word and Excel downloads keep it as one cell, as before."""
+        type(self.project).objects.filter(pk=self.project.pk).update(background="First paragraph\nSecond paragraph")
+        self.save()
+        for fmt in ("docx", "xlsx"):
+            text = text_of(fmt, self.client_for(self.leader).get(f"/api/reports/proposal-form/{self.project.pk}/", {"file_format": fmt}).content)
+            self.assertIn("First paragraph\nSecond paragraph", text, fmt)
+
     def test_register_saves_the_form_as_a_project_team_document(self):
         from document_management.models import Document
 
