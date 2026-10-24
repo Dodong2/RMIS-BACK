@@ -23,6 +23,10 @@ class Document(models.Model):
         ("terminal_report", "Terminal Report"),
         ("accomplishment_report", "Accomplishment Report"),
         ("proposal_form", "Research Proposal Form (SF-018)"),
+        # Register Approved Project Step 7, each required (client 2026-10-24)
+        ("notice_of_approval", "Notice of Approval"),
+        ("ntp", "Notice to Proceed (NTP)"),
+        ("moa", "Memorandum of Agreement (MOA)"),
         ("thesis", "Thesis"),
         ("dissertation", "Dissertation"),
         ("dataset", "Research Dataset"),

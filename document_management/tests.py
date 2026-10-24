@@ -127,10 +127,19 @@ class StagedUploadTests(RMISTestCase):
             "file": SimpleUploadedFile(name, b"data", content_type="application/pdf"),
         }, format="multipart")
 
-    def register(self, user, token):
+    def register(self, user, token, document_type="other"):
         return self.client_for(user).post("/api/documents/documents/", {
-            "project": self.project.id, "document_type": "other", "stage": "inception", "staged_token": token,
+            "project": self.project.id, "document_type": document_type, "stage": "inception", "staged_token": token,
         })
+
+    def test_step_7_saves_the_notice_of_approval_ntp_and_moa_as_their_own_types(self):
+        """Client 2026-10-24: Notice of Approval, Notice to Proceed and MOA are separate required attachments."""
+        for document_type, name in (("notice_of_approval", "NOA.pdf"), ("ntp", "NTP.pdf"), ("moa", "MOA.pdf")):
+            response = self.register(self.admin, self.stage(self.admin, name).data["staged_token"], document_type)
+
+            self.assertEqual(response.status_code, 201, response.data)
+            self.assertEqual((response.data["document_type"], response.data["version_number"]), (document_type, 1))
+        self.move_document.assert_called_with(self.upload_document.call_args.args[1], "P-1/moa/v1_MOA.pdf")
 
     def test_a_staged_file_is_moved_into_the_project_on_register(self):
         staged = self.stage(self.admin)
