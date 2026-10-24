@@ -10,6 +10,11 @@ python manage.py runserver
 ```
 Migrations: `python manage.py makemigrations <app>` only. Never run `migrate`: local and prod share one DB. Give Carl the command (`./venv/bin/python manage.py migrate`) and he runs it.
 
+## Tests
+- Tests run on a local Docker Postgres, never Supabase: `TEST_DB_HOST=127.0.0.1` in `.env` points `manage.py test` at the container `rmis-testdb` (postgres:17, `127.0.0.1:5433`). Check `docker ps --filter name=rmis-testdb` first; if it's stopped, `docker start rmis-testdb`. The app, `runserver` and `migrate` always stay on Supabase.
+- Run `python manage.py test <label> --keepdb`. New migrations are applied to the local test DB automatically at the start of the run, so never `migrate` it by hand. Supabase still gets them only through Carl's `migrate`. A broken migration now fails locally first.
+- When a migration file that was already applied locally is edited or deleted, `--keepdb` won't notice. Rebuild the local test DB once with `python manage.py test <label> --noinput` (no `--keepdb`). That deletes only the local `rmis-testdb` copy, about 20 s.
+
 ## Apps and what they own
 - `accounts` — custom User, Role, auth (email/password + Google-via-Supabase bridge), RBAC (`HasRole` permission class), admin confirmation flow (pending → active)
 - `research_projects` — Module 2: Program → Project → Study hierarchy, work-plan milestones. (Named `research_projects`, not `projects` — that name conflicts with an existing module, don't rename back.)
@@ -31,4 +36,4 @@ Migrations: `python manage.py makemigrations <app>` only. Never run `migrate`: l
 - No hard-delete anywhere on User records — only `is_active` toggling. Users are FK'd from research records; deleting would break history.
 
 ## Session start
-Before trusting HANDOVER.md or your own memory as current, run `git log -8 --oneline` and `git status`. If there are commits or uncommitted changes you don't recognize (likely made manually, outside a Claude session), read the diff (`git show <hash>` or `git diff`) to catch up before doing anything else. Don't assume the last thing you remember is still the latest state.
+Before trusting `.claude/rules/handover.md` or your own memory as current, run `git log -8 --oneline` and `git status`. If there are commits or uncommitted changes you don't recognize (likely made manually, outside a Claude session), read the diff (`git show <hash>` or `git diff`) to catch up before doing anything else. Don't assume the last thing you remember is still the latest state.
