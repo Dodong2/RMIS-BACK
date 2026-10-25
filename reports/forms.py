@@ -21,12 +21,12 @@ import csv
 import datetime
 import io
 import re
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, unescape
 
 from monitoring.models import MidtermReport, TerminalReport
 from outputs.serializers import COMPUTED_6P
 
-from .richtext import rich_text_lines
+from .richtext import rich_text_lines, rich_text_marks
 
 UNIVERSITY = ["Republic of the Philippines", "Laguna State Polytechnic University", "Province of Laguna"]
 HEADER_FILL = "BDD7EE"  # the light blue of the printed SF-017 headers
@@ -212,10 +212,18 @@ def _money(n):
     return f"{n:,.2f}" if n else "-"
 
 
-def _section(title, body):
+def _section(title, body, marked=None):
     # "split": the PDF gives each line its own row so a section longer than a page can break across pages
-    return {"kind": "table", "header": [[title]], "rows": [[body or "Not provided"]], "widths": [100], "header_fill": PROPOSAL_FILL,
-            "split": True}
+    # "marked": the same text with <b>/<i>/<u> (richtext.rich_text_marks) for the PDF and Word; CSV and Excel use the body
+    block = {"kind": "table", "header": [[title]], "rows": [[body or "Not provided"]], "widths": [100], "header_fill": PROPOSAL_FILL,
+             "split": True}
+    if marked:
+        block["marked"] = marked
+    return block
+
+
+def _rich_section(title, value):
+    return _section(title, rich_text_lines(value), rich_text_marks(value))
 
 
 def _work_plan_block(data):
@@ -351,9 +359,9 @@ def proposal_form(project_id):
         _section("RESEARCH PRIORITY AREA", "\n".join(_box(code == data["research_priority_area"], label) for code, label in Project.PRIORITY_AREA_CHOICES)),
         _section("RESEARCH TYPOLOGY", "\n".join(_box(code in data["research_typology"], label) for code, label in Project.TYPOLOGY_CHOICES)),
         _section("SUSTAINABLE DEVELOPMENT GOALS (SDGs)", "; ".join(f"SDG {n} — {SDG_LABELS[n - 1]}" for n in data["sdgs"]) or "None selected"),
-        _section("II. BACKGROUND OF THE STUDY", rich_text_lines(data["background"])),
+        _rich_section("II. BACKGROUND OF THE STUDY", data["background"]),
         _section("III. OBJECTIVES OF THE STUDY", "\n".join(f"{i}. {o}" for i, o in enumerate(data["objectives"], start=1))),
-        _section("IV. PROJECT DESCRIPTIONS/METHODOLOGY", rich_text_lines(data["methodology"])),
+        _rich_section("IV. PROJECT DESCRIPTIONS/METHODOLOGY", data["methodology"]),
         {
             "kind": "table",
             "header": [["V. QUANTIFIABLE EXPECTED OUTPUTS: 6Ps", "", ""], ["ITEM", "PARTICULARS", "QUANTITY"]],
@@ -362,7 +370,7 @@ def proposal_form(project_id):
             "rows": outputs or [["Set under Research Outputs after registration, or through the Excel upload.", "", ""]],
             "widths": [25, 60, 15],
         },
-        _section("VI. SOCIO-ECONOMIC SIGNIFICANCE", rich_text_lines(data["socio_economic_significance"])),
+        _rich_section("VI. SOCIO-ECONOMIC SIGNIFICANCE", data["socio_economic_significance"]),
         {
             "kind": "table",
             "header": [["VII. TARGET BENEFICIARIES", ""], ["Target Beneficiaries", "Total"]],
@@ -371,8 +379,8 @@ def proposal_form(project_id):
             "rows": beneficiaries or [["None listed", ""]],
             "widths": [85, 15],
         },
-        _section("VIII. MONITORING/EVALUATION", rich_text_lines(data["monitoring_evaluation"])),
-        _section("IX. LIST OF REFERENCES", rich_text_lines(data["references"])),
+        _rich_section("VIII. MONITORING/EVALUATION", data["monitoring_evaluation"]),
+        _rich_section("IX. LIST OF REFERENCES", data["references"]),
         {
             "kind": "table",
             "header": [["X. BUDGET REQUIREMENTS"] + [""] * (budget_columns - 1),
@@ -730,6 +738,23 @@ def _shade(cell, color=HEADER_FILL):
     cell._tc.get_or_add_tcPr().append(shading)
 
 
+MARK_TAG = re.compile(r"(</?[biu]>)")
+
+
+def _add_marked_runs(paragraph, marked):
+    """Lines with <b>/<i>/<u> (richtext.rich_text_marks) as Word runs, a line break between lines."""
+    on = {"b": 0, "i": 0, "u": 0}
+    for n, line in enumerate(marked.split("\n")):
+        if n:
+            paragraph.add_run().add_break()
+        for part in MARK_TAG.split(line):
+            if MARK_TAG.fullmatch(part):
+                on[part.strip("</>")] += -1 if part[1] == "/" else 1
+            elif part:
+                run = paragraph.add_run(unescape(part))
+                run.bold, run.italic, run.underline = on["b"] > 0 or None, on["i"] > 0 or None, on["u"] > 0 or None
+
+
 def render_form_docx(form):
     from docx import Document
     from docx.enum.section import WD_ORIENT
@@ -788,7 +813,10 @@ def render_form_docx(form):
             for r, values in enumerate(block["rows"]):
                 cells = table.add_row().cells
                 for c, value in enumerate(values):
-                    cells[c].text = value
+                    if block.get("marked"):
+                        _add_marked_runs(cells[c].paragraphs[0], block["marked"])
+                    else:
+                        cells[c].text = value
                     cell_fill, bold = _cell_style(block, r, c)
                     if cell_fill:
                         _shade(cells[c], cell_fill)
@@ -868,12 +896,14 @@ def render_form_pdf(form):
             header = [[Paragraph(f"<b>{escape(v)}</b>", ParagraphStyle("th", parent=small, alignment=TA_CENTER))
                        for v in row] for row in block["header"]]
             def body_cell(r, c, v):
+                if block.get("marked"):
+                    return Paragraph(v, small)  # already escaped, only <b>/<i>/<u> left
                 return Paragraph(f"<b>{escape(v or '')}</b>", small) if _cell_style(block, r, c)[1] else p(v, small)
 
             rows = block["rows"]
             if block.get("split"):
                 # ReportLab can't break one table cell across pages (LayoutError, FRN-2026-005 2026-10-22)
-                rows = [[line] for line in rows[0][0].split("\n")]
+                rows = [[line] for line in block.get("marked", rows[0][0]).split("\n")]
             body = [[body_cell(r, c, v) for c, v in enumerate(row)] for r, row in enumerate(rows)]
             widths = block.get("widths") or [100 / width] * width
             usable = pagesize[0] - 80

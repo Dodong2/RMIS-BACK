@@ -1140,6 +1140,46 @@ class RichTextProposalTests(RMISTestCase):
         self.assertIn("Why this matters\n• Food", text)
         self.assertNotIn("<p>", text)
 
+    def test_marked_lines_keep_bold_italic_underline(self):
+        """Carl 2026-10-25 (Task 9): the SF-018 PDF/Word keep bold, italic and underline; links and strikethrough stay text."""
+        from reports.richtext import rich_text_marks
+
+        self.assertEqual(rich_text_marks("<p>We <strong>survey</strong> <em>farms</em> &amp; <u>fish</u></p><p><b>Both <i>marks</i></b></p>"),
+                         "We <b>survey</b> <i>farms</i> &amp; <u>fish</u>\n<b>Both <i>marks</i></b>")
+        self.assertEqual(rich_text_marks("<p><strong>One<br>Two</strong></p>"), "<b>One</b>\n<b>Two</b>")
+        self.assertEqual(rich_text_marks("<ul><li><p><em>Item</em></p></li></ul>"), "• <i>Item</i>")
+        self.assertEqual(rich_text_marks('<p><s>old</s> <a href="https://x.ph">site</a> &lt;tag&gt;</p>'), "old site &lt;tag&gt;")
+        self.assertEqual(rich_text_marks("Rice & corn < 50\nline 2"), "Rice &amp; corn &lt; 50\nline 2")
+
+    def test_sf018_word_keeps_bold_italic_underline(self):
+        import io
+
+        from docx import Document
+
+        from reports.forms import proposal_form, render_form_docx
+
+        Project.objects.filter(pk=self.project.pk).update(methodology="<p>We <strong>survey</strong> <em>farms</em> &amp; <u>fish</u></p>")
+
+        doc = Document(io.BytesIO(render_form_docx(proposal_form(self.project.pk))))
+        runs = {run.text: run for table in doc.tables for row in table.rows for cell in row.cells
+                for paragraph in cell.paragraphs for run in paragraph.runs}
+        self.assertTrue(runs["survey"].bold)
+        self.assertTrue(runs["farms"].italic)
+        self.assertTrue(runs["fish"].underline)
+        self.assertFalse(runs["We "].bold)
+        self.assertIn(" & ", runs)
+
+    def test_sf018_pdf_keeps_marks_and_still_breaks_across_pages(self):
+        from reports.forms import proposal_form, render_form_pdf
+
+        plain = render_form_pdf(proposal_form(self.project.pk))
+        Project.objects.filter(pk=self.project.pk).update(
+            background="".join(f"<p>Line {i} <strong>bold</strong> <em>italic</em> &amp; <u>under</u></p>" for i in range(150)))
+
+        marked = render_form_pdf(proposal_form(self.project.pk))
+        self.assertFalse(b"/Times-Italic" in plain)
+        self.assertTrue(b"/Times-Italic" in marked)  # the font dictionaries aren't compressed
+
 
 class DuplicateTitleTests(RMISTestCase):
     """Client 2026-10-24: a project whose title already exists can't be registered; spacing and capitals don't count."""
