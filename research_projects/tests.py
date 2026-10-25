@@ -1180,6 +1180,39 @@ class RichTextProposalTests(RMISTestCase):
         self.assertFalse(b"/Times-Italic" in plain)
         self.assertTrue(b"/Times-Italic" in marked)  # the font dictionaries aren't compressed
 
+    def test_appendix_f_word_keeps_bold_italic_underline(self):
+        """Carl 2026-10-25 (Task 9b): Appendix F's sections taken from the SF-018 keep their formatting too."""
+        import io
+
+        from docx import Document
+
+        from monitoring.models import TerminalReport
+        from reports.forms import appendix_f_form, render_form_docx
+
+        Project.objects.filter(pk=self.project.pk).update(methodology="<p>We <strong>survey</strong> <em>farms</em> &amp; <u>fish</u></p><p>Next line</p>")
+        TerminalReport.objects.create(project=self.project, submitted_by=self.leader)
+
+        doc = Document(io.BytesIO(render_form_docx(appendix_f_form(self.project.pk))))
+        runs = {run.text: run for paragraph in doc.paragraphs for run in paragraph.runs}
+        self.assertTrue(runs["survey"].bold)
+        self.assertTrue(runs["farms"].italic)
+        self.assertTrue(runs["fish"].underline)
+        self.assertFalse(runs["We "].bold)
+        self.assertIn("Next line", runs)
+
+    def test_appendix_f_pdf_keeps_marks(self):
+        from monitoring.models import TerminalReport
+        from reports.forms import appendix_f_form, render_form_pdf
+
+        TerminalReport.objects.create(project=self.project, submitted_by=self.leader)
+        plain = render_form_pdf(appendix_f_form(self.project.pk))
+        Project.objects.filter(pk=self.project.pk).update(
+            background="".join(f"<p>Line {i} <strong>bold</strong> <em>italic</em> &amp; <u>under</u></p>" for i in range(150)))
+
+        marked = render_form_pdf(appendix_f_form(self.project.pk))
+        self.assertFalse(b"/Times-Italic" in plain)
+        self.assertTrue(b"/Times-Italic" in marked)
+
 
 class DuplicateTitleTests(RMISTestCase):
     """Client 2026-10-24: a project whose title already exists can't be registered; spacing and capitals don't count."""

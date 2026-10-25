@@ -13,6 +13,8 @@ Block kinds:
       "bold_first" (bold first column; default: tables without a header). Rows here are body rows.
   {"kind": "heading", "text": str, "level": 1|2}            outline heading (SF-16)
   {"kind": "section", "heading": str, "body": str, "level": 1|2}  heading + text; blank body = space to write in
+  optional "marked" on a section or a one-column table: the body with <b>/<i>/<u> (richtext.rich_text_marks), drawn by
+      the PDF and Word; CSV and Excel keep using the plain body
   {"kind": "signatures", "items": [(label, name, role), ...]}
   {"kind": "footer", "parts": [left, center, right]}
   {"kind": "page_break"}
@@ -123,12 +125,12 @@ def appendix_f_form(project_id):
     objectives = "\n".join(f"{i}. {text}" for i, text in enumerate(_objectives(project), start=1))
     main_text = [
         ("Introduction", "", 1),
-        ("Project Rationale", rich_text_lines(project.background), 1),
+        ("Project Rationale", rich_text_lines(project.background), 1, rich_text_marks(project.background)),
         ("Research Framework", "", 1),
         ("Objectives of the Project/Study", objectives, 1),
         ("Conceptual Model", "", 1),
-        ("Significance of the Project/Study", rich_text_lines(project.socio_economic_significance), 1),
-        ("Research Methodology", rich_text_lines(project.methodology), 1),
+        ("Significance of the Project/Study", rich_text_lines(project.socio_economic_significance), 1, rich_text_marks(project.socio_economic_significance)),
+        ("Research Methodology", rich_text_lines(project.methodology), 1, rich_text_marks(project.methodology)),
         ("Research/Experimental Design", "", 2),
         ("Sampling Design (if applicable)", "", 2),
         ("Instruments and Procedures", "", 2),
@@ -137,9 +139,9 @@ def appendix_f_form(project_id):
         ("Summary of Findings", "", 1),
         ("Conclusion/s", "", 1),
         ("Recommendation/s", "", 1),
-        ("Literature Cited", rich_text_lines(project.references), 1),
+        ("Literature Cited", rich_text_lines(project.references), 1, rich_text_marks(project.references)),
     ]
-    contents = ["Acknowledgement", "Mentoring Beneficiaries", "Executive Summary"] + [h for h, _, _ in main_text]
+    contents = ["Acknowledgement", "Mentoring Beneficiaries", "Executive Summary"] + [h for h, *_ in main_text]
     blocks = [
         {"kind": "header", "lines": UNIVERSITY, "title": "TERMINAL REPORT"},
         {"kind": "line", "text": project.title},
@@ -168,7 +170,9 @@ def appendix_f_form(project_id):
         {"kind": "section", "heading": "Table of Contents", "body": "\n".join(contents), "level": 2},
         {"kind": "section", "heading": "Executive Summary", "body": report.narrative, "level": 2},
         {"kind": "heading", "text": "MAIN TEXT", "level": 1},
-        *({"kind": "section", "heading": h, "body": body or "", "level": level + 1} for h, body, level in main_text),
+        # a 4th value: the SF-018 rich text with <b>/<i>/<u> for the PDF and Word (Task 9b)
+        *({"kind": "section", "heading": h, "body": body or "", "level": level + 1, **({"marked": marked[0]} if marked and marked[0] else {})}
+          for h, body, level, *marked in main_text),
     ]
     return {"title": "Appendix F - Terminal Report", "landscape": False, "blocks": blocks}
 
@@ -835,7 +839,10 @@ def render_form_docx(form):
             heading = doc.add_heading(block["heading"], level=block["level"])
             for run in heading.runs:  # the form's headings are black, not Word's default blue
                 run.font.color.rgb = RGBColor(0, 0, 0)
-            if block["body"]:
+            if block.get("marked"):
+                for line in block["marked"].split("\n"):
+                    _add_marked_runs(doc.add_paragraph(), line)
+            elif block["body"]:
                 for chunk in block["body"].split("\n"):
                     para(chunk)
             else:
@@ -933,7 +940,10 @@ def render_form_pdf(form):
             elements.append(Paragraph(escape(block["text"]), h1))
         elif kind == "section":
             elements.append(Paragraph(escape(block["heading"]), h3 if block["level"] > 2 else h2))
-            elements.append(p(block["body"]) if block["body"] else Spacer(1, 48))
+            if block.get("marked"):
+                elements.append(Paragraph(block["marked"].replace("\n", "<br/>"), normal))  # already escaped
+            else:
+                elements.append(p(block["body"]) if block["body"] else Spacer(1, 48))
         elif kind == "signatures":
             items = block["items"]
             rows = [[label for label, _, _ in items], ["" for _ in items],
