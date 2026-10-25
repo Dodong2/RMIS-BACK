@@ -1,4 +1,4 @@
-> **STALE (2026-10-23):** the branch/push/migration workflow below is outdated. Work is on `main`, Carl pushes and runs every `migrate`, and tasks are gated by `dss/CLAUDE.md` (parent folder, `../CLAUDE.md`) (GO TASK N). Use this file only for module history.
+> **STALE (2026-10-23, still true 2026-10-25):** the branch/push/migration workflow and module notes below are history; the current state is in "Last thing done" at the bottom. Work is on `main`, Carl pushes and runs every `migrate`, and tasks are gated by `dss/CLAUDE.md` (parent folder, `../CLAUDE.md`) (GO TASK N). Use this file only for module history.
 
 # RMIS Backend — Current Status
 
@@ -266,14 +266,26 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-10-02: finished every code task of the 2026-10-01 client plan (T1–T18) plus the 2026-10-02 follow-ups (F1–F3
-SF-017/SF-16 exports and peso inputs; N1–N5 staff e-mails, % completed, calendar, accomplishment report, reminders) and
-the open notes (Leader Load without programs, 6Ps/work plan in the manual wizard, full-length 6P particulars, leader
-download of a staff accomplishment report). Full suite: 106 tests pass (2026-10-02, after
-the last commit). Older history (2026-09-29 deploy fixes, Option A) is in git log and the module bullets above.
+2026-10-23 to 2026-10-25, all on `main` (see `git log`). Full suite 2026-10-25: 416/416 OK in 169 s (local `rmis-testdb`).
+- Infrastructure: DRF rate limits (`c589363`, rates `48ad1a1`), tests on the local Docker Postgres (`215cc86`).
+- Registration fixes, Tasks 1-7: Work Log flow tests + reassigned tasks keep their hours (`c40bea6`, `8975e49`); Excel
+  template Category legend (`54cb00c`); "Not Applicable" wet/dry (`d165a65`, research_projects 0019); Work Plan Excel
+  (`c4f5a7d`, `0e77880`); rich text Sections II/IV/VI/VIII/IX, sanitized with nh3 (`45dc50f`); editable Excel dry run
+  (`572ed04`).
+- Tasks 8-13: SF-018 PDF for long sections (`caa3c87`); no duplicate titles (`58ece83`); Notice of Approval/NTP/MOA
+  document types (`9bf7326`, document_management 0006); project review status DERIVED from the current LIB chain +
+  registration locked after submit (`e057bb1`, `research_projects/workflow.py`); CRC Chair no longer registers
+  (`02673bf`, accounts 0024); Drafts hidden from crc_chair/finance_budget + Portfolio/Performance/Appendix G per user
+  (`6e9e3de`); work gate: no work until Reviews Completed (`f908c02`, deliverables `59658b0`, task Approve/Return
+  `0bb6b55`).
+- Task 9 (2026-10-25, `4a361b2`): SF-018 PDF and Word keep bold/italic/underline (`reports/richtext.py`
+  `rich_text_marks`); CSV/XLSX and Appendix F unchanged.
+- Docs: `dss/CLAUDE.md` backup at `docs/dss-CLAUDE.md` (`c19f511`, `d72fd51`, `f82b4ec`); CLAUDE.md Tests section (`15a5341`).
+- Frontend: nothing pending to consume. Every endpoint/field above already has its UI (rmis-frontend 2026-10-23/24).
+- Migrations: all applied by Carl (document_management 0006, accounts 0024, research_projects 0019 included).
 
 ## Next thing to do in this repo
-1. Carl: `manage.py migrate` (`outputs.0003`), then test with the guide's PART 3 (Checkpoints A–D in the todo).
-2. Fix whatever the testing finds; then the final sign-off item in the todo.
-3. Still open from before: project status/closure (leaders or CRC only), Capsule CV (Annex A), the "still to confirm"
-   constants, optional DPMIS traceability HTML.
+1. Carl: push `4a361b2`, then browser-check the SF-018 PDF/Word with bold, italic and underline in a Draft's Methodology.
+2. Optional, not approved yet: bold/italic in Appendix F (same fields); backend gate on `VerifyRecordView`;
+   read-only check of the 1.9-3.2 s GET latency and doubled daphne access-log lines.
+3. Wait for the client's next changes. Every task goes through `dss/CLAUDE.md` (plan -> GO TASK N -> report -> STOP).
