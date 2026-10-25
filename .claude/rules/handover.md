@@ -279,13 +279,17 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   (`6e9e3de`); work gate: no work until Reviews Completed (`f908c02`, deliverables `59658b0`, task Approve/Return
   `0bb6b55`).
 - Task 9 (2026-10-25, `4a361b2`): SF-018 PDF and Word keep bold/italic/underline (`reports/richtext.py`
-  `rich_text_marks`); CSV/XLSX and Appendix F unchanged.
+  `rich_text_marks`); CSV/XLSX unchanged.
+- Task 9b (2026-10-25, `9a9a112`): Appendix F (Terminal Report) PDF and Word keep them too in Project Rationale,
+  Significance, Research Methodology and Literature Cited (section blocks with "marked"). No Terminal Report exists in
+  the DB yet, so a browser check needs a certified project + a Terminal Report first.
 - Docs: `dss/CLAUDE.md` backup at `docs/dss-CLAUDE.md` (`c19f511`, `d72fd51`, `f82b4ec`); CLAUDE.md Tests section (`15a5341`).
 - Frontend: nothing pending to consume. Every endpoint/field above already has its UI (rmis-frontend 2026-10-23/24).
 - Migrations: all applied by Carl (document_management 0006, accounts 0024, research_projects 0019 included).
 
 ## Next thing to do in this repo
-1. Carl: push `4a361b2`, then browser-check the SF-018 PDF/Word with bold, italic and underline in a Draft's Methodology.
-2. Optional, not approved yet: bold/italic in Appendix F (same fields); backend gate on `VerifyRecordView`;
+1. Carl: push (`4a361b2`, `9f2552d`, `9a9a112`, this handover), then browser-check the SF-018 PDF/Word with bold,
+   italic and underline in a Draft's Methodology, and Appendix F once a Terminal Report exists.
+2. Optional, not approved yet: backend gate on `VerifyRecordView`;
    read-only check of the 1.9-3.2 s GET latency and doubled daphne access-log lines.
 3. Wait for the client's next changes. Every task goes through `dss/CLAUDE.md` (plan -> GO TASK N -> report -> STOP).
