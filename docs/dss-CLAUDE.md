@@ -17,24 +17,26 @@ Applies to every session under `dss/` (rmis-backend, rmis-frontend, rmis-realtim
 - `RMIS chap1/CLAUDE.md` only points back here.
 - Backup: this file has a copy at `rmis-backend/docs/dss-CLAUDE.md`. Whenever this file changes, update the copy in the same task and commit it in rmis-backend.
 
-## ROLES (fixed, 12)
+## ROLES (fixed, 9)
 
 | # | Code | Label |
 |---|---|---|
 | 1 | `system_admin` | System Admin |
 | 2 | `vprei` | VP for REI |
 | 3 | `university_admin` | University Administration |
-| 4 | `drd` | DRD |
-| 5 | `crc_chair` | CRC Chairperson |
-| 6 | `riuh` | RIUH |
-| 7 | `finance_budget` | Finance/Accounting/Budget |
-| 8 | `procurement_officer_lib` | Procurement Officer - LIB |
-| 9 | `program_leader` | Program Leader |
-| 10 | `project_leader` | Project Leader |
-| 11 | `study_leader` | Study Leader |
-| 12 | `project_staff` | Project Staff |
+| 4 | `crc_chair` | CRC/CRD |
+| 5 | `riuh` | RIUH |
+| 6 | `finance_budget` | Finance/Accounting/Budget |
+| 7 | `procurement_officer_lib` | Procurement Officer - LIB |
+| 8 | `project_leader` | Project Leader/Program Leader/Study Leader |
+| 9 | `project_staff` | Project Staff |
 
-Never invent, rename or merge a role. These codes and labels match `rmis-backend/accounts/management/commands/seed_roles.py` and `rmis-frontend/src/lib/roles.ts`. Every plan names the affected roles by code.
+Client decision on 2026-10-27 (accounts 0026/0027): 12 roles became 9.
+- `drd` merged into `crc_chair` ("CRC/CRD"). It kept the CRC Chair's permissions only, so it got none of DRD's own and no `projects.register`.
+- `program_leader` and `study_leader` merged into `project_leader`, who sees only the projects they lead.
+- CRC/CRD, Finance, RIUH and Procurement are scoped to their `User.campus`. A project's campus is its Project Leader's campus.
+
+Never invent, rename or merge a role without a client decision. These codes and labels match `rmis-backend/accounts/management/commands/seed_roles.py` and `rmis-frontend/src/lib/roles.ts`. Every plan names the affected roles by code.
 
 ## SPEC SOURCES (what to follow)
 
