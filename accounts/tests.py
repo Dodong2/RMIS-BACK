@@ -10,7 +10,7 @@ from accounts.models import AuditLog, Role, RolePermission, TemporaryReplacement
 from accounts.permission_seed import PERMISSIONS
 from accounts.permissions import scoped_projects
 from accounts.testing import FAST_HASHER, PASSWORD, RMISTestCase
-from research_projects.models import Project
+from research_projects.models import CollegeUnit, Project
 
 
 @FAST_HASHER
@@ -39,13 +39,86 @@ class SeedRolesTests(TestCase):
 
 
 class RegistrationTests(RMISTestCase):
+    def setUp(self):
+        super().setUp()
+        CollegeUnit.objects.create(code="CCS", title="College of Computer Studies")
+
     def register(self, **overrides):
         data = {
             "email": "New.Researcher@lspu.test", "password": PASSWORD, "password2": PASSWORD,
-            "first_name": "Aimee Concepcion", "last_name": "Chavez",
+            "first_name": "Aimee Concepcion", "last_name": "Chavez", "gender": "female", "campus": "Siniloan",
+            "college_unit": "CCS - College of Computer Studies", "mobile_number": "09171234567", "staff_id": "123456",
+            "requested_role": Role.objects.get(code="project_staff").id,
         }
         data.update(overrides)
         return APIClient().post("/api/auth/register/", data, format="json")
+
+    def test_register_stores_the_new_required_fields(self):
+        response = self.register(mobile_number="+639171234567")
+
+        self.assertEqual(response.status_code, 201)
+        user = User.objects.get(email="new.researcher@lspu.test")
+        self.assertEqual(
+            (user.gender, user.campus, user.college_unit, user.mobile_number, user.staff_id, user.requested_role.code),
+            ("female", "Siniloan", "CCS - College of Computer Studies", "+639171234567", "123456", "project_staff"),
+        )
+        self.assertIsNone(user.email_verified_at)
+
+    def test_every_new_field_is_required(self):
+        for field in ("gender", "campus", "college_unit", "mobile_number", "staff_id", "requested_role"):
+            with self.subTest(field=field):
+                response = self.register(**{field: ""})
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.data)
+        self.assertFalse(User.objects.filter(email="new.researcher@lspu.test").exists())
+
+    def test_register_rejects_values_outside_the_lists_and_formats(self):
+        cases = [
+            ("gender", "other"), ("campus", "Manila"), ("college_unit", "College of Nowhere"),
+            ("mobile_number", "0917123456"), ("staff_id", "12345"), ("staff_id", "abcdef"),
+        ]
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                response = self.register(**{field: value})
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.data)
+        self.assertFalse(User.objects.filter(email="new.researcher@lspu.test").exists())
+
+    def test_system_admin_cannot_be_requested(self):
+        response = self.register(requested_role=Role.objects.get(code="system_admin").id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("requested_role", response.data)
+
+    def test_staff_id_must_be_unique(self):
+        self.make_user("project_leader", staff_id="123456")
+
+        response = self.register()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["staff_id"], ["This Staff ID is already registered."])
+
+    def test_register_runs_the_password_rules(self):
+        for weak in ("short1", "12345678901", "password123"):
+            with self.subTest(password=weak):
+                response = self.register(password=weak, password2=weak)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("password", response.data)
+        self.assertFalse(User.objects.filter(email="new.researcher@lspu.test").exists())
+
+    def test_registration_options_are_public_and_never_offer_system_admin(self):
+        response = APIClient().get("/api/auth/registration-options/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["campuses"], ["San Pablo City", "Siniloan", "Los Baños", "Sta. Cruz"])
+        self.assertEqual(response.data["college_units"], ["CCS - College of Computer Studies"])
+        codes = [role["code"] for role in response.data["roles"]]
+        self.assertNotIn("system_admin", codes)
+        self.assertEqual(len(codes), Role.objects.count() - 1)
+        self.assertEqual([g["value"] for g in response.data["genders"]], ["male", "female"])
 
     def test_register_creates_an_inactive_pending_user_and_emails_admins(self):
         self.make_user("system_admin", email="admin@lspu.test")
@@ -53,7 +126,7 @@ class RegistrationTests(RMISTestCase):
 
         response = self.register(requested_role=role.id)
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.data)
         user = User.objects.get(email="new.researcher@lspu.test")
         self.assertFalse(user.is_active)
         self.assertTrue(user.is_pending_role)
@@ -403,6 +476,26 @@ class UserPickerTests(RMISTestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual((response.data["full_name"], response.data["position"]), ("Grace Esmade", "Instructor I"))
         self.assertEqual(denied.status_code, 403)
+
+    def test_admin_sets_a_staff_id_and_clearing_it_leaves_no_clash(self):
+        """The System Admin account predates Staff IDs and gets 000000 (Carl, 2026-10-27)."""
+        admin = self.make_user("system_admin")
+        client = self.client_for(admin)
+        url = f"/api/admin/users/{admin.id}/profile/"
+
+        response = client.patch(url, {"staff_id": "000000", "campus": "Sta. Cruz"}, format="json")
+        bad = client.patch(url, {"staff_id": "0000", "college_unit": "Not a unit"}, format="json")
+        other = self.make_user("project_staff")
+        client.patch(url, {"staff_id": ""}, format="json")
+        cleared = client.patch(f"/api/admin/users/{other.id}/profile/", {"staff_id": ""}, format="json")
+
+        self.assertEqual((response.status_code, response.data["staff_id"], response.data["campus"]),
+                         (200, "000000", "Sta. Cruz"))
+        self.assertEqual(bad.status_code, 400)
+        self.assertEqual(set(bad.data), {"staff_id", "college_unit"})
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(list(User.objects.filter(pk__in=[admin.pk, other.pk]).values_list("staff_id", flat=True)),
+                         [None, None])
 
     def test_people_picker_lists_every_active_account_with_a_display_name(self):
         """Client meeting 2026-10-01 (#6): the team picker offers any registered account, not only leaders."""

@@ -1,6 +1,8 @@
 import requests as http
 from django.conf import settings
-from django.db import transaction
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils.crypto import get_random_string
 from rest_framework import generics
@@ -11,8 +13,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import AuditLog, Permission, Role, RolePermission, TemporaryReplacement, User
 from .serializers import (
-    AuditLogSerializer, RoleSerializer, PendingUserSerializer, TemporaryReplacementSerializer, UserListSerializer,
-    UserProfileSerializer, UserScopeSerializer,
+    AuditLogSerializer, RoleSerializer, PendingUserSerializer, RegistrationProfileSerializer,
+    TemporaryReplacementSerializer, UserListSerializer, UserProfileSerializer, UserScopeSerializer,
 )
 from .permissions import HasRole
 from config.concurrency import lock
@@ -29,7 +31,6 @@ class RegisterView(APIView):
         last_name = request.data.get("last_name", "").strip()
         password = request.data.get("password")
         password2 = request.data.get("password2")
-        requested_role_id = request.data.get("requested_role")
 
         if not email or not password or not password2:
             return Response({"detail": "Email and password are required."}, status=400)
@@ -39,21 +40,29 @@ class RegisterView(APIView):
             return Response({"detail": "Passwords do not match."}, status=400)
         if User.objects.filter(email=email).exists():
             return Response({"detail": "Email already registered."}, status=400)
+        profile = RegistrationProfileSerializer(data=request.data)
+        if not profile.is_valid():
+            return Response(profile.errors, status=400)
+        try:
+            validate_password(password, User(email=email, first_name=first_name, last_name=last_name))
+        except DjangoValidationError as error:
+            return Response({"password": error.messages}, status=400)
 
-        requested_role = Role.objects.filter(id=requested_role_id).first() if requested_role_id else None
         username = f"{email.split('@')[0]}_{get_random_string(5)}"
-
-        user = User.objects.create_user(
-            username=username,
-            email=email,
-            password=password,
-            first_name=first_name[:150],
-            last_name=last_name[:150],
-            is_active=False,
-            is_pending_role=True,
-            registration_method="email",
-            requested_role=requested_role,
-        )
+        try:
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                first_name=first_name[:150],
+                last_name=last_name[:150],
+                is_active=False,
+                is_pending_role=True,
+                registration_method="email",
+                **profile.validated_data,
+            )
+        except IntegrityError:  # the same e-mail or Staff ID registered at the same moment
+            return Response({"detail": "Email or Staff ID already registered."}, status=400)
 
         notify_admins_new_registration(user)
 
@@ -135,6 +144,23 @@ class GoogleExchangeView(APIView):
 
         refresh = RefreshToken.for_user(user)
         return Response({"access": str(refresh.access_token), "refresh": str(refresh)})
+
+
+class RegistrationOptionsView(APIView):
+    """Dropdowns for the public registration form (client 2026-10-27): the fixed campuses, the System Admin's College
+    Units and the roles that can be requested (not System Admin)."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from research_projects.models import CollegeUnit
+
+        return Response({
+            "campuses": [value for value, _label in User.CAMPUS_CHOICES],
+            "college_units": list(CollegeUnit.objects.values_list("name", flat=True)),
+            "roles": RoleSerializer(Role.objects.exclude(code="system_admin").order_by("id"), many=True).data,
+            "genders": [{"value": value, "label": label} for value, label in User.GENDER_CHOICES],
+        })
 
 
 class RolesListView(generics.ListAPIView):
@@ -307,8 +333,9 @@ class PermissionMatrixView(APIView):
 
 
 class UserProfileView(APIView):
-    """PATCH {first_name, last_name, office, position}: the admin fills in who an account is, for the people pickers
-    and the Annex A endorser auto-fill (client meeting 2026-10-01)."""
+    """PATCH {first_name, last_name, office, position, staff_id, gender, campus, college_unit, mobile_number}: the admin
+    fills in who an account is, for the people pickers and the Annex A endorser auto-fill (client meeting 2026-10-01;
+    registration fields 2026-10-27)."""
 
     permission_classes = [HasRole("accounts.manage_users")]
 

@@ -1,6 +1,14 @@
 from django.contrib.auth.models import AbstractUser
 from django.core.serializers.json import DjangoJSONEncoder
+from django.core.validators import RegexValidator
 from django.db import models
+
+# Registration fields (client 2026-10-27). Staff ID is 6 digits until the client gives the real format; change only
+# these two lines then.
+STAFF_ID_PATTERN = r"^\d{6}$"
+STAFF_ID_MESSAGE = "Staff ID must be 6 digits."
+MOBILE_PATTERN = r"^(09|\+639)\d{9}$"
+MOBILE_MESSAGE = "Enter a mobile number like 09171234567 or +639171234567."
 
 
 class Role(models.Model):
@@ -32,10 +40,30 @@ class User(AbstractUser):
         ("active", "Active"),
         ("suspended", "Suspended"),
         ("deactivated", "Deactivated"),
+        ("rejected", "Rejected"),
     )
     account_status = models.CharField(max_length=20, choices=ACCOUNT_STATUS_CHOICES, default="active")
     office = models.CharField(max_length=150, blank=True, help_text="Office/department (college, unit, campus office)")
     position = models.CharField(max_length=150, blank=True, help_text="Plantilla/academic position, e.g. Associate Professor II")
+
+    GENDER_CHOICES = (("male", "Male"), ("female", "Female"))
+    # The four LSPU campuses, spelled like the project registration's campus cards (Project.campus).
+    CAMPUS_CHOICES = (
+        ("San Pablo City", "San Pablo City"),
+        ("Siniloan", "Siniloan"),
+        ("Los Baños", "Los Baños"),
+        ("Sta. Cruz", "Sta. Cruz"),
+    )
+    # Required on registration (client 2026-10-27), blank only for accounts made before it.
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True)
+    campus = models.CharField(max_length=100, choices=CAMPUS_CHOICES, blank=True)
+    college_unit = models.CharField(max_length=100, blank=True, help_text="A CollegeUnit name, kept as text")
+    mobile_number = models.CharField(max_length=13, blank=True, validators=[RegexValidator(MOBILE_PATTERN, MOBILE_MESSAGE)])
+    staff_id = models.CharField(
+        max_length=20, unique=True, null=True, blank=True, validators=[RegexValidator(STAFF_ID_PATTERN, STAFF_ID_MESSAGE)],
+        error_messages={"unique": "This Staff ID is already registered."},
+    )
+    email_verified_at = models.DateTimeField(null=True, blank=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]

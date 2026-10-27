@@ -28,13 +28,41 @@ class EmailLoginSerializer(LoginSerializer):
         return user.email if user else value
 
 
+PROFILE_FIELDS = ["staff_id", "gender", "campus", "college_unit", "mobile_number"]
+
+
+def validate_college_unit(value):
+    from research_projects.models import CollegeUnit
+
+    if value and not CollegeUnit.objects.filter(name=value).exists():
+        raise serializers.ValidationError("Pick a College Unit from the list.")
+    return value
+
+
+class RegistrationProfileSerializer(serializers.ModelSerializer):
+    """The registration fields besides name, e-mail and password (client 2026-10-27). All required; System Admin
+    can't be requested, only assigned."""
+
+    requested_role = serializers.PrimaryKeyRelatedField(
+        queryset=Role.objects.exclude(code="system_admin"),
+        error_messages={"does_not_exist": "Pick one of the listed roles.", "incorrect_type": "Pick one of the listed roles."},
+    )
+
+    class Meta:
+        model = User
+        fields = [*PROFILE_FIELDS, "requested_role"]
+        extra_kwargs = {field: {"required": True, "allow_blank": False} for field in PROFILE_FIELDS}
+
+    validate_college_unit = staticmethod(validate_college_unit)
+
+
 class PendingUserSerializer(serializers.ModelSerializer):
     requested_role = RoleSerializer(read_only=True)
     full_name = serializers.CharField(source="display_name", read_only=True)
 
     class Meta:
         model = User
-        fields = ["id", "email", "full_name", "registration_method", "requested_role", "date_joined"]
+        fields = ["id", "email", "full_name", "registration_method", "requested_role", "date_joined", *PROFILE_FIELDS]
 
 
 class UserListSerializer(serializers.ModelSerializer):
@@ -45,7 +73,7 @@ class UserListSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "id", "email", "full_name", "first_name", "last_name", "role", "office", "position", "scope", "is_active",
-            "account_status", "date_joined",
+            "account_status", "date_joined", *PROFILE_FIELDS,
         ]
 
 
@@ -54,7 +82,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["first_name", "last_name", "office", "position"]
+        fields = ["first_name", "last_name", "office", "position", *PROFILE_FIELDS]
+
+    validate_college_unit = staticmethod(validate_college_unit)
+
+    def validate_staff_id(self, value):
+        return value or None  # cleared = NULL, so several accounts without one don't clash on the unique column
 
 
 class UserScopeSerializer(serializers.Serializer):

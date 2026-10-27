@@ -66,7 +66,7 @@ class ApiSweepTests(RMISTestCase):
 
     def test_every_route_requires_login_except_the_public_auth_ones(self):
         public = {
-            "/api/auth/register/", "/api/auth/google/request/", "/api/auth/google/exchange/", "/api/roles/",
+            "/api/auth/register/", "/api/auth/registration-options/", "/api/auth/google/request/", "/api/auth/google/exchange/", "/api/roles/",
             "/api/auth/login/", "/api/auth/logout/", "/api/auth/token/verify/", "/api/auth/token/refresh/",
         }
         open_routes = []
