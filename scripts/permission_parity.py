@@ -32,8 +32,8 @@ for code, (_module, _name, source) in PERMISSIONS.items():
             diffs.append(f"{code} / {role}: constant={in_constant} db={in_db}")
 
 print(f"{len(role_codes)} roles x {len(PERMISSIONS)} permissions checked")
-if len(role_codes) != 12:
-    diffs.append(f"expected 12 roles in DB, found {len(role_codes)}")
+if len(role_codes) != 9:  # 9 roles since 2026-10-27 (12 before; accounts 0026/0027)
+    diffs.append(f"expected 9 roles in DB, found {len(role_codes)}")
 for d in diffs:
     print("DIFF", d)
 print(f"{len(diffs)} differences")
