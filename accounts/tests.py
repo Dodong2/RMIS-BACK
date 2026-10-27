@@ -3,6 +3,7 @@ from unittest import mock
 
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
@@ -277,10 +278,77 @@ class EmailVerificationTests(RMISTestCase):
         self.assertEqual(response.status_code, 401)
 
 
+class PendingDecisionTests(RMISTestCase):
+    """Pending list, Approve and Reject follow e-mail verification (client 2026-10-27)."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.client_for(self.make_user("system_admin", email="admin@lspu.test"))
+        self.verified = self.make_user(None, email="verified@lspu.test", is_active=False, email_verified_at=timezone.now())
+        self.unverified = self.make_user(None, email="unverified@lspu.test", is_active=False)
+        self.role = Role.objects.get(code="project_leader")
+
+    def reject(self, user, client=None, **data):
+        with self.captureOnCommitCallbacks(execute=True):
+            return (client or self.admin).post(f"/api/admin/pending-users/{user.id}/reject/", data, format="json")
+
+    def approve(self, user):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.admin.patch(f"/api/admin/pending-users/{user.id}/assign-role/", {"role_id": self.role.id},
+                                    format="json")
+
+    def test_pending_list_shows_only_verified_undecided_registrations(self):
+        rejected = self.make_user(None, email="rejected@lspu.test", is_active=False, email_verified_at=timezone.now(),
+                                  account_status="rejected")
+
+        emails = [row["email"] for row in self.admin.get("/api/admin/pending-users/").data]
+
+        self.assertEqual(emails, ["verified@lspu.test"])
+        self.assertNotIn(rejected.email, [row["email"] for row in self.admin.get("/api/admin/users/").data])
+
+    def test_unverified_registration_cannot_be_approved(self):
+        response = self.approve(self.unverified)
+
+        self.assertEqual(response.status_code, 400)
+        self.unverified.refresh_from_db()
+        self.assertFalse(self.unverified.is_active)
+        self.brevo_post.assert_not_called()
+
+    def test_reject_blocks_login_and_emails_the_reason_once(self):
+        response = self.reject(self.verified, reason="Not an LSPU employee <b>")
+        again = self.reject(self.verified)
+        approve = self.approve(self.verified)
+        login = APIClient().post("/api/auth/login/", {"email": "verified@lspu.test", "password": PASSWORD}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((again.status_code, approve.status_code), (400, 400))
+        self.verified.refresh_from_db()
+        self.assertEqual((self.verified.account_status, self.verified.is_active), ("rejected", False))
+        self.assertEqual(self.brevo_post.call_count, 1)
+        mail = self.brevo_post.call_args.kwargs["json"]
+        self.assertEqual(mail["to"][0]["email"], "verified@lspu.test")
+        self.assertIn("Not an LSPU employee &lt;b&gt;", mail["htmlContent"])
+        self.assertEqual(login.data["account_state"], ["rejected"])
+
+    def test_confirmed_account_cannot_be_rejected(self):
+        self.approve(self.verified)
+
+        self.assertEqual(self.reject(self.verified).status_code, 400)
+        self.verified.refresh_from_db()
+        self.assertTrue(self.verified.is_active)
+
+    def test_only_the_system_admin_rejects(self):
+        response = self.reject(self.verified, client=self.client_for(self.make_user("crc_chair")))
+
+        self.assertEqual(response.status_code, 403)
+        self.verified.refresh_from_db()
+        self.assertEqual(self.verified.account_status, "active")
+
+
 class AdminConfirmationTests(RMISTestCase):
     def test_admin_assigning_a_role_activates_the_user_and_sends_confirmation(self):
         admin = self.make_user("system_admin")
-        pending = self.make_user(None, email="pending@lspu.test", is_active=False)
+        pending = self.make_user(None, email="pending@lspu.test", is_active=False, email_verified_at=timezone.now())
         role = Role.objects.get(code="project_leader")
 
         with self.captureOnCommitCallbacks(execute=True):  # the e-mail goes out only after the approval commits
@@ -297,7 +365,7 @@ class AdminConfirmationTests(RMISTestCase):
 
     def test_confirmed_user_can_then_log_in(self):
         admin = self.make_user("system_admin")
-        pending = self.make_user(None, email="pending@lspu.test", is_active=False)
+        pending = self.make_user(None, email="pending@lspu.test", is_active=False, email_verified_at=timezone.now())
         self.client_for(admin).patch(
             f"/api/admin/pending-users/{pending.id}/assign-role/",
             {"role_id": Role.objects.get(code="project_leader").id}, format="json",
@@ -309,7 +377,7 @@ class AdminConfirmationTests(RMISTestCase):
 
     def test_non_admin_cannot_assign_roles(self):
         leader = self.make_user("project_leader")
-        pending = self.make_user(None, email="pending@lspu.test", is_active=False)
+        pending = self.make_user(None, email="pending@lspu.test", is_active=False, email_verified_at=timezone.now())
 
         response = self.client_for(leader).patch(
             f"/api/admin/pending-users/{pending.id}/assign-role/",

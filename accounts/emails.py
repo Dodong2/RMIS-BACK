@@ -76,3 +76,15 @@ def send_verification_email(user):
         f"<p>If you didn't register for RMIS, ignore this e-mail.</p>"
     )
     return send_brevo_email(user.email, "Verify your RMIS e-mail address", html)
+
+
+def send_rejection_email(user, reason=""):
+    from django.utils.html import escape
+
+    why = f"<p>Reason: {escape(reason)}</p>" if reason else ""
+    html = (
+        f"<p>Hi {escape(user.get_full_name())},</p>"
+        f"<p>Your RMIS registration was not approved.</p>{why}"
+        f"<p>If you think this is a mistake, contact the RMIS System Admin.</p>"
+    )
+    return send_brevo_email(user.email, "Your RMIS registration was not approved", html)

@@ -21,7 +21,9 @@ from .serializers import (
 )
 from .permissions import HasRole
 from config.concurrency import lock
-from .emails import notify_admins_new_registration, send_role_confirmation_email, send_verification_email
+from .emails import (
+    notify_admins_new_registration, send_rejection_email, send_role_confirmation_email, send_verification_email,
+)
 from .tokens import email_verification_token
 
 
@@ -227,9 +229,11 @@ class RolesListView(generics.ListAPIView):
 
 
 class PendingUsersListView(generics.ListAPIView):
+    """Registrations waiting for the System Admin: e-mail verified, not yet approved or rejected (client 2026-10-27)."""
+
     serializer_class = PendingUserSerializer
     permission_classes = [HasRole("accounts.manage_users")]
-    queryset = User.objects.filter(is_pending_role=True)
+    queryset = User.objects.filter(is_pending_role=True, account_status="active", email_verified_at__isnull=False)
 
 
 class UsersListView(generics.ListAPIView):
@@ -247,8 +251,12 @@ class AssignRoleView(APIView):
         role = get_object_or_404(Role, id=role_id)
         # Locked and pending-only: confirming twice (double click, two admins) can't send two e-mails.
         user = lock(User.objects.all(), id=user_id)
+        if user.account_status == "rejected":
+            return Response({"detail": "This registration was rejected."}, status=400)
         if not user.is_pending_role:
             return Response({"detail": "This registration was already confirmed."}, status=400)
+        if user.email_verified_at is None:
+            return Response({"detail": "This e-mail address isn't verified yet."}, status=400)
 
         user.role = role
         user.is_pending_role = False
@@ -260,6 +268,28 @@ class AssignRoleView(APIView):
         return Response({"detail": "Role assigned and confirmation sent."})
     
     
+class RejectRegistrationView(APIView):
+    """POST {reason?}: the System Admin turns a pending registration down (client 2026-10-27). The account stays a
+    never-confirmed registration (is_pending_role) with account_status "rejected", so it is in neither the Pending nor
+    the Users list and can't log in; the e-mail can't be registered again."""
+
+    permission_classes = [HasRole("accounts.manage_users")]
+
+    @transaction.atomic
+    def post(self, request, user_id):
+        user = lock(User.objects.all(), id=user_id)
+        if not user.is_pending_role or user.account_status != "active":
+            return Response({"detail": "This registration was already decided."}, status=400)
+        reason = str(request.data.get("reason", "")).strip()[:1000]
+
+        user.account_status = "rejected"
+        user.is_active = False
+        user.save(update_fields=["account_status", "is_active"])
+        transaction.on_commit(lambda: send_rejection_email(user, reason))
+
+        return Response({"detail": "Registration rejected and the applicant notified."})
+
+
 class UpdateUserRoleView(APIView):
     permission_classes = [HasRole("accounts.manage_users")]
  

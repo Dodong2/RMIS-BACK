@@ -107,7 +107,7 @@ class ConflictHandlerTests(RMISTestCase):
 class AssignRoleOnceTests(RMISTestCase):
     def test_confirming_a_registration_twice_sends_one_email(self):
         admin = self.client_for(self.make_user("system_admin"))
-        pending = self.make_user(None)
+        pending = self.make_user(None, email_verified_at=timezone.now())
         role = Role.objects.get(code="project_leader")
         url = f"/api/admin/pending-users/{pending.id}/assign-role/"
 
