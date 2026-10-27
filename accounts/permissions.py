@@ -31,8 +31,9 @@ def role_can(user, permission_code):
 # Row-level scope for budget/financial data (client clarification Q12, Q1c).
 # Leaders see only projects they lead (directly, or via a study/program they lead); project_staff see
 # no budget data (unless acting for a suspended leader); campus-level roles are limited to User.scope["campus"] and/or ["college"] when an admin has set them.
-# Everyone else (system_admin, vprei, drd, university_admin) is university-wide.
-LEADER_ROLES = ["program_leader", "project_leader", "study_leader"]
+# Everyone else (system_admin, vprei, university_admin) is university-wide.
+# Client 2026-10-27: one leader role (Program and Study Leaders merged into the Project Leader).
+LEADER_ROLES = ["project_leader"]
 CAMPUS_SCOPED_ROLES = ["crc_chair", "finance_budget", "procurement_officer_lib", "riuh"]
 
 
@@ -95,10 +96,10 @@ def visible_projects(user):
 
     code = user.role.code if user.role else None
     if code == "project_leader":
-        # Client 2026-10-18: a Project Leader sees only the projects they lead (or lead as acting replacement), not
-        # ones where they are listed as Co-Project Leader or team member.
+        # Client 2026-10-18, kept for the merged leader role 2026-10-27: a leader sees only the projects they lead (or
+        # lead as acting replacement), not ones where they are listed as Co-Project Leader or team member.
         return Project.objects.filter(lead__in=[user.pk, *acting_for(user)])
-    if code in LEADER_ROLES or code == "project_staff":
+    if code == "project_staff":
         leads = [user.pk, *acting_for(user)]
         return Project.objects.filter(
             Q(lead__in=leads) | Q(studies__lead__in=leads) | Q(program__lead__in=leads)
@@ -148,7 +149,7 @@ class BudgetScopedMixin:
 
 
 # Document visibility by sensitivity level (client clarification Q8).
-UNIVERSITY_WIDE_ROLES = ["system_admin", "vprei", "drd", "university_admin"]
+UNIVERSITY_WIDE_ROLES = ["system_admin", "vprei", "university_admin"]
 # The Research Proposal Form saved on register: only these roles, plus the project's own leader (client 2026-10-09)
 PROPOSAL_FORM_ROLES = ["system_admin", "riuh", "crc_chair"]
 

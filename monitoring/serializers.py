@@ -13,18 +13,18 @@ from .models import (
 )
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-REPORT_ROLES = ["system_admin", "riuh", "project_leader", "study_leader", "project_staff"]
+REPORT_ROLES = ["system_admin", "riuh", "project_leader", "project_staff"]
 TERMINAL_CERTIFY_ROLES = ["system_admin", "riuh"]
-EVALUATION_PANEL_ROLES = ["system_admin", "vprei", "drd", "crc_chair"]
-RENEWAL_DECISION_ROLES = ["system_admin", "riuh", "drd", "vprei"]
-EXTENSION_REQUEST_ROLES = ["system_admin", "program_leader", "project_leader"]
-EXTENSION_ENDORSE_ROLES = ["system_admin", "drd", "crc_chair"]  # DRD, or the campus coordinator
+EVALUATION_PANEL_ROLES = ["system_admin", "vprei", "crc_chair"]
+RENEWAL_DECISION_ROLES = ["system_admin", "riuh", "vprei"]
+EXTENSION_REQUEST_ROLES = ["system_admin", "project_leader"]
+EXTENSION_ENDORSE_ROLES = ["system_admin", "crc_chair"]  # CRC/CRD (DRD merged in 2026-10-27)
 EXTENSION_APPROVE_ROLES = ["system_admin", "university_admin"]  # University President
 # R&D Quarterly Progress Reports (2026-10-14; Structure Module 9 + Clarification 1a/1b/1c). No system_admin: the
 # Project Leader prepares, RIUH / CRC Chair review and endorse, DRD / VPREI review and give final approval.
 QUARTERLY_PREPARE_ROLES = ["project_leader"]
-QUARTERLY_REVIEW_ROLES = ["riuh", "crc_chair", "drd", "vprei"]
-QUARTERLY_APPROVE_ROLES = ["drd", "vprei"]
+QUARTERLY_REVIEW_ROLES = ["riuh", "crc_chair", "vprei"]
+QUARTERLY_APPROVE_ROLES = ["vprei"]  # CRC/CRD reviews only (client 2026-10-27)
 EXTENSION_MIN_LEAD_DAYS = 30  # "approved one (1) month before the expected date of project termination"
 
 

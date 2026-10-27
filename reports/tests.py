@@ -270,7 +270,7 @@ class ProposalFormTests(RMISTestCase):
 
         staff = self.make_user("project_staff")
         ProjectAssignment.objects.create(project=self.project, user=staff, start_date=date.today())
-        for user in (self.make_user("vprei"), self.make_user("drd"), self.make_user("university_admin"), staff):
+        for user in (self.make_user("vprei"), self.make_user("university_admin"), staff):
             client = self.client_for(user)
             listed = client.get("/api/documents/documents/", {"project": self.project.pk}).data
             self.assertEqual([d for d in listed if d["document_type"] == "proposal_form"], [], user.role.code)

@@ -10,7 +10,7 @@ from research_projects.models import Program, Project
 
 from .models import PersonnelChange, ProjectAssignment, PropertyClearance, Task
 
-ASSIGNER_ROLES = {"system_admin", "crc_chair", "drd", "riuh"}  # leaders are reached per user
+ASSIGNER_ROLES = {"system_admin", "crc_chair", "riuh"}  # leaders are reached per user
 
 
 def certify(project):
@@ -23,7 +23,7 @@ class TaskSignalTests(RMISTestCase):
         super().setUp()
         self.notify = self._patch("personnel.signals.notify")
         self.leader = self.make_user("project_leader")
-        self.program_leader = self.make_user("program_leader")
+        self.program_leader = self.make_user("project_leader")  # leads the program (one leader role since 2026-10-27)
         self.staff = self.make_user("project_staff")
         program = Program.objects.create(title="Prog", lead=self.program_leader)
         self.project = Project.objects.create(title="P", project_code="P-1", funding_type="institutional",

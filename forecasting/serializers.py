@@ -3,7 +3,7 @@ from rest_framework import serializers
 from .models import ForecastRun, MonthlyForecast
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-FORECAST_ROLES = ["system_admin", "drd", "vprei", "finance_budget"]
+FORECAST_ROLES = ["system_admin", "vprei", "finance_budget"]
 
 
 class MonthlyForecastSerializer(serializers.ModelSerializer):

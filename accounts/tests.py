@@ -22,7 +22,10 @@ class SeedRolesTests(TestCase):
     def test_seed_roles_also_grants_role_permissions(self):
         call_command("seed_roles", stdout=open("/dev/null", "w"))
 
-        self.assertEqual(Role.objects.count(), 12)
+        self.assertEqual(Role.objects.count(), 9)  # 12 became 9 (client 2026-10-27)
+        self.assertEqual(Role.objects.get(code="crc_chair").name, "CRC/CRD")
+        self.assertEqual(Role.objects.get(code="project_leader").name, "Project Leader/Program Leader/Study Leader")
+        self.assertFalse(Role.objects.filter(code__in=["drd", "program_leader", "study_leader"]).exists())
         self.assertTrue(
             RolePermission.objects.filter(role__code="system_admin", permission__code="projects.register").exists()
         )
@@ -37,6 +40,42 @@ class SeedRolesTests(TestCase):
             "budget.manage", "financial.request_realignment",
             "monitoring.quarterly_prepare", "monitoring.quarterly_review", "monitoring.quarterly_approve",
         })
+
+
+class MergeRolesMigrationTests(RMISTestCase):
+    """accounts 0026 (client 2026-10-27): accounts on DRD/Program/Study Leader move to CRC/CRD and Project Leader."""
+
+    def test_legacy_accounts_move_to_the_merged_role_and_legacy_grants_go(self):
+        import importlib
+
+        from django.apps import apps
+
+        from accounts.models import Permission
+        from research_projects.models import ProjectEndorser
+
+        merge = importlib.import_module("accounts.migrations.0026_merge_roles")
+        legacy = {code: Role.objects.create(code=code, name=code) for code in merge.MERGED}
+        RolePermission.objects.create(role=legacy["drd"], permission=Permission.objects.get(code="dss.manage"))
+        drd = self.make_user(None, email="drd@lspu.test")
+        User.objects.filter(pk=drd.pk).update(role=legacy["drd"])
+        study = self.make_user(None, email="study@lspu.test")
+        User.objects.filter(pk=study.pk).update(requested_role=legacy["study_leader"])
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded",
+                                         lead=self.make_user("project_leader"))
+        endorser = ProjectEndorser.objects.create(project=project, role_code="drd", name="Dr. D")
+
+        merge.forwards(apps, None)
+
+        drd.refresh_from_db()
+        study.refresh_from_db()
+        endorser.refresh_from_db()
+        self.assertEqual((drd.role.code, study.requested_role.code, endorser.role_code),
+                         ("crc_chair", "project_leader", "crc_chair"))
+        self.assertFalse(RolePermission.objects.filter(role__in=legacy.values()).exists())
+        self.assertEqual(Role.objects.get(code="crc_chair").name, "CRC/CRD")
+        crc = set(RolePermission.objects.filter(role__code="crc_chair").values_list("permission__code", flat=True))
+        self.assertNotIn("dss.manage", crc)  # none of DRD's own permissions (client 2026-10-27, a-g)
+        self.assertNotIn("projects.register", crc)
 
 
 class RegistrationTests(RMISTestCase):

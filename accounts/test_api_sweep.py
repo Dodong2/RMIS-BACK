@@ -36,12 +36,12 @@ class ApiSweepTests(RMISTestCase):
         self._patch("rest_framework.throttling.SimpleRateThrottle.allow_request", return_value=True)
         self.users = {code: self.make_user(code) for code in SWEEP_ROLES}
         leader = self.users["project_leader"]
-        program = Program.objects.create(title="Program", funding_type="core_funded", lead=self.make_user("program_leader"))
+        program = Program.objects.create(title="Program", funding_type="core_funded", lead=self.make_user("project_leader"))
         self.project = Project.objects.create(
             title="Project", project_code="SWEEP-1", funding_type="core_funded", lead=leader, program=program,
             sdgs=[4], sectors=["education"],
         )
-        Study.objects.create(project=self.project, title="Study", lead=self.make_user("study_leader"))
+        Study.objects.create(project=self.project, title="Study", lead=self.make_user("project_leader"))
         WorkPlanMilestone.objects.create(project=self.project, title="Milestone", target_date="2026-12-31")
         budget = LineItemBudget.objects.create(project=self.project, version_number=1)
         LineItem.objects.create(budget=budget, category="mooe", description="Travel", amount=1000)

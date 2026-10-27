@@ -167,16 +167,14 @@ def compute_risk_dashboard(campus=None, funding_type=None, user=None):
 
 
 # Q7 actions as a live inbox (no push/Celery): which risk levels each role is alerted about. Leaders get the
-# "reminder" band and up on their own projects, RIUH/CRC the "notice" band and up in their scope, VP/DRD only
+# "reminder" band and up on their own projects, RIUH/CRC the "notice" band and up in their scope, VP only
 # escalations. system_admin sees everything from medium up for testing. Other roles get no alerts.
+# 2026-10-27: DRD merged into CRC/CRD (notice band and up), Program/Study Leaders into the Project Leader.
 ALERT_LEVELS_BY_ROLE = {
-    "program_leader": ("medium", "high", "critical"),
     "project_leader": ("medium", "high", "critical"),
-    "study_leader": ("medium", "high", "critical"),
     "riuh": ("high", "critical"),
     "crc_chair": ("high", "critical"),
     "vprei": ("critical",),
-    "drd": ("critical",),
     "system_admin": ("medium", "high", "critical"),
 }
 

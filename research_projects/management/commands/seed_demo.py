@@ -37,8 +37,9 @@ from research_projects.models import (
 )
 
 PREFIX = "DEMO-"
-# Each step's doer; a tuple = first role that has an active user (quarterly approval is DRD or VPREI).
-ROLES = ("project_leader", "finance_budget", "procurement_officer_lib", "riuh", ("drd", "vprei"))
+# Each step's doer; a tuple = first role that has an active user. Quarterly approval is the VPREI's (DRD merged into
+# CRC/CRD 2026-10-27, which only reviews).
+ROLES = ("project_leader", "finance_budget", "procurement_officer_lib", "riuh", ("vprei",))
 d = datetime.date
 
 PROJECTS = [
@@ -157,7 +158,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Deleted {count} demo project(s)."))
 
     def seed_project(self, spec, users):
-        leader, budget_officer, procurement, riuh, drd = (users[c] for c in ROLES)
+        leader, budget_officer, procurement, riuh, vprei = (users[c] for c in ROLES)
         start, end = spec["start"], spec["end"]
         completed = spec["final_status"] == "completed"
 
@@ -185,9 +186,9 @@ class Command(BaseCommand):
         ProjectTeamMember.objects.create(project=project, member_role="co_leader", name="Demo Co-Leader", gender="male")
         ProjectTeamMember.objects.create(project=project, member_role="member", name="Demo Research Assistant", gender="female")
         TargetBeneficiary.objects.create(project=project, group=spec["beneficiary"][0], total=spec["beneficiary"][1])
-        designations = {"riuh": "Research and Innovation Unit Head", "drd": "Director, Research and Development",
+        designations = {"riuh": "Research and Innovation Unit Head",
                         "vprei": "Vice President for Research, Extension and Innovation"}
-        for user in (riuh, drd):
+        for user in (riuh, vprei):
             designation = designations[user.role.code]
             ProjectEndorser.objects.create(project=project, role_code=user.role.code, user=user, name=_name(user),
                                            designation=designation, signed_on=start - datetime.timedelta(days=40))
@@ -260,10 +261,10 @@ class Command(BaseCommand):
         )
         QuarterlyReportEvent.objects.create(report=report, action="created", to_status="draft", actor=leader)
         for from_status, to_status, actor in (("draft", "submitted", leader), ("submitted", "under_review", riuh),
-                                              ("under_review", "endorsed", riuh), ("endorsed", "approved", drd)):
+                                              ("under_review", "endorsed", riuh), ("endorsed", "approved", vprei)):
             QuarterlyReportEvent.objects.create(report=report, action="status_transition", from_status=from_status,
                                                 to_status=to_status, actor=actor)
-        report.status, report.submitted_at, report.approved_by, report.approved_at = "approved", timezone.now(), drd, timezone.now()
+        report.status, report.submitted_at, report.approved_by, report.approved_at = "approved", timezone.now(), vprei, timezone.now()
         report.save()
 
         # 8. Outputs

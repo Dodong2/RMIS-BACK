@@ -74,7 +74,7 @@ class LibWorkflowTests(RMISTestCase):
         for user in (self.crc, self.officer, self.make_user("project_leader")):
             self.assertIn(self.act(user, "submit").status_code, (403, 404), user.role.code)
         self.act(self.leader, "submit")
-        for user in (self.officer, self.leader, self.make_user("drd"), self.make_user("riuh")):
+        for user in (self.officer, self.leader, self.make_user("vprei"), self.make_user("riuh")):
             self.assertIn(self.act(user, "start-review").status_code, (403, 404), user.role.code)  # Q10: hidden from Budget
         self.move_to("endorsed")
         for user in (self.crc, self.leader):
@@ -112,10 +112,11 @@ class LibWorkflowTests(RMISTestCase):
             self.assertEqual(leader.delete(url).status_code, 400, status)
 
     def test_only_the_project_leader_encodes(self):
-        # Client Q9 (2026-10-21): the Procurement Officer and Program Leaders no longer encode LIBs.
+        # Client Q9 (2026-10-21): the Procurement Officer and Program Leaders no longer encode LIBs (Program Leaders merged
+        # into the Project Leader 2026-10-27; vprei stands in for another non-encoding role).
         row = {"budget": self.budget.id, "category": "mooe", "description": "Training Expenses", "amount": "10"}
         url = f"/api/budget/line-items/{self.item.id}/"
-        for code in ("procurement_officer_lib", "program_leader", "crc_chair", "finance_budget", "system_admin"):
+        for code in ("procurement_officer_lib", "vprei", "crc_chair", "finance_budget", "system_admin"):
             client = self.client_for(self.make_user(code))
             self.assertEqual(client.post("/api/budget/line-items/", row, format="json").status_code, 403, code)
             self.assertEqual(client.patch(url, {"justification": "X"}, format="json").status_code, 403, code)

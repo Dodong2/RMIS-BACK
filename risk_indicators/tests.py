@@ -46,9 +46,8 @@ class RiskAlertTests(RMISTestCase):
             LineItemBudget.objects.create(project=project, version_number=1, status="submitted")
         self.assertEqual(self.alerts_for(self.make_user("crc_chair")), expected)
 
-    def test_vp_and_drd_get_critical_only(self):
+    def test_vp_gets_critical_only(self):
         self.assertEqual(self.alerts_for(self.make_user("vprei")), {("CRIT", "critical")})
-        self.assertEqual(self.alerts_for(self.make_user("drd")), {("CRIT", "critical")})
 
     def test_roles_without_a_q7_action_get_no_alerts(self):
         self.assertEqual(self.alerts_for(self.make_user("finance_budget")), set())

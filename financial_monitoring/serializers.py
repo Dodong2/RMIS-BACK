@@ -19,7 +19,7 @@ REALIGNMENT_REQUEST_ROLES = ["project_leader"]
 REALIGNMENT_MAJOR_REVIEW_ROLES = ["system_admin", "finance_budget"]
 REALIGNMENT_BOR_REVIEW_ROLES = ["system_admin", "finance_budget"]
 DISBURSEMENT_ROLES = ["system_admin", "finance_budget"]
-PROCUREMENT_REQUEST_ROLES = ["system_admin", "program_leader", "project_leader"]  # "signed by the Lead Proponent"
+PROCUREMENT_REQUEST_ROLES = ["system_admin", "project_leader"]  # "signed by the Lead Proponent"
 PROCUREMENT_STATUS_ROLES = ["system_admin", "procurement_officer_lib"]
 
 MINOR_TIER_MAX_PCT = 33

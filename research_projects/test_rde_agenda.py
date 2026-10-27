@@ -116,7 +116,7 @@ class ProjectRdeAlignmentTests(RdeAgendaTestCase):
         self.assertEqual(response.status_code, 200, response.data)
 
     def test_program_stores_a_priority_area_too(self):
-        program_leader = self.make_user("program_leader")
+        program_leader = self.make_user("project_leader")
 
         response = self.client.post("/api/programs/", {
             "code": "P-1", "title": "Program", "funding_type": "core_funded", "lead": program_leader.pk,

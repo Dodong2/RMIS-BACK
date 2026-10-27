@@ -6,10 +6,10 @@ class PortfolioDashboardTests(RMISTestCase):
     def test_a_scoped_role_counts_only_the_projects_it_is_involved_in(self):
         """Client 2026-10-24 (replaces 2026-10-13's "every project"): Portfolio, Performance and Appendix G count only
         the projects the user is involved in (visible_projects)."""
-        program_leader = self.make_user("program_leader")
-        mine = Project.objects.create(title="Mine", project_code="M-1", funding_type="core_funded", lead=program_leader, sdgs=[4])
+        leader = self.make_user("project_leader")
+        mine = Project.objects.create(title="Mine", project_code="M-1", funding_type="core_funded", lead=leader, sdgs=[4])
         Project.objects.create(title="Other", project_code="O-1", funding_type="core_funded", lead=self.make_user("project_leader"), sdgs=[9])
-        client = self.client_for(program_leader)
+        client = self.client_for(leader)
 
         self.assertEqual(client.get("/api/dashboard/portfolio/").data["by_sdg"], {4: 1})
         self.assertEqual(client.get("/api/dashboard/portfolio/").data["total_projects"], 1)
@@ -42,8 +42,8 @@ class PortfolioDashboardTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_study_leader_cannot_see_the_portfolio(self):
-        response = self.client_for(self.make_user("study_leader")).get("/api/dashboard/portfolio/")
+    def test_project_staff_cannot_see_the_portfolio(self):
+        response = self.client_for(self.make_user("project_staff")).get("/api/dashboard/portfolio/")
 
         self.assertEqual(response.status_code, 403)
 
@@ -140,7 +140,7 @@ class PerformanceDashboardTests(RMISTestCase):
                       status="completed", milestones=(4, 4), approved=1000, spent=1000, pubs=5)
 
     def test_project_rows_carry_physical_and_financial_progress(self):
-        response = self.client_for(self.make_user("drd")).get("/api/dashboard/performance/")
+        response = self.client_for(self.make_user("vprei")).get("/api/dashboard/performance/")
 
         self.assertEqual(response.status_code, 200)
         row = next(r for r in response.data["projects"] if r["project_code"] == "A-1")
@@ -153,7 +153,7 @@ class PerformanceDashboardTests(RMISTestCase):
         self.assertEqual(row["college_code"], "CA")
 
     def test_rankings_use_the_weighted_score(self):
-        data = self.client_for(self.make_user("drd")).get("/api/dashboard/performance/").data
+        data = self.client_for(self.make_user("vprei")).get("/api/dashboard/performance/").data
 
         # A-1: 0.4*50 + 0.3*50 + 0.2*0 + 0.1*20 = 37; B-1: 0.4*100 + 0.3*100 + 0.2*100 + 0.1*50 = 95
         self.assertEqual([(c["campus"], c["score"]) for c in data["campus_ranking"]], [("Siniloan", 95), ("San Pablo City", 37)])
@@ -162,7 +162,7 @@ class PerformanceDashboardTests(RMISTestCase):
         self.assertEqual(data["leader_ranking"][1]["projects"], 1)
 
     def test_filters_by_campus_and_college(self):
-        client = self.client_for(self.make_user("drd"))
+        client = self.client_for(self.make_user("vprei"))
 
         by_campus = client.get("/api/dashboard/performance/", {"campus": "Siniloan"}).data
         by_college = client.get("/api/dashboard/performance/", {"college": "CA - College of Agriculture"}).data
@@ -173,7 +173,7 @@ class PerformanceDashboardTests(RMISTestCase):
     def test_project_without_milestones_or_budget_scores_zero_for_those_parts(self):
         self._project("C-1", self.make_user("project_leader"), "Sta. Cruz", "CTE - College of Teacher Education")
 
-        data = self.client_for(self.make_user("drd")).get("/api/dashboard/performance/", {"campus": "Sta. Cruz"}).data
+        data = self.client_for(self.make_user("vprei")).get("/api/dashboard/performance/", {"campus": "Sta. Cruz"}).data
 
         row = data["projects"][0]
         self.assertIsNone(row["physical_pct"])
@@ -186,12 +186,12 @@ class PerformanceDashboardTests(RMISTestCase):
         project = Project.objects.get(project_code="A-1")
         ProjectTeamMember.objects.create(project=project, name="Ana Cruz", member_role="member")
 
-        row = self.client_for(self.make_user("drd")).get("/api/dashboard/performance/").data["projects"][0]
+        row = self.client_for(self.make_user("vprei")).get("/api/dashboard/performance/").data["projects"][0]
 
         self.assertEqual((row["funding_type"], row["team_members"]), ("core_funded", 1))
 
     def test_monthly_disbursements_cover_the_latest_12_months_in_scope(self):
-        client = self.client_for(self.make_user("drd"))
+        client = self.client_for(self.make_user("vprei"))
 
         months = client.get("/api/dashboard/performance/").data["monthly_disbursements"]
         siniloan = client.get("/api/dashboard/performance/", {"campus": "Siniloan"}).data["monthly_disbursements"]
@@ -212,7 +212,7 @@ class PerformanceDashboardTests(RMISTestCase):
         LineItem.objects.create(budget=budget, category="ps", description="Honoraria", amount=300, funding_source="LSPU GAA")
         old = LineItemBudget.objects.create(project=a1, version_number=2, is_current=False)
         LineItem.objects.create(budget=old, category="ps", description="Old", amount=9999, funding_source="CHED")
-        client = self.client_for(self.make_user("drd"))
+        client = self.client_for(self.make_user("vprei"))
 
         everything = client.get("/api/dashboard/performance/").data["budget_by_funding_agency"]
         siniloan = client.get("/api/dashboard/performance/", {"campus": "Siniloan"}).data["budget_by_funding_agency"]
@@ -225,8 +225,8 @@ class PerformanceDashboardTests(RMISTestCase):
         ])
         self.assertEqual(siniloan, [{"agency": "Unspecified", "total": 1000.0}])
 
-    def test_study_leader_cannot_see_performance(self):
-        response = self.client_for(self.make_user("study_leader")).get("/api/dashboard/performance/")
+    def test_project_staff_cannot_see_performance(self):
+        response = self.client_for(self.make_user("project_staff")).get("/api/dashboard/performance/")
 
         self.assertEqual(response.status_code, 403)
 
@@ -267,7 +267,7 @@ class ForecastingDashboardTests(RMISTestCase):
                 forecast_run=latest, period=date(2026, month, 1), predicted_amount=amount, lower_bound=0, upper_bound=0,
             )
 
-        data = self.client_for(self.make_user("drd")).get("/api/dashboard/forecasting/", {"college": "CA - College of Agriculture"}).data
+        data = self.client_for(self.make_user("vprei")).get("/api/dashboard/forecasting/", {"college": "CA - College of Agriculture"}).data
 
         self.assertEqual(data["monthly_forecast"], [{"month": "2026-03", "predicted": 100.0}, {"month": "2026-04", "predicted": 200.0}])
         self.assertEqual(data["projects"][0]["title"], "Smart Irrigation")
@@ -393,7 +393,7 @@ class DraftsHiddenFromReviewersTests(RMISTestCase):
         self.assertEqual([b["project"] for b in client.get("/api/budget/budgets/").data], [self.submitted.pk])
 
     def test_other_roles_still_see_drafts(self):
-        for role in ("system_admin", "vprei", "riuh", "drd"):
+        for role in ("system_admin", "vprei", "riuh", "university_admin"):
             client = self.client_for(self.make_user(role))
 
             self.assertEqual(len(client.get("/api/projects/").data), 3, role)

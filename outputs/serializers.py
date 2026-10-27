@@ -9,7 +9,7 @@ from .models import CreativeWorkRecord, IPRecord, PublicationRecord, SenseRanked
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 MANAGE_ROLES = ["system_admin", "riuh"]
-REPORT_ROLES = ["system_admin", "riuh", "project_leader", "study_leader"]
+REPORT_ROLES = ["system_admin", "riuh", "project_leader"]
 CREATIVE_WORK_ROLES = REPORT_ROLES + ["project_staff"]
 
 

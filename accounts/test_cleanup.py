@@ -73,7 +73,7 @@ class CleanupFreshStartTests(RMISTestCase):
                          (self.admin.pk, "system_admin", True, True))
         self.assertEqual(Command().keep_counts(), self.kept_before)
         self.assertEqual((Role.objects.count(), CollegeUnit.objects.count(), CooperatingAgency.objects.count(),
-                          EndorserChoice.objects.count()), (12, 1, 1, 1))
+                          EndorserChoice.objects.count()), (9, 1, 1, 1))
         self.assertTrue(LibItem.objects.exists())
         self.assertTrue(Permission.objects.exists() and RolePermission.objects.exists())
         self.assertEqual(self.total(), 0)

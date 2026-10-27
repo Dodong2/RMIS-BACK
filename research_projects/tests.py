@@ -80,10 +80,10 @@ class ManualRegistrationTests(RMISTestCase):
         self.assertIn("lead", response.data)
         self.assertFalse(Project.objects.exists())
 
-    def test_program_and_study_leaders_still_cannot_register(self):
+    def test_roles_without_projects_register_cannot_register(self):
         leader = self.make_user("project_leader")
 
-        for code in ("program_leader", "study_leader"):
+        for code in ("crc_chair", "project_staff"):  # Program/Study Leaders merged into the Project Leader 2026-10-27
             response = self.client_for(self.make_user(code)).post("/api/projects/", project_payload(leader), format="json")
             self.assertEqual(response.status_code, 403)
         self.assertFalse(Project.objects.exists())
@@ -131,7 +131,7 @@ class ManualRegistrationTests(RMISTestCase):
 
     def test_study_components_need_only_a_title(self):
         """Client meeting 2026-10-01 (#7): SF-018 lists Study 1, Study 2 by title; a study leader is optional."""
-        leader, study_leader = self.make_user("project_leader"), self.make_user("study_leader")
+        leader, study_leader = self.make_user("project_leader"), self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
         client = self.client_for(leader)
 
@@ -139,7 +139,8 @@ class ManualRegistrationTests(RMISTestCase):
         with_lead = client.post(
             "/api/studies/", {"project": project.id, "title": "Study 2", "lead": study_leader.id}, format="json"
         )
-        wrong_role = client.post("/api/studies/", {"project": project.id, "title": "Study 3", "lead": leader.id}, format="json")
+        staff = self.make_user("project_staff")
+        wrong_role = client.post("/api/studies/", {"project": project.id, "title": "Study 3", "lead": staff.id}, format="json")
 
         self.assertEqual(untitled_lead.status_code, 201, untitled_lead.data)
         self.assertIsNone(untitled_lead.data["lead"])
@@ -160,7 +161,7 @@ class ManualRegistrationTests(RMISTestCase):
             "project": project.id, "name": "Adriel G. Roman", "designation": "Dean/Associate Dean",
         }, format="json")
         mismatched = client.post("/api/project-endorsers/", {
-            "project": project.id, "role_code": "drd", "user": vp.id, "name": "Robert Agatep",
+            "project": project.id, "role_code": "crc_chair", "user": vp.id, "name": "Robert Agatep",
         }, format="json")
         outsider = self.client_for(self.make_user("project_leader")).post("/api/project-endorsers/", {
             "project": project.id, "name": "Someone",
@@ -629,10 +630,10 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(Project.objects.exists())
 
-    def test_program_and_study_leaders_cannot_use_the_excel_import(self):
+    def test_roles_without_projects_register_cannot_use_the_excel_import(self):
         self.fill_project()
 
-        for code in ("program_leader", "study_leader"):
+        for code in ("crc_chair", "project_staff"):
             self.assertEqual(self.upload(self.make_user(code)).status_code, 403)
         self.assertFalse(Project.objects.exists())
 
@@ -720,7 +721,7 @@ class WorkPlanExcelTests(RMISTestCase):
         self.sheet.append(["Logistic preparations", "2026-01-01", "2026-03-31"])
 
         self.assertEqual(self.post(self.make_user("project_leader")).status_code, 200)
-        for code in ("project_staff", "study_leader", "finance_budget"):
+        for code in ("project_staff", "crc_chair", "finance_budget"):
             self.assertEqual(self.post(self.make_user(code)).status_code, 403, code)
 
 
@@ -744,7 +745,7 @@ class ProjectReadScopeTests(RMISTestCase):
         self.assertEqual(self.client_for(self.leader).get(f"/api/projects/{self.mine.id}/").status_code, 200)
 
     def test_team_members_and_assigned_staff_see_the_project(self):
-        member, staff = self.make_user("study_leader"), self.make_user("project_staff")
+        member, staff = self.make_user("project_staff"), self.make_user("project_staff")
         self.theirs.team_members.create(name="Member", user=member)
         from personnel.models import ProjectAssignment
         ProjectAssignment.objects.create(user=staff, project=self.theirs, start_date="2026-01-01")
@@ -763,7 +764,7 @@ class ProjectReadScopeTests(RMISTestCase):
         self.assertEqual(self.client_for(self.leader).get(f"/api/projects/{self.theirs.id}/").status_code, 404)
 
     def test_university_wide_roles_still_see_everything(self):
-        self.assertEqual(self.codes(self.make_user("drd")), ["M-1", "T-1"])
+        self.assertEqual(self.codes(self.make_user("vprei")), ["M-1", "T-1"])
         self.assertEqual(self.codes(self.make_user("system_admin")), ["M-1", "T-1"])
 
     def test_studies_and_milestones_follow_the_project_scope(self):
@@ -883,7 +884,7 @@ class EditRegisteredProjectTests(RMISTestCase):
         # Returned for revision: visible to the CRC Chair (D2) and open for edits (D6)
         budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="returned")
         BudgetReview.objects.create(budget=budget, action="held_crc", acted_by=self.make_user("crc_chair"))
-        for code in ("crc_chair", "drd", "riuh"):
+        for code in ("crc_chair", "riuh"):
             c = self.client_for(self.make_user(code))
             self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"title": "Changed"}, format="json").status_code, 403, code)
             self.assertEqual(c.patch(f"/api/project-team/{self.member.pk}/", {"name": "Z"}, format="json").status_code, 403, code)

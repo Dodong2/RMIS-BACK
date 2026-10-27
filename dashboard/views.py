@@ -11,8 +11,8 @@ from .serializers import PlanningTargetSerializer
 # Analytics is for oversight, finance, procurement and program leaders (client 2026-10-13); seed source for
 # dashboard.view_portfolio.
 ANALYTICS_ROLES = [
-    "system_admin", "vprei", "university_admin", "drd", "crc_chair", "riuh", "finance_budget",
-    "procurement_officer_lib", "program_leader", "project_leader",
+    "system_admin", "vprei", "university_admin", "crc_chair", "riuh", "finance_budget",
+    "procurement_officer_lib", "project_leader",
 ]
 
 

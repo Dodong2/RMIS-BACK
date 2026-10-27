@@ -3,7 +3,7 @@ from rest_framework import serializers
 from .models import PlanningTarget
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-MANAGE_ROLES = ["system_admin", "riuh", "drd", "vprei"]
+MANAGE_ROLES = ["system_admin", "riuh", "vprei"]
 
 
 class PlanningTargetSerializer(serializers.ModelSerializer):

@@ -58,7 +58,7 @@ class LeaderLoadView(APIView):
 
     def get(self, request):
         users = User.objects.filter(
-            is_active=True, role__code__in=["program_leader", "project_leader"],
+            is_active=True, role__code="project_leader",
         ).annotate(
             programs=Count("led_programs", filter=Q(led_programs__status="active")),
             projects=Count("led_projects", filter=Q(led_projects__status="active")),

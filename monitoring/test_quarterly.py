@@ -116,7 +116,7 @@ class QuarterlyReportTests(RMISTestCase):
     # --- workflow ---------------------------------------------------------------------------------------------
 
     def test_full_chain_with_a_revision_bumps_the_version(self):
-        riuh, drd = self.make_user("riuh"), self.make_user("drd")
+        riuh, vprei = self.make_user("riuh"), self.make_user("vprei")
         report_id = self._create().data["id"]
 
         self.assertEqual(self._move(report_id, self.leader, "submitted").status_code, 200)
@@ -125,11 +125,11 @@ class QuarterlyReportTests(RMISTestCase):
         self.assertEqual(self._move(report_id, self.leader, "submitted").status_code, 200)
         self.assertEqual(self._move(report_id, riuh, "under_review").status_code, 200)
         self.assertEqual(self._move(report_id, riuh, "endorsed", "Complete").status_code, 200)
-        response = self._move(report_id, drd, "approved", "Approved.")
+        response = self._move(report_id, vprei, "approved", "Approved.")
 
         self.assertEqual(response.status_code, 200, response.data)
         report = QuarterlyProgressReport.objects.get(pk=report_id)
-        self.assertEqual((report.status, report.version, report.approved_by), ("approved", 2, drd))
+        self.assertEqual((report.status, report.version, report.approved_by), ("approved", 2, vprei))
         self.assertEqual([c["remarks"] for c in response.data["review_history"]],
                          ["Attach the certified statement", "Complete", "Approved."])
 
@@ -159,7 +159,7 @@ class QuarterlyReportTests(RMISTestCase):
 
     def test_invalid_jump_is_rejected(self):
         report_id = self._create().data["id"]
-        self.assertEqual(self._move(report_id, self.make_user("drd"), "approved").status_code, 400)
+        self.assertEqual(self._move(report_id, self.make_user("vprei"), "approved").status_code, 400)
 
     def test_reviewer_outside_scope_cannot_review(self):
         report_id = self._create().data["id"]
@@ -179,7 +179,7 @@ class QuarterlyReportTests(RMISTestCase):
 
     def test_list_is_scoped(self):
         self._create()
-        self.assertEqual(len(self.client_for(self.make_user("drd")).get(URL).data), 1)
+        self.assertEqual(len(self.client_for(self.make_user("vprei")).get(URL).data), 1)
         self.assertEqual(len(self.client_for(self.make_user("project_leader")).get(URL).data), 0)
         other = self.make_user("riuh", scope={"college": "CAS - College of Arts and Sciences"})
         self.assertEqual(len(self.client_for(other).get(URL).data), 0)
@@ -197,12 +197,12 @@ class QuarterlyReportTests(RMISTestCase):
     # --- export -----------------------------------------------------------------------------------------------
 
     def test_export_renders_only_approved_reports(self):
-        drd = self.make_user("drd")
-        client = self.client_for(drd)
+        vprei = self.make_user("vprei")
+        client = self.client_for(vprei)
         self.assertEqual(client.get(f"{URL}export/", {"file_format": "pdf"}).status_code, 404)
 
         report_id = self._in_review()
-        self._move(report_id, drd, "approved", "Approved.")
+        self._move(report_id, vprei, "approved", "Approved.")
         pdf = client.get(f"{URL}export/", {"file_format": "pdf", "ids": str(report_id)})
         docx = client.get(f"{URL}export/", {"file_format": "docx"})
 

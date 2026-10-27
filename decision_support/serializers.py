@@ -5,7 +5,7 @@ from .models import (
 )
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-DSS_ROLES = ["system_admin", "drd", "vprei"]
+DSS_ROLES = ["system_admin", "vprei"]
 DECISION_ROLES = DSS_ROLES + ["university_admin"]  # final approval: University President
 
 

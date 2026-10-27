@@ -269,7 +269,7 @@ class ProgramSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         lead = attrs.get("lead", getattr(self.instance, "lead", None))
         funding_type = attrs.get("funding_type", getattr(self.instance, "funding_type", None))
-        validate_lead_role(lead, "program_leader")
+        validate_lead_role(lead, "project_leader")
         validate_rde_alignment(self, attrs)
         ensure_leader_keeps(self, attrs, ["code", "lead"])
         ensure_registrant_in_scope(self, leads=[lead, getattr(self.instance, "lead", None)])
@@ -434,7 +434,7 @@ class StudySerializer(serializers.ModelSerializer):
         lead = attrs.get("lead", getattr(self.instance, "lead", None))
         project = attrs.get("project", getattr(self.instance, "project", None))
         if lead:
-            validate_lead_role(lead, "study_leader")
+            validate_lead_role(lead, "project_leader")
         ensure_leader_keeps(self, attrs, ["project", "lead"])
         program_lead = project.program.lead if project.program else None
         ensure_registrant_in_scope(self, project, leads=[lead, project.lead, program_lead])

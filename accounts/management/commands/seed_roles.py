@@ -6,14 +6,11 @@ ROLES = [
     ("system_admin", "System Admin"),
     ("vprei", "VP for REI"),
     ("university_admin", "University Administration"),
-    ("drd", "DRD"),
-    ("crc_chair", "CRC Chairperson"),
+    ("crc_chair", "CRC/CRD"),  # DRD merged in (client 2026-10-27)
     ("riuh", "RIUH"),
     ("finance_budget", "Finance/Accounting/Budget"),
     ("procurement_officer_lib", "Procurement Officer - LIB"),
-    ("program_leader", "Program Leader"),
-    ("project_leader", "Project Leader"),
-    ("study_leader", "Study Leader"),
+    ("project_leader", "Project Leader/Program Leader/Study Leader"),  # one role since 2026-10-27
     ("project_staff", "Project Staff"),
 ]
 

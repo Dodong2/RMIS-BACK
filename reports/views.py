@@ -17,7 +17,7 @@ from .renderers import CONTENT_TYPES, render
 from .serializers import GeneratedReportLogSerializer
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-REPORT_LOG_VIEW_ROLES = ["system_admin", "riuh", "drd", "vprei"]
+REPORT_LOG_VIEW_ROLES = ["system_admin", "riuh", "vprei"]
 
 
 def build_report_response(request, report_type, title, data, filters=None):

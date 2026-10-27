@@ -111,7 +111,7 @@ class SocketTests(RMISTestCase):
             with self.subTest(group=group):
                 await database_sync_to_async(self.notify_and_commit)(group)
                 self.assertEqual(await ws.receive_json_from(), {"type": "thing.created", "id": 7})
-        await database_sync_to_async(self.notify_and_commit)(to_role("drd"))  # someone else's group
+        await database_sync_to_async(self.notify_and_commit)(to_role("vprei"))  # someone else's group
         self.assertTrue(await ws.receive_nothing())
         await ws.disconnect()
 

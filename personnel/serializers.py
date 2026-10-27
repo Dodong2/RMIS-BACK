@@ -17,15 +17,15 @@ from .models import (
 )
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-MANAGE_ROLES = ["system_admin", "crc_chair", "drd", "riuh"]
-TASK_ASSIGNER_ROLES = MANAGE_ROLES + ["program_leader", "project_leader", "study_leader"]
+MANAGE_ROLES = ["system_admin", "crc_chair", "riuh"]
+TASK_ASSIGNER_ROLES = MANAGE_ROLES + ["project_leader"]
 CLEARANCE_ROLES = MANAGE_ROLES + ["procurement_officer_lib"]
 
-# record type -> (model, required lead role, concurrency cap or None for no cap)
+# record type -> (model, required lead role, concurrency cap or None for no cap). One leader role since 2026-10-27.
 LEAD_RECORDS = {
-    "program": (Program, "program_leader", 2),
+    "program": (Program, "project_leader", 2),
     "project": (Project, "project_leader", 3),
-    "study": (Study, "study_leader", None),
+    "study": (Study, "project_leader", None),
 }
 
 

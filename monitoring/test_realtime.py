@@ -8,7 +8,7 @@ from monitoring.models import ExtensionRequest, ProjectEvaluation, RenewalApplic
 from realtime.notify import to_role, to_user
 from research_projects.models import Project
 
-MONITORING_ROLES = {"system_admin", "riuh", "vprei", "drd", "crc_chair", "university_admin"}
+MONITORING_ROLES = {"system_admin", "riuh", "vprei", "crc_chair", "university_admin"}
 
 
 def certify(project):

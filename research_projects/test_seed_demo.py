@@ -9,7 +9,7 @@ from financial_monitoring.models import Disbursement, ProcurementRequest
 from monitoring.models import QuarterlyProgressReport, TerminalReport
 from research_projects.models import Project
 
-DEMO_ROLES = ("project_leader", "finance_budget", "procurement_officer_lib", "riuh", "drd")
+DEMO_ROLES = ("project_leader", "finance_budget", "procurement_officer_lib", "riuh", "vprei")
 
 
 class SeedDemoTests(RMISTestCase):
@@ -68,15 +68,15 @@ class SeedDemoTests(RMISTestCase):
         self.assertFalse(ProcurementRequest.objects.exists())
         self.assertTrue(Project.objects.filter(pk=real.pk).exists())
 
-    def test_vprei_approves_when_there_is_no_drd(self):
-        User.objects.filter(role__code="drd").update(is_active=False)
-        vprei = self.make_user("vprei")
+    def test_vprei_approves_the_quarterly_reports(self):
+        """DRD merged into CRC/CRD (2026-10-27), which only reviews, so the VPREI approves."""
+        vprei = User.objects.get(role__code="vprei")
         self.seed()
         report = QuarterlyProgressReport.objects.filter(project__project_code__startswith="DEMO-").first()
         self.assertEqual(report.approved_by, vprei)
 
     def test_missing_role_stops_with_clear_message(self):
-        User.objects.filter(role__code="drd").update(is_active=False)
-        with self.assertRaisesMessage(CommandError, "drd or vprei"):
+        User.objects.filter(role__code="vprei").update(is_active=False)
+        with self.assertRaisesMessage(CommandError, "No active user for role(s): vprei"):
             self.seed()
         self.assertFalse(Project.objects.filter(project_code__startswith="DEMO-").exists())

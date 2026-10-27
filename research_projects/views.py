@@ -28,12 +28,12 @@ XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 # register programs/projects/studies (manual entry and Excel import). Client meeting 2026-10-01 added the Project
 # Leader back, for projects they lead only (serializers.ensure_project_leader_registers_self).
 # Client 2026-10-24: the CRC Chair reviews submitted projects and no longer registers them (accounts 0024)
-REGISTRATION_ROLES = ["system_admin", "drd", "riuh", "project_leader"]
+REGISTRATION_ROLES = ["system_admin", "riuh", "project_leader"]
 # Leaders are limited to records they are part of, and can't change the CRC-owned fields
 # (serializers.ensure_registrant_in_scope / ensure_leader_keeps).
-EDIT_ROLES = REGISTRATION_ROLES + ["crc_chair", "program_leader", "study_leader"]
+EDIT_ROLES = REGISTRATION_ROLES + ["crc_chair"]
 # Leaders capture their own work plan (Module Structure M2); ensure_in_scope limits them to their projects.
-MILESTONE_ROLES = ["system_admin", "crc_chair", "program_leader", "project_leader", "study_leader"]
+MILESTONE_ROLES = ["system_admin", "crc_chair", "project_leader"]
 
 
 class AdminChoiceListCreateView(generics.ListCreateAPIView):
