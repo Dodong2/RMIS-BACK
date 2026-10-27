@@ -78,6 +78,36 @@ class MergeRolesMigrationTests(RMISTestCase):
         self.assertNotIn("projects.register", crc)
 
 
+class DeleteLegacyRolesMigrationTests(RMISTestCase):
+    """accounts 0027 (client 2026-10-27): the legacy roles go once no account has them."""
+
+    def setUp(self):
+        super().setUp()
+        import importlib
+
+        self.migration = importlib.import_module("accounts.migrations.0027_delete_legacy_roles")
+        for code in self.migration.LEGACY:
+            Role.objects.create(code=code, name=code)
+
+    def test_deletes_the_legacy_roles_and_keeps_the_nine(self):
+        from django.apps import apps
+
+        self.migration.forwards(apps, None)
+
+        self.assertFalse(Role.objects.filter(code__in=self.migration.LEGACY).exists())
+        self.assertEqual(Role.objects.count(), 9)
+
+    def test_stops_while_an_account_still_has_a_legacy_role(self):
+        from django.apps import apps
+
+        user = self.make_user(None)
+        User.objects.filter(pk=user.pk).update(requested_role=Role.objects.get(code="study_leader"))
+
+        with self.assertRaisesMessage(RuntimeError, "still have a legacy role"):
+            self.migration.forwards(apps, None)
+        self.assertEqual(Role.objects.filter(code__in=self.migration.LEGACY).count(), 3)
+
+
 class RegistrationTests(RMISTestCase):
     def setUp(self):
         super().setUp()
