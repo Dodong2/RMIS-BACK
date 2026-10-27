@@ -305,7 +305,7 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
 1. Carl:
    - Push `8cae785`..`20c2975` (10 commits plus this handover) and deploy together with the frontend.
    - Set Staff ID `000000` on his own profile (User & Access, Edit Profile).
-   - Browser-check the flow end to end: register, then verify the e--mail, then admin Approve or Reject, then log in; also Google sign-up, the CRC/CRD and Project Leader nav, and the campus lock.
+   - Browser-check the flow end to end: register, then verify the e-mail, then admin Approve or Reject, then log in; also Google sign-up, the CRC/CRD and Project Leader nav, and the campus lock.
    - The Brevo verification e-mail has not been sent live yet.
 2. Optional, not approved: a backend gate on `VerifyRecordView`; a read-only check of the 1.9-3.2 s GET latency.
 3. Wait for the client's next changes. Every task goes through `dss/CLAUDE.md` (plan, then GO TASK N, then report, then STOP).
