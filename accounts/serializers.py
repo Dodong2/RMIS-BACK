@@ -128,9 +128,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 
 class UserScopeSerializer(serializers.Serializer):
-    """Admin-assigned scope (client clarification Q2/Q12). A blank or null value clears that key."""
+    """Admin-assigned scope (client clarification Q2/Q12). A blank or null value clears that key. campus is the
+    account's User.campus (one of the 4 campuses, client 2026-10-27); college stays in User.scope."""
 
-    campus = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=100)
+    campus = serializers.ChoiceField(choices=User.CAMPUS_CHOICES, required=False, allow_blank=True, allow_null=True)
     college = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=100)
 
     def validate(self, attrs):

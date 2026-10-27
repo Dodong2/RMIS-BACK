@@ -280,6 +280,18 @@ class ProgramSerializer(serializers.ModelSerializer):
         return attrs
 
 
+def ensure_campus_is_leads(attrs, lead):
+    """Client 2026-10-27: a project belongs to its Project Leader's campus, so the CRC/CRD, Finance, RIUH and
+    Procurement of that campus see it. Filled in when left blank; a different campus is refused. A leader account
+    without a campus (made before 2026-10-27) keeps the free choice."""
+    if not lead.campus:
+        return
+    sent = (attrs.get("campus") or "").strip()
+    if sent and sent.lower() != lead.campus.lower():
+        raise serializers.ValidationError({"campus": f"The project's campus is its Project Leader's campus ({lead.campus})."})
+    attrs["campus"] = lead.campus
+
+
 class ProjectSerializer(serializers.ModelSerializer):
     lead_detail = LeadSerializer(source="lead", read_only=True)
     # Client 2026-10-24: Draft until the Project Leader submits, then the CRC Chair's and Budget Officer's reviews
@@ -363,6 +375,8 @@ class ProjectSerializer(serializers.ModelSerializer):
         if is_continuing and (continuing_year or 0) < 2:
             raise serializers.ValidationError({"continuing_year": "A continuing proposal needs its year (2 or later)."})
         validate_lead_role(lead, "project_leader")
+        if self.instance is None or "lead" in attrs or "campus" in attrs:
+            ensure_campus_is_leads(attrs, lead)
         validate_rde_alignment(self, attrs)
         ensure_project_leader_registers_self(self, lead)
         ensure_leader_keeps(self, attrs, ["project_code", "lead", "program"])

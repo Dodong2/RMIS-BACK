@@ -446,7 +446,7 @@ class UserProfileView(APIView):
 
 class UserScopeView(APIView):
     """PATCH {"campus": "...", "college": "..."}. Both are enforced against Project.campus/college
-    for campus-scoped roles (accounts.permissions.scoped_projects)."""
+    for campus-scoped roles (accounts.permissions.scoped_projects). campus is stored on User.campus."""
 
     permission_classes = [HasRole("accounts.manage_users")]
 
@@ -454,15 +454,19 @@ class UserScopeView(APIView):
         user = get_object_or_404(User, id=user_id, is_pending_role=False)
         serializer = UserScopeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        if "campus" in data:
+            user.campus = data.pop("campus") or ""
         scope = dict(user.scope or {})
-        for key, value in serializer.validated_data.items():
+        scope.pop("campus", None)  # campus lives on User.campus since 2026-10-27
+        for key, value in data.items():
             if value:
                 scope[key] = value
             else:
                 scope.pop(key, None)
         user.scope = scope
-        user.save(update_fields=["scope"])
-        return Response({"id": user.id, "scope": user.scope})
+        user.save(update_fields=["scope", "campus"])
+        return Response({"id": user.id, "scope": user.scope, "campus": user.campus})
 
 
 class TemporaryReplacementListCreateView(generics.ListCreateAPIView):

@@ -85,7 +85,7 @@ class LibWorkflowTests(RMISTestCase):
 
     def test_crc_chair_outside_campus_gets_404(self):
         self.act(self.leader, "submit")
-        other = self.make_user("crc_chair", scope={"campus": "Los Baños"})
+        other = self.make_user("crc_chair", campus="Los Baños")
         self.assertEqual(self.act(other, "start-review").status_code, 404)
         self.assertEqual(self.status(), "submitted")
 

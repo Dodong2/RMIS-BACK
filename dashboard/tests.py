@@ -348,7 +348,7 @@ class DashboardRoleScopeTests(RMISTestCase):
     def test_campus_scoped_role_counts_only_its_campus(self):
         from budget_lib.models import LineItemBudget
 
-        crc = self.make_user("crc_chair", scope={"campus": "Siniloan"})
+        crc = self.make_user("crc_chair", campus="Siniloan")
         for project in (self.mine, self.other):  # submitted: a Draft is hidden from the CRC Chair (D2)
             LineItemBudget.objects.create(project=project, version_number=1, status="submitted")
 

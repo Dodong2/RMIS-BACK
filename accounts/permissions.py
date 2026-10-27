@@ -30,7 +30,8 @@ def role_can(user, permission_code):
 
 # Row-level scope for budget/financial data (client clarification Q12, Q1c).
 # Leaders see only projects they lead (directly, or via a study/program they lead); project_staff see
-# no budget data (unless acting for a suspended leader); campus-level roles are limited to User.scope["campus"] and/or ["college"] when an admin has set them.
+# no budget data (unless acting for a suspended leader); campus-level roles are limited to their User.campus (from
+# registration, client 2026-10-27) and/or the admin-set User.scope["college"].
 # Everyone else (system_admin, vprei, university_admin) is university-wide.
 # Client 2026-10-27: one leader role (Program and Study Leaders merged into the Project Leader).
 LEADER_ROLES = ["project_leader"]
@@ -74,13 +75,13 @@ def scoped_projects(user):
         ).distinct()
     if code == "project_staff" or code is None:
         return Project.objects.none()
-    scope = user.scope or {}
-    if code in CAMPUS_SCOPED_ROLES and (scope.get("campus") or scope.get("college")):
+    college = (user.scope or {}).get("college")
+    if code in CAMPUS_SCOPED_ROLES and (user.campus or college):
         qs = Project.objects.all()
-        if scope.get("campus"):
-            qs = qs.filter(campus__iexact=scope["campus"])
-        if scope.get("college"):
-            qs = qs.filter(college__iexact=scope["college"])
+        if user.campus:
+            qs = qs.filter(campus__iexact=user.campus)
+        if college:
+            qs = qs.filter(college__iexact=college)
         return without_drafts(qs) if code in DRAFT_HIDDEN_ROLES else qs
     if code in DRAFT_HIDDEN_ROLES:
         return without_drafts(Project.objects.all())

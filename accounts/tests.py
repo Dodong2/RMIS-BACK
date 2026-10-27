@@ -682,6 +682,23 @@ class GoogleAuthTests(RMISTestCase):
         self.assertFalse(User.objects.filter(email="g.user@lspu.test").exists())
 
 
+class UserScopeTests(RMISTestCase):
+    def test_scope_campus_is_the_accounts_campus_and_college_stays_in_scope(self):
+        admin = self.client_for(self.make_user("system_admin"))
+        crc = self.make_user("crc_chair", campus="Siniloan")
+        url = f"/api/admin/users/{crc.id}/scope/"
+
+        moved = admin.patch(url, {"campus": "Sta. Cruz", "college": "CCS - College of Computer Studies"}, format="json")
+        bad = admin.patch(url, {"campus": "Manila"}, format="json")
+        cleared = admin.patch(url, {"campus": ""}, format="json")
+
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertEqual((moved.data["campus"], moved.data["scope"]), ("Sta. Cruz", {"college": "CCS - College of Computer Studies"}))
+        self.assertEqual(bad.status_code, 400)
+        crc.refresh_from_db()
+        self.assertEqual((cleared.status_code, crc.campus), (200, ""))
+
+
 class AuditLogTests(RMISTestCase):
     def test_authenticated_writes_are_audit_logged(self):
         admin = self.make_user("system_admin")

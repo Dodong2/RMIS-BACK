@@ -110,7 +110,7 @@ class ProcurementDashboardTests(RMISTestCase):
 
     def test_campus_scoped_officer_sees_and_moves_only_their_campus(self):
         mine, theirs = self.file(self.item, 1000), self.file(self.other_item, 1000)
-        carla = self.client_for(self.make_user("procurement_officer_lib", scope={"campus": "Siniloan"}))
+        carla = self.client_for(self.make_user("procurement_officer_lib", campus="Siniloan"))
 
         data = carla.get(URL).data
         self.assertEqual([r["id"] for r in data["requests"]], [mine.id])
@@ -157,7 +157,7 @@ class FinanceSharedAccountsTests(RMISTestCase):
         self.assertEqual(first.json(), second.json())
 
     def test_campus_scoped_finance_cannot_disburse_or_review_elsewhere(self):
-        finance = self.client_for(self.make_user("finance_budget", scope={"campus": "Siniloan"}))
+        finance = self.client_for(self.make_user("finance_budget", campus="Siniloan"))
         payload = {"amount": "100", "reference_number": "OR-1", "disbursed_on": "2026-10-22"}
 
         response = finance.post("/api/financial/disbursements/", {**payload, "line_item": self.items["Santa Cruz"].id})

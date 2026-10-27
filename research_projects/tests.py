@@ -4,6 +4,7 @@ import io
 import openpyxl
 
 from accounts.testing import RMISTestCase
+from accounts.models import User
 from budget_lib.models import LibItem, LineItem, LineItemBudget
 from research_projects.models import CollegeUnit, CooperatingAgency, Project, ProjectEndorser, RdeThrust, WorkPlanMilestone
 from research_projects.rde_agenda import seed_rde_agenda
@@ -262,6 +263,53 @@ class ManualRegistrationTests(RMISTestCase):
         self.assertEqual(response.status_code, 400)
 
 
+class ProjectCampusTests(RMISTestCase):
+    """Client 2026-10-27: a project is on its Project Leader's campus, and the campus-scoped roles see only theirs."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.make_user("system_admin")
+        self.leader = self.make_user("project_leader", campus="Siniloan")
+
+    def test_registration_takes_the_leaders_campus(self):
+        blank = self.client_for(self.admin).post("/api/projects/", project_payload(self.leader), format="json")
+        own = self.client_for(self.leader).post(
+            "/api/projects/", project_payload(self.leader, project_code="LSPU-2", title="Second", campus="siniloan"),
+            format="json",
+        )
+        other = self.client_for(self.admin).post(
+            "/api/projects/", project_payload(self.leader, project_code="LSPU-3", title="Third", campus="Sta. Cruz"),
+            format="json",
+        )
+
+        self.assertEqual((blank.status_code, blank.data["campus"]), (201, "Siniloan"))
+        self.assertEqual((own.status_code, own.data["campus"]), (201, "Siniloan"))
+        self.assertEqual(other.status_code, 400)
+        self.assertEqual(str(other.data["campus"][0]), "The project's campus is its Project Leader's campus (Siniloan).")
+
+    def test_a_leader_without_a_campus_keeps_the_free_choice(self):
+        old = self.make_user("project_leader")
+
+        response = self.client_for(self.admin).post("/api/projects/", project_payload(old, campus="Los Baños"), format="json")
+
+        self.assertEqual((response.status_code, response.data["campus"]), (201, "Los Baños"))
+
+    def test_campus_scoped_roles_see_only_their_campus(self):
+        mine = Project.objects.create(title="S", project_code="S-1", funding_type="core_funded", lead=self.leader,
+                                      campus="Siniloan")
+        theirs = Project.objects.create(title="C", project_code="C-1", funding_type="core_funded",
+                                        lead=self.make_user("project_leader"), campus="Sta. Cruz")
+        for project in (mine, theirs):  # submitted, so the CRC/CRD and Finance see them (Drafts are hidden, D2)
+            LineItemBudget.objects.create(project=project, version_number=1, status="submitted")
+        from accounts.permissions import scoped_projects
+
+        for code in ("crc_chair", "finance_budget", "riuh", "procurement_officer_lib"):
+            with self.subTest(role=code):
+                user = self.make_user(code, campus="Siniloan")
+                self.assertEqual(list(scoped_projects(user).values_list("project_code", flat=True)), ["S-1"])
+        self.assertIsNone(scoped_projects(self.make_user("vprei", campus="Siniloan")))  # university-wide
+
+
 class ExcelImportTests(RMISTestCase):
     def setUp(self):
         super().setUp()
@@ -317,6 +365,18 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(project.target_beneficiaries.get().total, 2000)
         self.assertEqual(LineItem.objects.get(budget__project=project).amount, 10000)
         self.assertEqual(project.milestones.count(), 1)
+
+    def test_excel_registration_takes_the_leaders_campus(self):
+        User.objects.filter(pk=self.leader.pk).update(campus="Siniloan")
+        self.fill_project(Campus="Sta. Cruz")
+        refused = self.upload()
+        self.fill_project(Campus=None)
+
+        response = self.upload()
+
+        self.assertEqual(refused.status_code, 400)
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Project.objects.get(project_code="LSPU-X1").campus, "Siniloan")
 
     def test_budget_rows_take_the_quarter_columns_of_each_year(self):
         """Client 2026-10-17 (yearly.png): a multi-year project's LIB rows carry Y1 Q1 .. Y3 Q4 amounts."""
