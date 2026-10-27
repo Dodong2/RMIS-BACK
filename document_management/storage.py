@@ -46,3 +46,36 @@ def get_signed_url(path, expires_in=3600):
     )
     resp.raise_for_status()
     return f"{settings.SUPABASE_URL}/storage/v1{resp.json()['signedURL']}"
+
+
+def list_objects(prefix=""):
+    """Every object path in the bucket under prefix, walking folders (used by cleanup_fresh_start)."""
+    paths, offset = [], 0
+    while True:
+        resp = requests.post(
+            f"{settings.SUPABASE_URL}/storage/v1/object/list/{settings.SUPABASE_STORAGE_BUCKET}",
+            headers=_headers("application/json"),
+            json={"prefix": prefix, "limit": 1000, "offset": offset},
+        )
+        resp.raise_for_status()
+        items = resp.json()
+        for item in items:
+            path = f"{prefix}{item['name']}"
+            if item.get("id") is None:  # a folder has no id
+                paths += list_objects(f"{path}/")
+            else:
+                paths.append(path)
+        if len(items) < 1000:
+            return paths
+        offset += 1000
+
+
+def delete_objects(paths):
+    """Permanently delete these objects from the bucket."""
+    for start in range(0, len(paths), 1000):
+        resp = requests.delete(
+            f"{settings.SUPABASE_URL}/storage/v1/object/{settings.SUPABASE_STORAGE_BUCKET}",
+            headers=_headers("application/json"),
+            json={"prefixes": paths[start:start + 1000]},
+        )
+        resp.raise_for_status()
