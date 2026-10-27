@@ -1,4 +1,4 @@
-> **STALE (2026-10-23, still true 2026-10-25):** the branch/push/migration workflow and module notes below are history; the current state is in "Last thing done" at the bottom. Work is on `main`, Carl pushes and runs every `migrate`, and tasks are gated by `dss/CLAUDE.md` (parent folder, `../CLAUDE.md`) (GO TASK N). Use this file only for module history.
+> **STALE (2026-10-23, still true 2026-10-27):** the branch/push/migration workflow and module notes below are history; the current state is in "Last thing done" at the bottom. Work is on `main`, Carl pushes and runs every `migrate`, and tasks are gated by `dss/CLAUDE.md` (parent folder, `../CLAUDE.md`) (GO TASK N). Use this file only for module history.
 
 # RMIS Backend — Current Status
 
@@ -93,7 +93,7 @@ all new endpoints above have no UI yet.
 defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personnel-change/slippage/procurement trigger scores.
 
 ## Backend status (this repo)
-- Module 1 (Auth/RBAC): done, stable, plus two real gaps found+fixed 2026-09-23 after the client asked where "Workplan/Procurement/Audit Logs/Settings" sidebar items map to (see below for the full mapping): (1) **`AuditLog` model + `accounts/middleware.py::AuditLogMiddleware` added** — the docx/MIT-proposal both explicitly call out "audit logging" as a Module 1 feature but nothing existed for it; the middleware logs every authenticated mutating (`POST`/`PUT`/`PATCH`/`DELETE`) request to `/api/` (actor, method, path, status_code, ip_address, timestamp) — request-level, not per-model field diffing, matching how the MIT proposal frames it ("the business logic layer... enforces authentication, role-based access control, request validation, and audit logging before any request reaches the data layer"). New endpoint `GET /api/admin/audit-logs/` (system_admin-only, filterable by `?actor=`/`?method=`). Since 2026-09-29 (`accounts.0012`) rows also carry `error_detail` (first 1000 chars of a 4xx JSON body). (2) **`seed_roles.py` had a dead `tier` kwarg** left over from a migration (`0002_role_tier` → `0003_remove_role_tier...`) that removed the `Role.tier` field without updating the seed command — running `python manage.py seed_roles` today would have crashed. Fixed by dropping the third tuple element entirely; confirmed the command runs clean now.
+- Module 1 (Auth/RBAC): **2026-10-27: 9 roles, e-mail verification before approval, Reject, campus scope from User.campus — see "Last thing done"; the older notes in this line are history.** Done, stable, plus two real gaps found+fixed 2026-09-23 after the client asked where "Workplan/Procurement/Audit Logs/Settings" sidebar items map to (see below for the full mapping): (1) **`AuditLog` model + `accounts/middleware.py::AuditLogMiddleware` added** — the docx/MIT-proposal both explicitly call out "audit logging" as a Module 1 feature but nothing existed for it; the middleware logs every authenticated mutating (`POST`/`PUT`/`PATCH`/`DELETE`) request to `/api/` (actor, method, path, status_code, ip_address, timestamp) — request-level, not per-model field diffing, matching how the MIT proposal frames it ("the business logic layer... enforces authentication, role-based access control, request validation, and audit logging before any request reaches the data layer"). New endpoint `GET /api/admin/audit-logs/` (system_admin-only, filterable by `?actor=`/`?method=`). Since 2026-09-29 (`accounts.0012`) rows also carry `error_detail` (first 1000 chars of a 4xx JSON body). (2) **`seed_roles.py` had a dead `tier` kwarg** left over from a migration (`0002_role_tier` → `0003_remove_role_tier...`) that removed the `Role.tier` field without updating the seed command — running `python manage.py seed_roles` today would have crashed. Fixed by dropping the third tuple element entirely; confirmed the command runs clean now.
 - Module 2 (research_projects: Program/Project/Study/Milestone): done. **Updated 2026-09-26**: registration now follows the
   client's Research Proposal Form **LSPU-RDO-SF-018** (sample: `dss/Dataset/BRIDGI_1.PDF`, scanned, no text layer).
   New `Project` fields: `lead_gender`, `contact_number`, `continuing_year`, `college` (Annex A "College Unit"),
@@ -266,30 +266,46 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-10-23 to 2026-10-25, all on `main` (see `git log`). Full suite 2026-10-25: 416/416 OK in 169 s (local `rmis-testdb`).
-- Infrastructure: DRF rate limits (`c589363`, rates `48ad1a1`), tests on the local Docker Postgres (`215cc86`).
-- Registration fixes, Tasks 1-7: Work Log flow tests + reassigned tasks keep their hours (`c40bea6`, `8975e49`); Excel
-  template Category legend (`54cb00c`); "Not Applicable" wet/dry (`d165a65`, research_projects 0019); Work Plan Excel
-  (`c4f5a7d`, `0e77880`); rich text Sections II/IV/VI/VIII/IX, sanitized with nh3 (`45dc50f`); editable Excel dry run
-  (`572ed04`).
-- Tasks 8-13: SF-018 PDF for long sections (`caa3c87`); no duplicate titles (`58ece83`); Notice of Approval/NTP/MOA
-  document types (`9bf7326`, document_management 0006); project review status DERIVED from the current LIB chain +
-  registration locked after submit (`e057bb1`, `research_projects/workflow.py`); CRC Chair no longer registers
-  (`02673bf`, accounts 0024); Drafts hidden from crc_chair/finance_budget + Portfolio/Performance/Appendix G per user
-  (`6e9e3de`); work gate: no work until Reviews Completed (`f908c02`, deliverables `59658b0`, task Approve/Return
-  `0bb6b55`).
-- Task 9 (2026-10-25, `4a361b2`): SF-018 PDF and Word keep bold/italic/underline (`reports/richtext.py`
-  `rich_text_marks`); CSV/XLSX unchanged.
-- Task 9b (2026-10-25, `9a9a112`): Appendix F (Terminal Report) PDF and Word keep them too in Project Rationale,
-  Significance, Research Methodology and Literature Cited (section blocks with "marked"). No Terminal Report exists in
-  the DB yet, so a browser check needs a certified project + a Terminal Report first.
-- Docs: `dss/CLAUDE.md` backup at `docs/dss-CLAUDE.md` (`c19f511`, `d72fd51`, `f82b4ec`); CLAUDE.md Tests section (`15a5341`).
-- Frontend: nothing pending to consume. Every endpoint/field above already has its UI (rmis-frontend 2026-10-23/24).
-- Migrations: all applied by Carl (document_management 0006, accounts 0024, research_projects 0019 included).
+2026-10-27 batch, all on `main`. Phases: audit, then auth design, then RBAC plan, then cleanup, then implementation. Memory note: `nine-roles-auth-cleanup-2026-10-27`. Full suite 449/449 OK after T7 (local `rmis-testdb`, 211 s).
+- **Database cleanup** (`8cae785`):
+  - `manage.py cleanup_fresh_start --keep-email <admin>` is a dry run by default. `--execute --expect N` deletes.
+  - Carl executed it on 2026-10-27: 607 rows, 10 Storage files and 7 Supabase Auth users were deleted, with no backup (Carl's decision).
+  - Left: 1 user (id 1, carlseighartaliode@gmail.com, system_admin), the reference lists (College Units, RDE Thrusts, Funding Types, Cooperating Agencies, Endorsers, LIB Items, roles and permissions) and 0 projects.
+- **Registration** (`8a438e3`, accounts 0025):
+  - New User fields: gender, campus (4 fixed), college_unit, mobile_number, staff_id (unique; 6 digits via `STAFF_ID_PATTERN`) and email_verified_at.
+  - account_status gains `rejected`.
+  - Password validators run at registration. System Admin can't be requested.
+  - New public `GET auth/registration-options/`.
+- **E-mail verification, approach C** (`c5f3532`):
+  - Register sends only a verification link: `accounts/tokens.py`, HMAC, single-use, 48 h via `PASSWORD_RESET_TIMEOUT`.
+  - `POST auth/verify-email/` verifies the address and notifies the admins.
+  - `POST auth/resend-verification/` always gives a generic answer.
+  - Login returns `account_state` (unverified, pending_approval, rejected, suspended or deactivated) when the password is right.
+  - A deleted account's refresh is a 401 (it was a 500).
+  - `SESSION_LOGIN` off; Brevo timeout plus logging.
+- **Pending and Reject** (`a109a01`):
+  - The Pending list shows only verified registrations, and Approve needs a verified e-mail.
+  - `POST admin/pending-users/<id>/reject/ {reason?}` sends a rejection e-mail. A rejected account keeps `is_pending_role`.
+- **Google sign-up** (`3abf133`): same fields minus the password. The account is created verified and goes straight to Pending.
+- **12 roles become 9** (`fc329dc`, accounts 0026, then `2c38fea`, accounts 0027):
+  - `drd` merged into `crc_chair` ("CRC/CRD") with the CRC Chair's permissions only.
+  - `program_leader` and `study_leader` merged into `project_leader` ("Project Leader/Program Leader/Study Leader", own-led projects only).
+  - The legacy roles were deleted.
+  - The DRD-only actions now belong to the VPREI (quarterly approve, DSS, forecasting with Finance, renewal and targets/logs with RIUH).
+  - `scripts/permission_parity.py` expects 9 roles (`ca95028`).
+- **Campus scope** (`3bca5cb`):
+  - CRC/CRD, Finance, RIUH and Procurement are scoped by `User.campus`, not `scope["campus"]`. `scope["college"]` stays.
+  - `PATCH admin/users/<id>/scope/ {campus}` writes `User.campus`.
+  - A project's campus is its Project Leader's campus (manual and Excel); a leader without a campus keeps the free choice.
+- **Docs** (`20c2975`): CLAUDE.md lists 9 roles; `docs/dss-CLAUDE.md` is the backup of the updated dss/CLAUDE.md.
+- **Migrations:** accounts 0025, 0026 and 0027 were MIGRATED by Carl on 2026-10-27. Parity: 0 differences on Supabase.
+- **Frontend:** every endpoint and field above already has its UI (rmis-frontend `c0a1b42`, `e6988cf`, `a76d062`, `dcde2a4`). Nothing is pending to consume.
 
 ## Next thing to do in this repo
-1. Carl: push (`4a361b2`, `9f2552d`, `9a9a112`, this handover), then browser-check the SF-018 PDF/Word with bold,
-   italic and underline in a Draft's Methodology, and Appendix F once a Terminal Report exists.
-2. Optional, not approved yet: backend gate on `VerifyRecordView`;
-   read-only check of the 1.9-3.2 s GET latency and doubled daphne access-log lines.
-3. Wait for the client's next changes. Every task goes through `dss/CLAUDE.md` (plan -> GO TASK N -> report -> STOP).
+1. Carl:
+   - Push `8cae785`..`20c2975` (10 commits plus this handover) and deploy together with the frontend.
+   - Set Staff ID `000000` on his own profile (User & Access, Edit Profile).
+   - Browser-check the flow end to end: register, then verify the e--mail, then admin Approve or Reject, then log in; also Google sign-up, the CRC/CRD and Project Leader nav, and the campus lock.
+   - The Brevo verification e-mail has not been sent live yet.
+2. Optional, not approved: a backend gate on `VerifyRecordView`; a read-only check of the 1.9-3.2 s GET latency.
+3. Wait for the client's next changes. Every task goes through `dss/CLAUDE.md` (plan, then GO TASK N, then report, then STOP).
