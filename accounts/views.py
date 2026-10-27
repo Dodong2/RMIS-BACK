@@ -129,12 +129,14 @@ class ResendVerificationView(APIView):
 
 
 class GoogleRequestView(APIView):
+    """Google sign-up: the same registration fields as e-mail sign-up except the password (client 2026-10-27).
+    Supabase/Google already proved the address, so the registration goes straight to the System Admin's Pending list."""
+
     permission_classes = [AllowAny]
     throttle_scope = "google"
 
     def post(self, request):
         token = request.data.get("supabase_access_token")
-        requested_role_id = request.data.get("requested_role")
         first_name = request.data.get("first_name", "").strip()
         last_name = request.data.get("last_name", "").strip()
 
@@ -151,14 +153,18 @@ class GoogleRequestView(APIView):
             return Response({"detail": "Invalid Supabase token."}, status=401)
 
         supa_user = resp.json()
-        email = supa_user["email"]
+        email = supa_user["email"].strip().lower()
         supabase_uid = supa_user["id"]
-        requested_role = Role.objects.filter(id=requested_role_id).first() if requested_role_id else None
 
-        user = User.objects.filter(email=email).first()
-        if user is None:
-            username = f"{email.split('@')[0]}_{get_random_string(5)}"
-            user = User.objects.create(
+        if User.objects.filter(email__iexact=email).exists():
+            return Response({"detail": "Request received. Please wait for confirmation."}, status=201)
+        profile = RegistrationProfileSerializer(data=request.data)
+        if not profile.is_valid():
+            return Response(profile.errors, status=400)
+
+        username = f"{email.split('@')[0]}_{get_random_string(5)}"
+        try:
+            user = User(
                 username=username,
                 email=email,
                 supabase_uid=supabase_uid,
@@ -167,11 +173,15 @@ class GoogleRequestView(APIView):
                 is_active=False,
                 is_pending_role=True,
                 registration_method="google",
-                requested_role=requested_role,
+                email_verified_at=timezone.now(),
+                **profile.validated_data,
             )
             user.set_unusable_password()
             user.save()
-            notify_admins_new_registration(user)
+        except IntegrityError:  # the same e-mail, Google account or Staff ID registered at the same moment
+            return Response({"detail": "Email or Staff ID already registered."}, status=400)
+        log_public_action(request, user, 201)
+        notify_admins_new_registration(user)
 
         return Response({"detail": "Request received. Please wait for confirmation."}, status=201)
 

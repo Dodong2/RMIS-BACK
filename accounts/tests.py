@@ -555,27 +555,61 @@ class GoogleAuthTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_request_creates_a_pending_google_user(self):
-        self.supabase_says(200)
+    def google_request(self, **overrides):
+        data = {
+            "supabase_access_token": "x", "first_name": "Grace", "last_name": "Esmade", "gender": "female",
+            "campus": "Los Baños", "college_unit": "CCS - College of Computer Studies", "mobile_number": "09181234567",
+            "staff_id": "654321", "requested_role": Role.objects.get(code="project_staff").id,
+        }
+        data.update(overrides)
+        return APIClient().post("/api/auth/google/request/", data, format="json")
 
-        response = APIClient().post(
-            "/api/auth/google/request/",
-            {"supabase_access_token": "x", "first_name": "Grace", "last_name": "Esmade"}, format="json",
-        )
+    def test_request_creates_a_verified_pending_google_user_and_notifies_admins(self):
+        CollegeUnit.objects.create(code="CCS", title="College of Computer Studies")
+        admin = self.make_user("system_admin", email="admin@lspu.test")
+        self.supabase_says(200, email="G.User@lspu.test")
 
-        self.assertEqual(response.status_code, 201)
+        response = self.google_request()
+
+        self.assertEqual(response.status_code, 201, response.data)
         user = User.objects.get(email="g.user@lspu.test")
         self.assertEqual(user.get_full_name(), "Grace Esmade")
         self.assertEqual(user.registration_method, "google")
         self.assertFalse(user.is_active)
         self.assertFalse(user.has_usable_password())
+        self.assertIsNotNone(user.email_verified_at)  # Google proved the address; no verification e-mail
+        self.assertEqual((user.staff_id, user.campus, user.requested_role.code), ("654321", "Los Baños", "project_staff"))
+        recipients = [call.kwargs["json"]["to"][0]["email"] for call in self.brevo_post.call_args_list]
+        self.assertEqual(recipients, ["admin@lspu.test"])
+        pending = self.client_for(admin).get("/api/admin/pending-users/").data
+        self.assertEqual([row["email"] for row in pending], ["g.user@lspu.test"])
 
-    def test_request_needs_a_first_and_last_name(self):
+    def test_request_needs_every_registration_field_but_no_password(self):
+        CollegeUnit.objects.create(code="CCS", title="College of Computer Studies")
         self.supabase_says(200)
 
-        response = APIClient().post("/api/auth/google/request/", {"supabase_access_token": "x", "first_name": "Grace"}, format="json")
+        no_name = self.google_request(last_name="")
+        missing = {field: self.google_request(**{field: ""}) for field in
+                   ("gender", "campus", "college_unit", "mobile_number", "staff_id", "requested_role")}
+        admin_role = self.google_request(requested_role=Role.objects.get(code="system_admin").id)
+
+        self.assertEqual(no_name.status_code, 400)
+        for field, response in missing.items():
+            with self.subTest(field=field):
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.data)
+        self.assertIn("requested_role", admin_role.data)
+        self.assertFalse(User.objects.filter(email="g.user@lspu.test").exists())
+
+    def test_request_refuses_a_staff_id_already_registered(self):
+        CollegeUnit.objects.create(code="CCS", title="College of Computer Studies")
+        self.make_user("project_leader", staff_id="654321")
+        self.supabase_says(200)
+
+        response = self.google_request()
 
         self.assertEqual(response.status_code, 400)
+        self.assertIn("staff_id", response.data)
         self.assertFalse(User.objects.filter(email="g.user@lspu.test").exists())
 
 
