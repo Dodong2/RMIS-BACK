@@ -3,6 +3,8 @@ from .views import (
     UserAccountStatusView,
     AuditLogListView,
     RegisterView,
+    ResendVerificationView,
+    VerifyEmailView,
     RegistrationOptionsView,
     GoogleRequestView,
     GoogleExchangeView,
@@ -24,6 +26,8 @@ from .views import (
 urlpatterns = [
     path("auth/register/", RegisterView.as_view()),
     path("auth/registration-options/", RegistrationOptionsView.as_view()),
+    path("auth/verify-email/", VerifyEmailView.as_view()),
+    path("auth/resend-verification/", ResendVerificationView.as_view()),
     path("auth/google/request/", GoogleRequestView.as_view()),
     path("auth/google/exchange/", GoogleExchangeView.as_view()),
     path("roles/", RolesListView.as_view()),

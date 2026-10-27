@@ -120,7 +120,7 @@ class RegistrationTests(RMISTestCase):
         self.assertEqual(len(codes), Role.objects.count() - 1)
         self.assertEqual([g["value"] for g in response.data["genders"]], ["male", "female"])
 
-    def test_register_creates_an_inactive_pending_user_and_emails_admins(self):
+    def test_register_creates_an_inactive_pending_user_and_emails_only_the_registrant(self):
         self.make_user("system_admin", email="admin@lspu.test")
         role = Role.objects.get(code="project_leader")
 
@@ -130,9 +130,13 @@ class RegistrationTests(RMISTestCase):
         user = User.objects.get(email="new.researcher@lspu.test")
         self.assertFalse(user.is_active)
         self.assertTrue(user.is_pending_role)
+        self.assertIsNone(user.email_verified_at)
         self.assertEqual(user.requested_role, role)
         self.assertEqual(user.get_full_name(), "Aimee Concepcion Chavez")
-        self.assertTrue(self.brevo_post.called)
+        # Approach C (2026-10-27): only the verification e-mail goes out; admins hear about it after verification.
+        recipients = [call.kwargs["json"]["to"][0]["email"] for call in self.brevo_post.call_args_list]
+        self.assertEqual(recipients, ["new.researcher@lspu.test"])
+        self.assertTrue(AuditLog.objects.filter(actor=user, path="/api/auth/register/", status_code=201).exists())
 
     def test_register_needs_a_first_and_last_name(self):
         response = self.register(last_name="  ")
@@ -162,6 +166,115 @@ class RegistrationTests(RMISTestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+
+class EmailVerificationTests(RMISTestCase):
+    """Approach C (client 2026-10-27): register -> verify the e-mail -> System Admin approval -> log in."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.make_user("system_admin", email="admin@lspu.test")
+        self.user = self.make_user(None, email="new@lspu.test", is_active=False, first_name="New", last_name="User")
+
+    def link(self, user=None):
+        from accounts.tokens import verification_link_params
+
+        uid, token = verification_link_params(user or self.user)
+        return {"uid": uid, "token": token}
+
+    def verify(self, data):
+        with self.captureOnCommitCallbacks(execute=True):
+            return APIClient().post("/api/auth/verify-email/", data, format="json")
+
+    def sent_to(self):
+        return [call.kwargs["json"]["to"][0]["email"] for call in self.brevo_post.call_args_list]
+
+    def test_the_e_mailed_link_verifies_the_address_and_then_notifies_admins(self):
+        from accounts.emails import send_verification_email
+
+        send_verification_email(self.user)
+        html = self.brevo_post.call_args.kwargs["json"]["htmlContent"]
+        self.assertIn("/verify-email?uid=", html)
+        self.brevo_post.reset_mock()
+
+        response = self.verify(self.link())
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.email_verified_at)
+        self.assertFalse(self.user.is_active)  # still needs the System Admin's approval
+        self.assertEqual(self.sent_to(), ["admin@lspu.test"])
+
+    def test_a_link_works_only_once(self):
+        link = self.link()
+        self.verify(link)
+        self.brevo_post.reset_mock()
+
+        response = self.verify(link)
+
+        self.assertEqual(response.status_code, 400)
+        self.brevo_post.assert_not_called()
+
+    def test_a_link_expires_after_48_hours(self):
+        from datetime import datetime
+
+        from accounts.tokens import email_verification_token
+
+        link = self.link()
+        later = datetime.now() + timedelta(hours=48, minutes=1)
+        with mock.patch.object(email_verification_token, "_now", return_value=later):
+            response = self.verify(link)
+
+        self.assertEqual(response.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.email_verified_at)
+
+    def test_a_token_for_another_account_or_garbage_is_refused(self):
+        other = self.make_user(None, email="other@lspu.test", is_active=False)
+        for data in ({**self.link(), "uid": self.link(other)["uid"]}, {"uid": "!!", "token": "x"}, {}):
+            with self.subTest(data=data):
+                self.assertEqual(self.verify(data).status_code, 400)
+        self.assertFalse(User.objects.filter(email_verified_at__isnull=False, is_pending_role=True).exists())
+
+    def test_resend_answers_the_same_whether_or_not_the_address_is_registered(self):
+        unknown = APIClient().post("/api/auth/resend-verification/", {"email": "nobody@lspu.test"}, format="json")
+        known = APIClient().post("/api/auth/resend-verification/", {"email": "NEW@lspu.test"}, format="json")
+
+        self.assertEqual((unknown.status_code, unknown.data), (known.status_code, known.data))
+        self.assertEqual(self.sent_to(), ["new@lspu.test"])
+
+    def test_resend_skips_verified_or_confirmed_accounts(self):
+        self.verify(self.link())
+        self.brevo_post.reset_mock()
+        for email in ("new@lspu.test", "admin@lspu.test"):
+            APIClient().post("/api/auth/resend-verification/", {"email": email}, format="json")
+
+        self.brevo_post.assert_not_called()
+
+    def test_login_says_why_only_when_the_password_is_right(self):
+        def login(password=PASSWORD):
+            return APIClient().post("/api/auth/login/", {"email": "new@lspu.test", "password": password}, format="json")
+
+        unverified = login()
+        wrong_password = login("not-the-password")
+        self.verify(self.link())
+        pending = login()
+        User.objects.filter(pk=self.user.pk).update(account_status="rejected", is_pending_role=False)
+        rejected = login()
+
+        self.assertEqual(unverified.status_code, 400)
+        self.assertEqual(unverified.data["account_state"], ["unverified"])
+        self.assertNotIn("account_state", wrong_password.data)
+        self.assertEqual(pending.data["account_state"], ["pending_approval"])
+        self.assertEqual(rejected.data["account_state"], ["rejected"])
+
+    def test_refresh_of_a_deleted_account_is_401_not_500(self):
+        refresh = str(RefreshToken.for_user(self.admin))
+        User.objects.filter(pk=self.admin.pk).delete()
+
+        response = APIClient().post("/api/auth/token/refresh/", {"refresh": refresh}, format="json")
+
+        self.assertEqual(response.status_code, 401)
 
 
 class AdminConfirmationTests(RMISTestCase):

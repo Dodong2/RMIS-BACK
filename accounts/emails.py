@@ -1,23 +1,36 @@
+import logging
+
 import requests
 from django.conf import settings
 from .models import User
 
+logger = logging.getLogger(__name__)
+
 
 def send_brevo_email(to_email, subject, html_content):
-    requests.post(
-        "https://api.brevo.com/v3/smtp/email",
-        headers={
-            "accept": "application/json",
-            "api-key": settings.BREVO_API_KEY,
-            "content-type": "application/json",
-        },
-        json={
-            "sender": {"name": settings.BREVO_SENDER_NAME, "email": settings.BREVO_SENDER_EMAIL},
-            "to": [{"email": to_email}],
-            "subject": subject,
-            "htmlContent": html_content,
-        },
-    )
+    """Returns True if Brevo accepted the e-mail. A failure is logged, never raised, so the caller's save stands."""
+    try:
+        resp = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": settings.BREVO_API_KEY,
+                "content-type": "application/json",
+            },
+            json={
+                "sender": {"name": settings.BREVO_SENDER_NAME, "email": settings.BREVO_SENDER_EMAIL},
+                "to": [{"email": to_email}],
+                "subject": subject,
+                "htmlContent": html_content,
+            },
+            timeout=10,
+        )
+    except requests.RequestException as error:
+        logger.error("Brevo e-mail to %s failed: %s", to_email, error)
+        return False
+    if not resp.ok:
+        logger.error("Brevo e-mail to %s failed: %s %s", to_email, resp.status_code, resp.text[:300])
+    return resp.ok
 
 
 def notify_admins_new_registration(user):
@@ -48,3 +61,18 @@ def send_role_confirmation_email(user):
         f"<p><a href='{login_url}'>Go to Login</a></p>"
     )
     send_brevo_email(user.email, "Your RMIS Account Has Been Confirmed", html)
+
+def send_verification_email(user):
+    from .tokens import verification_link_params
+
+    uid, token = verification_link_params(user)
+    link = f"{settings.FRONTEND_URL}/verify-email?uid={uid}&token={token}"
+    html = (
+        f"<p>Hi {user.get_full_name()},</p>"
+        f"<p>Verify your e-mail address to finish your RMIS registration:</p>"
+        f"<p><a href='{link}'>Verify my e-mail</a></p>"
+        f"<p>The link works once and expires in 48 hours. After you verify, the System Admin reviews your "
+        f"registration.</p>"
+        f"<p>If you didn't register for RMIS, ignore this e-mail.</p>"
+    )
+    return send_brevo_email(user.email, "Verify your RMIS e-mail address", html)

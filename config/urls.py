@@ -5,6 +5,8 @@ from django.urls import path, include
 from rest_framework_simplejwt.views import TokenVerifyView
 from django.http import JsonResponse
 
+from accounts.serializers import RefreshSerializer
+
 # dj-rest-auth's routes minus password reset: its reset flow crashed (NoReverseMatch) and sends through Django SMTP,
 # which RMIS doesn't use (e-mail goes through Brevo). No frontend screen uses it.
 
@@ -14,6 +16,7 @@ def health(request):
 
 class TokenRefreshView(get_refresh_view()):
     throttle_scope = "token_refresh"
+    serializer_class = RefreshSerializer
 
 
 auth_urlpatterns = [

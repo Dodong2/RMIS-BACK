@@ -4,7 +4,10 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.crypto import get_random_string
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from rest_framework import generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -18,7 +21,17 @@ from .serializers import (
 )
 from .permissions import HasRole
 from config.concurrency import lock
-from .emails import notify_admins_new_registration, send_role_confirmation_email
+from .emails import notify_admins_new_registration, send_role_confirmation_email, send_verification_email
+from .tokens import email_verification_token
+
+
+def log_public_action(request, user, status_code):
+    """AuditLogMiddleware logs only signed-in requests; registration and verification are anonymous, so they are
+    logged here with the account itself as the actor (client 2026-10-27)."""
+    AuditLog.objects.create(
+        actor=user, method=request.method, path=request.path[:500], status_code=status_code,
+        ip_address=request.META.get("REMOTE_ADDR"),
+    )
 
 
 class RegisterView(APIView):
@@ -64,9 +77,53 @@ class RegisterView(APIView):
         except IntegrityError:  # the same e-mail or Staff ID registered at the same moment
             return Response({"detail": "Email or Staff ID already registered."}, status=400)
 
-        notify_admins_new_registration(user)
+        # Approach C (client 2026-10-27): the e-mail is verified first; admins hear about it only after that.
+        send_verification_email(user)
+        log_public_action(request, user, 201)
 
-        return Response({"detail": "Registration received. Please wait for confirmation."}, status=201)
+        return Response({
+            "detail": "Registration received. Open the link we sent to your e-mail within 48 hours to verify it.",
+        }, status=201)
+
+
+class VerifyEmailView(APIView):
+    """POST {uid, token} from the e-mailed link. Verifies the address once; then the System Admin is notified."""
+
+    permission_classes = [AllowAny]
+    throttle_scope = "verify"
+    INVALID = "This link is invalid, already used or expired. Log in to see your account's status or ask for a new link."
+
+    @transaction.atomic
+    def post(self, request):
+        try:
+            user_id = int(force_str(urlsafe_base64_decode(str(request.data.get("uid", "")))))
+        except (TypeError, ValueError, OverflowError):
+            return Response({"detail": self.INVALID}, status=400)
+        user = User.objects.select_for_update().filter(pk=user_id).first()
+        if user is None or not email_verification_token.check_token(user, str(request.data.get("token", ""))):
+            return Response({"detail": self.INVALID}, status=400)
+
+        user.email_verified_at = timezone.now()
+        user.save(update_fields=["email_verified_at"])
+        log_public_action(request, user, 200)
+        transaction.on_commit(lambda: notify_admins_new_registration(user))
+        return Response({"detail": "Your e-mail is verified. The System Admin will review your registration."})
+
+
+class ResendVerificationView(APIView):
+    """POST {email}. Always the same answer, so it doesn't reveal which addresses are registered."""
+
+    permission_classes = [AllowAny]
+    throttle_scope = "resend"
+
+    def post(self, request):
+        email = str(request.data.get("email", "")).strip()
+        user = User.objects.filter(
+            email__iexact=email, email_verified_at__isnull=True, is_pending_role=True, account_status="active",
+        ).first() if email else None
+        if user:
+            send_verification_email(user)
+        return Response({"detail": "If that e-mail is registered and not yet verified, we sent it a new link."})
 
 
 class GoogleRequestView(APIView):

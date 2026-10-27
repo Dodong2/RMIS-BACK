@@ -1,7 +1,9 @@
 from datetime import date
 
+from dj_rest_auth.jwt_auth import CookieTokenRefreshSerializer
 from dj_rest_auth.serializers import LoginSerializer, UserDetailsSerializer
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
 from .models import AuditLog, Role, TemporaryReplacement, User
 
 
@@ -26,6 +28,41 @@ class EmailLoginSerializer(LoginSerializer):
     def validate_email(self, value):
         user = User.objects.filter(email__iexact=value.strip()).only("email").first() if value else None
         return user.email if user else value
+
+    def validate(self, attrs):
+        """With the right password, say why an inactive account can't log in (client 2026-10-27); with a wrong one,
+        keep the generic error so it doesn't reveal anything."""
+        try:
+            return super().validate(attrs)
+        except serializers.ValidationError:
+            user = User.objects.filter(email=attrs.get("email")).first()
+            if user and not user.is_active and user.check_password(attrs.get("password") or ""):
+                state, message = login_block(user)
+                raise serializers.ValidationError({"detail": message, "account_state": state})
+            raise
+
+
+def login_block(user):
+    """(account_state, message) for an account that can't log in yet or anymore."""
+    if user.account_status == "rejected":
+        return "rejected", "Your registration was not approved. Contact the RMIS System Admin."
+    if user.account_status == "suspended":
+        return "suspended", "Your account is suspended. Contact the RMIS System Admin."
+    if user.account_status == "deactivated":
+        return "deactivated", "This account has been deactivated."
+    if user.email_verified_at is None:
+        return "unverified", f"Verify your e-mail first: open the link we sent to {user.email}, or ask for a new one."
+    return "pending_approval", "Your e-mail is verified. Your registration is waiting for the System Admin's approval."
+
+
+class RefreshSerializer(CookieTokenRefreshSerializer):
+    """A refresh token of a deleted account answered 500 (SimpleJWT's .get raised DoesNotExist); now 401."""
+
+    def validate(self, attrs):
+        try:
+            return super().validate(attrs)
+        except User.DoesNotExist:
+            raise AuthenticationFailed("No active account found for the given token.", "no_active_account")
 
 
 PROFILE_FIELDS = ["staff_id", "gender", "campus", "college_unit", "mobile_number"]

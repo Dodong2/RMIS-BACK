@@ -206,7 +206,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "user": "300/min",            # every endpoint
         "login": "20/min",            # password guessing; one shared Wi-Fi = one IP for everyone on it
-        "register": "10/hour",        # each registration e-mails every sysadmin through Brevo
+        "register": "10/hour",        # each registration sends a verification e-mail through Brevo
+        "verify": "10/min",           # e-mail verification link
+        "resend": "3/hour",           # new verification link
         "google": "10/min",           # Google request + exchange
         "token_refresh": "30/min",
         "password_change": "5/min",
@@ -225,6 +227,7 @@ REST_AUTH = {
     "JWT_AUTH_HTTPONLY": False,   # simplest for polyrepo/cross-domain
     "USER_DETAILS_SERIALIZER": "accounts.serializers.CustomUserDetailsSerializer",
     "LOGIN_SERIALIZER": "accounts.serializers.EmailLoginSerializer",
+    "SESSION_LOGIN": False,       # JWT only; login used to leave a django_session row behind every time
 }
 
 SIMPLE_JWT = {
@@ -244,6 +247,9 @@ SUPABASE_PUBLISHABLE_KEY = env("SUPABASE_PUBLISHABLE_KEY")
 SUPABASE_SERVICE_ROLE_KEY = env("SUPABASE_SERVICE_ROLE_KEY", default="")
 SUPABASE_STORAGE_BUCKET = env("SUPABASE_STORAGE_BUCKET", default="research-documents")
 
-ACCOUNT_EMAIL_VERIFICATION = "none"
+# E-mail verification link (accounts.tokens, client 2026-10-27). RMIS has no password reset, so this only sets the link's life.
+PASSWORD_RESET_TIMEOUT = 48 * 60 * 60
+
+ACCOUNT_EMAIL_VERIFICATION = "none"  # allauth's own flow; RMIS verifies through accounts.tokens instead
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
