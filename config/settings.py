@@ -228,6 +228,7 @@ REST_AUTH = {
     "USER_DETAILS_SERIALIZER": "accounts.serializers.CustomUserDetailsSerializer",
     "LOGIN_SERIALIZER": "accounts.serializers.EmailLoginSerializer",
     "SESSION_LOGIN": False,       # JWT only; login used to leave a django_session row behind every time
+    "OLD_PASSWORD_FIELD_ENABLED": True,  # password/change/ asks for the current password (Google accounts have none)
 }
 
 SIMPLE_JWT = {

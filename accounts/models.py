@@ -9,6 +9,7 @@ STAFF_ID_PATTERN = r"^\d{6}$"
 STAFF_ID_MESSAGE = "Staff ID must be 6 digits."
 MOBILE_PATTERN = r"^(09|\+639)\d{9}$"
 MOBILE_MESSAGE = "Enter a mobile number like 09171234567 or +639171234567."
+PROFILE_EDIT_LIMIT = 3
 
 
 class Role(models.Model):
@@ -64,6 +65,9 @@ class User(AbstractUser):
         error_messages={"unique": "This Staff ID is already registered."},
     )
     email_verified_at = models.DateTimeField(null=True, blank=True)
+    # Successful self-service edits on the Profile page (client 2026-10-28), at most PROFILE_EDIT_LIMIT. The System
+    # Admin's edits in User & Access don't count and don't reset it.
+    profile_edit_count = models.PositiveSmallIntegerField(default=0)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]

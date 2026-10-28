@@ -3,6 +3,7 @@ from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.crypto import get_random_string
@@ -11,12 +12,12 @@ from django.utils.http import urlsafe_base64_decode
 from rest_framework import generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import AuditLog, Permission, Role, RolePermission, TemporaryReplacement, User
+from .models import PROFILE_EDIT_LIMIT, AuditLog, Permission, Role, RolePermission, TemporaryReplacement, User
 from .serializers import (
-    AuditLogSerializer, RoleSerializer, PendingUserSerializer, RegistrationProfileSerializer,
+    AuditLogSerializer, RoleSerializer, PendingUserSerializer, RegistrationProfileSerializer, SelfProfileSerializer,
     TemporaryReplacementSerializer, UserListSerializer, UserProfileSerializer, UserScopeSerializer,
 )
 from .permissions import HasRole
@@ -442,6 +443,36 @@ class UserProfileView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(UserListSerializer(user).data)
+
+
+PROFILE_LIMIT_MESSAGE = (
+    f"You have used all {PROFILE_EDIT_LIMIT} profile edits. Ask the RMIS System Admin to change your profile."
+)
+
+
+class SelfProfileView(APIView):
+    """GET/PATCH auth/profile/: the signed-in user's own profile (client 2026-10-28), always request.user. A PATCH
+    sends first_name, last_name, gender and mobile_number; each successful one uses one of PROFILE_EDIT_LIMIT edits.
+    The save is one conditional UPDATE, so two concurrent saves can't both use the last edit."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(SelfProfileSerializer(request.user).data)
+
+    def patch(self, request):
+        user = request.user
+        if user.profile_edit_count >= PROFILE_EDIT_LIMIT:
+            return Response({"detail": PROFILE_LIMIT_MESSAGE}, status=403)
+        serializer = SelfProfileSerializer(user, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        saved = User.objects.filter(pk=user.pk, profile_edit_count__lt=PROFILE_EDIT_LIMIT).update(
+            **serializer.validated_data, profile_edit_count=F("profile_edit_count") + 1,
+        )
+        if not saved:
+            return Response({"detail": PROFILE_LIMIT_MESSAGE}, status=403)
+        user.refresh_from_db()
+        return Response(SelfProfileSerializer(user).data)
 
 
 class UserScopeView(APIView):

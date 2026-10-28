@@ -4,7 +4,7 @@ from dj_rest_auth.jwt_auth import CookieTokenRefreshSerializer
 from dj_rest_auth.serializers import LoginSerializer, UserDetailsSerializer
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
-from .models import AuditLog, Role, TemporaryReplacement, User
+from .models import PROFILE_EDIT_LIMIT, AuditLog, Role, TemporaryReplacement, User
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -16,9 +16,17 @@ class RoleSerializer(serializers.ModelSerializer):
 class CustomUserDetailsSerializer(UserDetailsSerializer):
     role = RoleSerializer(read_only=True)
     is_pending_role = serializers.BooleanField(read_only=True)
+    has_password = serializers.SerializerMethodField()  # False for Google accounts: no local password to change
 
     class Meta(UserDetailsSerializer.Meta):
-        fields = UserDetailsSerializer.Meta.fields + ("role", "is_pending_role", "is_active", "office", "position")
+        fields = UserDetailsSerializer.Meta.fields + (
+            "role", "is_pending_role", "is_active", "office", "position", "has_password",
+        )
+        # PATCH auth/user/ used to change the name with no limit; self-service edits go through auth/profile/ now.
+        read_only_fields = fields
+
+    def get_has_password(self, user):
+        return user.has_usable_password()
 
 
 class EmailLoginSerializer(LoginSerializer):
@@ -125,6 +133,38 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     def validate_staff_id(self, value):
         return value or None  # cleared = NULL, so several accounts without one don't clash on the unique column
+
+
+SELF_PROFILE_FIELDS = ["first_name", "last_name", "gender", "mobile_number"]
+
+
+class SelfProfileSerializer(serializers.ModelSerializer):
+    """The signed-in user's own Profile page (client 2026-10-28). Only name, gender and mobile can be changed, all
+    four sent and filled in, at least one really changed. Campus and College Unit stay read-only: campus is the
+    project scope of campus-level roles and a Project Leader's project campus, so only the System Admin sets them."""
+
+    role = RoleSerializer(read_only=True)
+    edits_left = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "email", "role", *SELF_PROFILE_FIELDS, "staff_id", "campus", "college_unit", "registration_method",
+            "profile_edit_count", "edits_left",
+        ]
+        read_only_fields = [field for field in fields if field not in SELF_PROFILE_FIELDS]
+        extra_kwargs = {field: {"required": True, "allow_blank": False} for field in SELF_PROFILE_FIELDS}
+
+    def get_edits_left(self, user):
+        return max(0, PROFILE_EDIT_LIMIT - user.profile_edit_count)
+
+    def validate(self, attrs):
+        locked = set(self.initial_data) - set(SELF_PROFILE_FIELDS)
+        if locked:
+            raise serializers.ValidationError({key: "This field can't be changed on your profile." for key in sorted(locked)})
+        if all(attrs[field] == getattr(self.instance, field) for field in SELF_PROFILE_FIELDS):
+            raise serializers.ValidationError("Nothing changed. Change at least one field.")
+        return attrs
 
 
 class UserScopeSerializer(serializers.Serializer):

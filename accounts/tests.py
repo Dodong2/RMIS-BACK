@@ -10,7 +10,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from accounts.models import AuditLog, Role, RolePermission, TemporaryReplacement, User
 from accounts.permission_seed import PERMISSIONS
 from accounts.permissions import scoped_projects
-from accounts.testing import FAST_HASHER, PASSWORD, RMISTestCase
+from accounts.testing import FAST_HASHER, PASSWORD, ConcurrencyTestCase, RMISTestCase
 from research_projects.models import CollegeUnit, Project
 
 
@@ -810,3 +810,182 @@ class UserPickerTests(RMISTestCase):
         names = {u["id"]: u["full_name"] for u in response.data}
         self.assertEqual(names[named.id], "Dan Azriel San Agustin")
         self.assertEqual(names[unnamed.id], unnamed.email)
+
+
+class SelfProfileTests(RMISTestCase):
+    """Profile page (client 2026-10-28): the user changes their own name, gender and mobile, at most 3 times."""
+
+    URL = "/api/auth/profile/"
+
+    def setUp(self):
+        super().setUp()
+        self.user = self.make_user(
+            "crc_chair", first_name="Ana", last_name="Cruz", gender="female", mobile_number="09171234567",
+            staff_id="123456", campus="Siniloan", college_unit="",
+        )
+        self.client = self.client_for(self.user)
+
+    def body(self, **changes):
+        return {"first_name": "Ana", "last_name": "Cruz", "gender": "female", "mobile_number": "09171234567", **changes}
+
+    def test_shows_the_signed_in_users_own_profile(self):
+        response = self.client.get(self.URL)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            (response.data["email"], response.data["staff_id"], response.data["campus"], response.data["role"]["code"],
+             response.data["edits_left"]),
+            (self.user.email, "123456", "Siniloan", "crc_chair", 3),
+        )
+        self.assertNotIn("password", response.data)
+        self.assertEqual(APIClient().get(self.URL).status_code, 401)
+
+    def test_three_successful_edits_then_locked(self):
+        for i, name in enumerate(["Anna", "Annie", "Ann"], start=1):
+            response = self.client.patch(self.URL, self.body(first_name=name), format="json")
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual((response.data["first_name"], response.data["edits_left"]), (name, 3 - i))
+
+        fourth = self.client.patch(self.URL, self.body(first_name="Anita"), format="json")
+        self.user.refresh_from_db()
+        self.assertEqual(fourth.status_code, 403)
+        self.assertEqual((self.user.first_name, self.user.profile_edit_count), ("Ann", 3))
+        self.assertEqual(self.client_for(self.user).get(self.URL).data["edits_left"], 0)  # a new session keeps it
+
+    def test_one_changed_field_is_enough(self):
+        response = self.client.patch(self.URL, self.body(mobile_number="+639181234567"), format="json")
+
+        self.user.refresh_from_db()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual((self.user.mobile_number, self.user.gender, self.user.profile_edit_count), ("+639181234567", "female", 1))
+
+    def test_invalid_unchanged_or_incomplete_saves_use_no_edit(self):
+        bad = [
+            self.body(),                                   # nothing changed
+            self.body(first_name="  Ana "),                # only whitespace changed
+            self.body(gender="other"),
+            self.body(mobile_number="12345"),
+            self.body(last_name=""),
+            {"first_name": "Anna"},                        # the other three missing
+        ]
+        for data in bad:
+            self.assertEqual(self.client.patch(self.URL, data, format="json").status_code, 400, data)
+
+        self.user.refresh_from_db()
+        self.assertEqual((self.user.first_name, self.user.profile_edit_count), ("Ana", 0))
+
+    def test_locked_fields_are_refused_and_nothing_is_saved(self):
+        other_role = Role.objects.get(code="system_admin")
+        for field, value in [
+            ("campus", "Los Baños"), ("college_unit", "CCS"), ("staff_id", "654321"), ("email", "x@lspu.test"),
+            ("role", other_role.id), ("profile_edit_count", 0), ("is_superuser", True), ("account_status", "active"),
+        ]:
+            response = self.client.patch(self.URL, self.body(first_name="Anna", **{field: value}), format="json")
+            self.assertEqual(response.status_code, 400, field)
+            self.assertIn(field, response.data)
+
+        self.user.refresh_from_db()
+        self.assertEqual(
+            (self.user.first_name, self.user.campus, self.user.staff_id, self.user.role.code, self.user.is_superuser,
+             self.user.profile_edit_count),
+            ("Ana", "Siniloan", "123456", "crc_chair", False, 0),
+        )
+
+    def test_only_changes_the_signed_in_user(self):
+        other = self.make_user("project_staff", first_name="Ben", last_name="Reyes")
+
+        response = self.client.patch(f"{self.URL}?user={other.id}", self.body(first_name="Anna", id=other.id), format="json")
+        self.client.patch(self.URL, self.body(first_name="Anna"), format="json")
+
+        other.refresh_from_db()
+        self.assertEqual(response.status_code, 400)  # id is not an editable field
+        self.assertEqual((other.first_name, other.profile_edit_count), ("Ben", 0))
+
+    def test_auth_user_no_longer_changes_the_name(self):
+        response = self.client.patch("/api/auth/user/", {"first_name": "Hacked", "last_name": "X"}, format="json")
+
+        self.user.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((self.user.first_name, self.user.last_name), ("Ana", "Cruz"))
+        self.assertEqual(self.client.get("/api/auth/user/").data["email"], self.user.email)
+
+    def test_admin_edits_neither_use_nor_reset_the_counter(self):
+        self.client.patch(self.URL, self.body(first_name="Anna"), format="json")
+        admin = self.client_for(self.make_user("system_admin"))
+
+        response = admin.patch(f"/api/admin/users/{self.user.id}/profile/",
+                               {"first_name": "Ana", "campus": "Los Baños"}, format="json")
+
+        self.user.refresh_from_db()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual((self.user.first_name, self.user.campus, self.user.profile_edit_count), ("Ana", "Los Baños", 1))
+
+
+class SelfProfileConcurrencyTests(ConcurrencyTestCase):
+    def test_two_saves_at_once_cannot_both_use_the_last_edit(self):
+        user = self.make_user("project_staff", first_name="Ana", last_name="Cruz", gender="female",
+                              mobile_number="09171234567", profile_edit_count=2)
+        self.widen("accounts.views.SelfProfileSerializer")  # both pass the count check before either saves
+
+        results = self.run_concurrently(*[
+            lambda name=name: self.client_for(user).patch(
+                "/api/auth/profile/",
+                {"first_name": name, "last_name": "Cruz", "gender": "female", "mobile_number": "09171234567"},
+                format="json",
+            )
+            for name in ("Anna", "Annie")
+        ])
+
+        user.refresh_from_db()
+        self.assertEqual(sorted(r.status_code for r in results), [200, 403], results)
+        self.assertEqual(user.profile_edit_count, 3)
+
+
+class PasswordChangeTests(RMISTestCase):
+    """Profile page password change (client 2026-10-28): the current password is required; Google accounts have none."""
+
+    URL = "/api/auth/password/change/"
+    NEW = "N3w-strong-pass-2026"
+
+    def change(self, user, **data):
+        return self.client_for(user).post(self.URL, {"new_password1": self.NEW, "new_password2": self.NEW, **data}, format="json")
+
+    def test_needs_the_right_current_password(self):
+        user = self.make_user("project_leader", profile_edit_count=1)
+
+        missing = self.change(user)
+        wrong = self.change(user, old_password="not-it")
+        user.refresh_from_db()
+        self.assertEqual((missing.status_code, wrong.status_code), (400, 400))
+        self.assertIn("old_password", wrong.data)
+        self.assertTrue(user.check_password(PASSWORD))
+
+        ok = self.change(user, old_password=PASSWORD)
+        user.refresh_from_db()
+        self.assertEqual(ok.status_code, 200, ok.data)
+        self.assertTrue(user.check_password(self.NEW))
+        self.assertEqual(user.profile_edit_count, 1)  # password changes don't use profile edits
+
+    def test_weak_or_mismatched_new_password_is_refused(self):
+        user = self.make_user("project_staff")
+
+        weak = self.client_for(user).post(self.URL, {"old_password": PASSWORD, "new_password1": "123", "new_password2": "123"}, format="json")
+        mismatch = self.change(user, old_password=PASSWORD, new_password2="Other-pass-2026")
+
+        user.refresh_from_db()
+        self.assertEqual((weak.status_code, mismatch.status_code), (400, 400))
+        self.assertTrue(user.check_password(PASSWORD))
+
+    def test_google_account_has_no_password_to_change(self):
+        user = self.make_user("project_staff", registration_method="google")
+        user.set_unusable_password()
+        user.save()
+
+        response = self.change(user, old_password="")
+        details = self.client_for(user).get("/api/auth/user/").data
+
+        user.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(user.has_usable_password())
+        self.assertFalse(details["has_password"])
+        self.assertTrue(self.client_for(self.make_user("riuh")).get("/api/auth/user/").data["has_password"])
