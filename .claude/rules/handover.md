@@ -1,4 +1,4 @@
-> **STALE (2026-10-23, still true 2026-10-27):** the branch/push/migration workflow and module notes below are history; the current state is in "Last thing done" at the bottom. Work is on `main`, Carl pushes and runs every `migrate`, and tasks are gated by `dss/CLAUDE.md` (parent folder, `../CLAUDE.md`) (GO TASK N). Use this file only for module history.
+> **STALE (2026-10-23, still true 2026-10-28):** the branch/push/migration workflow and module notes below are history; the current state is in "Last thing done" at the bottom. Work is on `main`, Carl pushes and runs every `migrate`, and tasks are gated by `dss/CLAUDE.md` (parent folder, `../CLAUDE.md`) (GO TASK N). Use this file only for module history.
 
 # RMIS Backend — Current Status
 
@@ -266,46 +266,24 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-10-27 batch, all on `main`. Phases: audit, then auth design, then RBAC plan, then cleanup, then implementation. Memory note: `nine-roles-auth-cleanup-2026-10-27`. Full suite 449/449 OK after T7 (local `rmis-testdb`, 211 s).
-- **Database cleanup** (`8cae785`):
-  - `manage.py cleanup_fresh_start --keep-email <admin>` is a dry run by default. `--execute --expect N` deletes.
-  - Carl executed it on 2026-10-27: 607 rows, 10 Storage files and 7 Supabase Auth users were deleted, with no backup (Carl's decision).
-  - Left: 1 user (id 1, carlseighartaliode@gmail.com, system_admin), the reference lists (College Units, RDE Thrusts, Funding Types, Cooperating Agencies, Endorsers, LIB Items, roles and permissions) and 0 projects.
-- **Registration** (`8a438e3`, accounts 0025):
-  - New User fields: gender, campus (4 fixed), college_unit, mobile_number, staff_id (unique; 6 digits via `STAFF_ID_PATTERN`) and email_verified_at.
-  - account_status gains `rejected`.
-  - Password validators run at registration. System Admin can't be requested.
-  - New public `GET auth/registration-options/`.
-- **E-mail verification, approach C** (`c5f3532`):
-  - Register sends only a verification link: `accounts/tokens.py`, HMAC, single-use, 48 h via `PASSWORD_RESET_TIMEOUT`.
-  - `POST auth/verify-email/` verifies the address and notifies the admins.
-  - `POST auth/resend-verification/` always gives a generic answer.
-  - Login returns `account_state` (unverified, pending_approval, rejected, suspended or deactivated) when the password is right.
-  - A deleted account's refresh is a 401 (it was a 500).
-  - `SESSION_LOGIN` off; Brevo timeout plus logging.
-- **Pending and Reject** (`a109a01`):
-  - The Pending list shows only verified registrations, and Approve needs a verified e-mail.
-  - `POST admin/pending-users/<id>/reject/ {reason?}` sends a rejection e-mail. A rejected account keeps `is_pending_role`.
-- **Google sign-up** (`3abf133`): same fields minus the password. The account is created verified and goes straight to Pending.
-- **12 roles become 9** (`fc329dc`, accounts 0026, then `2c38fea`, accounts 0027):
-  - `drd` merged into `crc_chair` ("CRC/CRD") with the CRC Chair's permissions only.
-  - `program_leader` and `study_leader` merged into `project_leader` ("Project Leader/Program Leader/Study Leader", own-led projects only).
-  - The legacy roles were deleted.
-  - The DRD-only actions now belong to the VPREI (quarterly approve, DSS, forecasting with Finance, renewal and targets/logs with RIUH).
-  - `scripts/permission_parity.py` expects 9 roles (`ca95028`).
-- **Campus scope** (`3bca5cb`):
-  - CRC/CRD, Finance, RIUH and Procurement are scoped by `User.campus`, not `scope["campus"]`. `scope["college"]` stays.
-  - `PATCH admin/users/<id>/scope/ {campus}` writes `User.campus`.
-  - A project's campus is its Project Leader's campus (manual and Excel); a leader without a campus keeps the free choice.
-- **Docs** (`20c2975`): CLAUDE.md lists 9 roles; `docs/dss-CLAUDE.md` is the backup of the updated dss/CLAUDE.md.
-- **Migrations:** accounts 0025, 0026 and 0027 were MIGRATED by Carl on 2026-10-27. Parity: 0 differences on Supabase.
-- **Frontend:** every endpoint and field above already has its UI (rmis-frontend `c0a1b42`, `e6988cf`, `a76d062`, `dcde2a4`). Nothing is pending to consume.
+2026-10-28 Task 2 (Profile page), on `main`, PUSHED. Memory note: `profile-task2-2026-10-28`. Full suite 477/477 (local `rmis-testdb`).
+- **Own profile** (`a79e72a`, accounts 0028):
+  - `GET/PATCH auth/profile/` is always `request.user`. PATCH takes only first_name, last_name, gender and mobile_number, all filled and valid, at least one really changed. Any other field is a 400.
+  - Campus and College Unit are read-only for every role (campus drives `scoped_projects` and the Project Leader campus lock). The System Admin still changes them in User & Access.
+  - `User.profile_edit_count`: 3 successful edits max (one conditional UPDATE, so two concurrent saves can't both use the last edit); the 4th is a 403. Admin edits neither use nor reset it.
+  - `PATCH auth/user/` no longer writes anything.
+- **Password change** (same commit): `OLD_PASSWORD_FIELD_ENABLED`, so `auth/password/change/` needs the current password. Google accounts (unusable password) can't use it. `auth/user/` gains `has_password`.
+- **Excel Staff ID** (`14b38f4`):
+  - Template gets "Project Leader Staff ID" and a Project Team "Staff ID (optional)" column (Text cells). Staff ID picks the account, e-mail is the fallback, so older templates still work; both filled but different accounts is an error.
+  - Cells read as typed, never zero-padded; a bad or unknown Staff ID is an error with a "format the cell as Text" hint.
+  - Blank leader gender/contact and blank team name/gender are filled from the account.
+- **Migrations:** accounts 0028 MIGRATED (checked with `showmigrations`, 2026-10-28).
+- **Frontend:** everything above has its UI (rmis-frontend `a768881`, `3828e10`). Nothing is pending to consume.
+- The 2026-10-27 batch (9 roles, e-mail verification, Reject, campus scope, cleanup; `8cae785`..`20c2975`) is pushed and migrated too (accounts 0025-0027).
 
 ## Next thing to do in this repo
 1. Carl:
-   - Push `8cae785`..`20c2975` (10 commits plus this handover) and deploy together with the frontend.
-   - Set Staff ID `000000` on his own profile (User & Access, Edit Profile).
-   - Browser-check the flow end to end: register, then verify the e-mail, then admin Approve or Reject, then log in; also Google sign-up, the CRC/CRD and Project Leader nav, and the campus lock.
-   - The Brevo verification e-mail has not been sent live yet.
-2. Optional, not approved: a backend gate on `VerifyRecordView`; a read-only check of the 1.9-3.2 s GET latency.
+   - Deploy backend + frontend together (both pushed).
+   - Browser-check: /profile (3-edit lock, Campus/College read-only, password change with the current password, Google account shows no password), Excel import with Staff IDs (leading zero), plus the still-open 2026-10-27 checks (register → verify e-mail → Approve/Reject → login, Google sign-up, CRC/CRD and Project Leader nav, campus lock). The Brevo verification e-mail has not been sent live yet.
+2. Known gaps, not approved: other JWTs stay valid after a password change (no blacklist); a backend gate on `VerifyRecordView`; a read-only check of the 1.9-3.2 s GET latency.
 3. Wait for the client's next changes. Every task goes through `dss/CLAUDE.md` (plan, then GO TASK N, then report, then STOP).
