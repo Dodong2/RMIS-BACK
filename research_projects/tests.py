@@ -711,6 +711,132 @@ class ExcelImportTests(RMISTestCase):
         self.assertFalse(Project.objects.filter(project_code="LSPU-X1").exists())
 
 
+class StaffIdExcelTests(RMISTestCase):
+    """Client 2026-10-28: the Staff ID picks the Project Leader and Project Team accounts; the e-mail is the fallback
+    for older templates. Blank Gender/Contact No./Name cells are filled from the account's profile."""
+
+    fill_project = ExcelImportTests.fill_project
+    upload = ExcelImportTests.upload
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.make_user("system_admin")
+        self.leader = self.make_user("project_leader", email="leader@lspu.test")
+        CollegeUnit.objects.create(name="CTE")
+        seed_rde_agenda(RdeThrust)
+        self.workbook = openpyxl.load_workbook(io.BytesIO(self.client_for(self.admin).get("/api/projects/import-template/").content))
+        User.objects.filter(pk=self.leader.pk).update(
+            staff_id="012345", gender="female", mobile_number="09171234567", first_name="Lea", last_name="Dimaano",
+        )
+        self.staff = self.make_user("project_staff", staff_id="222222", gender="male", first_name="Ben", last_name="Reyes")
+
+    def by_staff_id(self, value, **values):
+        self.fill_project(**{"Project Leader Staff ID": value, "Project Leader E-mail Address": None,
+                             "Project Leader Gender": None, **values})
+
+    def dry_run(self):
+        buffer = io.BytesIO()
+        self.workbook.save(buffer)
+        buffer.seek(0)
+        buffer.name = "registration.xlsx"
+        return self.client_for(self.admin).post("/api/projects/import/?dry_run=1", {"file": buffer}, format="multipart")
+
+    def lead_error(self):
+        response = self.upload()
+        self.assertEqual(response.status_code, 400)
+        return [e["message"] for e in response.data["errors"] if e["field"] == "Project Leader Staff ID"]
+
+    def test_staff_ids_pick_the_accounts_and_fill_their_profiles(self):
+        self.by_staff_id("012345")
+        self.workbook["Project Team"].append(["Team Member", None, None, None, "222222"])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        project = Project.objects.get()
+        self.assertEqual((project.lead, project.lead_gender, project.contact_number), (self.leader, "female", "09171234567"))
+        member = project.team_members.get()
+        self.assertEqual((member.user, member.name, member.gender), (self.staff, "Ben Reyes", "male"))
+
+    def test_number_cells_and_spaces_are_read_as_typed(self):
+        User.objects.filter(pk=self.leader.pk).update(staff_id="123456")
+        for value in [123456, 123456.0, " 123456 "]:
+            self.by_staff_id(value)
+            response = self.dry_run()
+            self.assertEqual(response.status_code, 200, (value, response.data))
+            self.assertEqual(response.data["preview"]["lead_email"], "leader@lspu.test")
+
+    def test_filled_cells_stay_the_projects_own_values(self):
+        self.by_staff_id("012345", **{"Project Leader Gender": "Male", "Contact No./s.": "0998 164 9081"})
+        self.workbook["Project Team"].append(["Team Member", "B. Reyes", "Female", None, "222222"])
+
+        self.assertEqual(self.upload().status_code, 201)
+        project = Project.objects.get()
+        self.assertEqual((project.lead_gender, project.contact_number), ("male", "0998 164 9081"))
+        self.assertEqual(project.team_members.values_list("name", "gender").get(), ("B. Reyes", "female"))
+
+    def test_bad_or_unknown_staff_ids_are_errors_without_guessing(self):
+        self.by_staff_id(12345)  # 012345 typed in a Number cell: the zero is gone
+        self.assertIn("format the cell as Text", self.lead_error()[0])
+        self.by_staff_id("12345a")
+        self.assertIn("Staff ID must be 6 digits", self.lead_error()[0])
+        self.by_staff_id("999999")
+        self.assertIn("No RMIS account with Staff ID '999999'", self.lead_error()[0])
+        other = self.make_user("project_leader", email="other@lspu.test")
+        self.by_staff_id("012345", **{"Project Leader E-mail Address": other.email})
+        self.assertEqual(self.lead_error(), ["The Staff ID and the e-mail belong to two different RMIS accounts."])
+        self.assertFalse(Project.objects.exists())
+
+    def test_team_staff_id_and_e_mail_must_be_the_same_account(self):
+        self.fill_project()
+        self.workbook["Project Team"].append(["Team Member", "Ben", None, self.leader.email, "222222"])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual([(e["sheet"], e["row"], e["field"]) for e in response.data["errors"]],
+                         [("Project Team", 2, "Staff ID (optional)")])
+
+    def test_same_staff_id_and_e_mail_is_fine(self):
+        self.by_staff_id("012345", **{"Project Leader E-mail Address": "leader@lspu.test"})
+        self.assertEqual(self.upload().status_code, 201)
+
+    def test_older_template_without_staff_id_columns_still_uses_the_e_mail(self):
+        sheet = self.workbook["Project"]
+        sheet.delete_rows(next(r.row for r in sheet["A"] if r.value == "Project Leader Staff ID"))
+        self.workbook["Project Team"].delete_cols(5)
+        self.fill_project(**{"Project Leader Gender": None})
+        self.workbook["Project Team"].append(["Team Member", None, None, self.staff.email])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        project = Project.objects.get()
+        self.assertEqual((project.lead, project.lead_gender), (self.leader, "female"))
+        self.assertEqual(project.team_members.values_list("user", "name").get(), (self.staff.pk, "Ben Reyes"))
+
+    def test_template_cells_for_staff_ids_are_text(self):
+        sheet = self.workbook["Project"]
+        row = next(r.row for r in sheet["A"] if r.value == "Project Leader Staff ID")
+        self.assertEqual(sheet.cell(row=row, column=2).number_format, "@")
+        self.assertEqual(self.workbook["Project Team"]["E1"].value, "Staff ID (optional)")
+
+    def test_preview_shows_the_account_the_staff_id_picked(self):
+        self.by_staff_id("012345")
+        self.workbook["Project Team"].append(["Co-Project Leader", None, None, None, "222222"])
+
+        response = self.dry_run()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        preview = response.data["preview"]
+        self.assertEqual((preview["lead_email"], preview["lead_gender"], preview["contact_number"]),
+                         ("leader@lspu.test", "female", "09171234567"))
+        self.assertEqual(preview["co_leaders"], [{"name": "Ben Reyes", "gender": "male"}])
+        self.assertFalse(Project.objects.exists())
+        self.assertEqual(self.upload().status_code, 201)
+        self.assertEqual(Project.objects.get().team_members.get().user, self.staff)
+
+
 class WorkPlanExcelTests(RMISTestCase):
     """Client 2026-10-23: Manual Entry Step 5 fills XI. Work Plan from the template's Work Plan sheet; nothing is saved."""
 

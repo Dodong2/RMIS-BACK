@@ -13,7 +13,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
-from accounts.models import User
+from accounts.models import STAFF_ID_MESSAGE, STAFF_ID_PATTERN, User
 from accounts.permissions import LEADER_ROLES
 from budget_lib.models import LibItem, LineItem, allocation_periods
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer, line_total
@@ -53,7 +53,9 @@ PROJECT_FIELDS = [
     ("LSPU Faculty Research Number (Project Code)", "project_code", "text", None, "Required, must be unique"),
     ("Program Code (if under a Program)", "program", "program", None, "Optional; code of an existing RMIS Program"),
     ("Funding Type", "funding_type", "choice", FUNDING_TYPES, "Blank = Institutional (LSPU-Funded)"),
-    ("Project Leader E-mail Address", "lead", "user", None, "Required; RMIS account with the Project Leader role"),
+    ("Project Leader Staff ID", "lead_staff_id", "staff_id", None,
+     "RMIS account with the Project Leader role; format the cell as Text so leading zeros stay"),
+    ("Project Leader E-mail Address", "lead", "user", None, "Used when the Staff ID is blank"),
     ("Project Leader Gender", "lead_gender", "choice", Project.GENDER_CHOICES, "Male or Female"),
     ("Contact No./s.", "contact_number", "text", None, ""),
     ("Start Date", "start_date", "date", None, "Date cell or YYYY-MM-DD"),
@@ -121,6 +123,7 @@ TABLE_SHEETS = {
         ("Name", "name", "text", None),
         ("Gender", "gender", "choice", Project.GENDER_CHOICES),
         ("RMIS E-mail (optional)", "user", "user", None),
+        ("Staff ID (optional)", "user_staff_id", "staff_id", None),
     ],
     "Study Components": [
         ("Study Title", "title", "text", None),
@@ -214,6 +217,19 @@ def _convert(raw, kind, choices):
         if not user:
             raise CellError(f"No RMIS account with e-mail '{raw}'.")
         return user.pk
+    if kind == "staff_id":
+        # A number cell drops leading zeros; it is read as typed (123456.0 -> "123456"), never padded or guessed.
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and float(raw).is_integer():
+            text = str(int(raw))
+        else:
+            text = str(raw).strip()
+        zeros = " If it starts with 0, format the cell as Text." if text[:1] != "0" else ""
+        if not re.fullmatch(STAFF_ID_PATTERN, text):
+            raise CellError(f"'{raw}': {STAFF_ID_MESSAGE}{zeros}")
+        user = User.objects.filter(staff_id=text).first()  # staff_id is unique
+        if not user:
+            raise CellError(f"No RMIS account with Staff ID '{text}'.{zeros}")
+        return user.pk
     if kind == "program":
         program = Program.objects.filter(code__iexact=str(raw).strip()).first()
         if not program:
@@ -296,6 +312,8 @@ def build_template():
                 rows = rows.filter(parent=None) if field == "rde_thrust" else rows.none()
             allowed = "; ".join(rows.values_list("name", flat=True))
         ws.append([label, None, f"{note}. {allowed}".strip(". ") if allowed else note])
+        if kind == "staff_id":
+            ws.cell(row=ws.max_row, column=2).number_format = "@"
     ws.column_dimensions["A"].width = 45
     ws.column_dimensions["B"].width = 60
     ws.column_dimensions["C"].width = 70
@@ -306,6 +324,8 @@ def build_template():
         sheet.append([header for header, *_ in columns])
         for i, (header, _, kind, choices) in enumerate(columns):
             sheet.column_dimensions[get_column_letter(i + 1)].width = max(18, len(header) + 4)
+            if kind == "staff_id":
+                sheet.column_dimensions[get_column_letter(i + 1)].number_format = "@"
             allowed = _allowed(kind, choices)
             if allowed:
                 legend = ". See the Legend sheet." if name == "Budget Requirements" and header == "Category" else ""
@@ -414,6 +434,37 @@ def read_work_plan(file_obj):
     ], []
 
 
+def _pick_account(data, staff_field, email_field, error):
+    """Staff ID first, the e-mail for older templates (client 2026-10-28). Both filled must be the same account.
+    Returns the account, or None (none given, or the conflict was reported through error)."""
+    by_staff, by_email = data.pop(staff_field, None), data.get(email_field)
+    if by_staff and by_email and by_staff != by_email:
+        error("The Staff ID and the e-mail belong to two different RMIS accounts.")
+        return None
+    if by_staff:
+        data[email_field] = by_staff
+    return User.objects.filter(pk=data[email_field]).first() if data.get(email_field) else None
+
+
+def _fill_from_accounts(project_data, tables, errors):
+    """Resolve the Project Leader and Project Team accounts and fill blank Gender/Contact No./Name from their profiles.
+    Filled cells are kept: they are this project's own values."""
+    lead = _pick_account(project_data, "lead_staff_id", "lead", lambda message: errors.append(
+        {"sheet": "Project", "row": None, "field": "Project Leader Staff ID", "message": message}))
+    if lead:
+        if lead.gender:
+            project_data.setdefault("lead_gender", lead.gender)
+        if lead.mobile_number:
+            project_data.setdefault("contact_number", lead.mobile_number)
+    for row_number, data in tables.get("Project Team", []):
+        member = _pick_account(data, "user_staff_id", "user", lambda message, row=row_number: errors.append(
+            {"sheet": "Project Team", "row": row, "field": "Staff ID (optional)", "message": message}))
+        if member:
+            data.setdefault("name", member.display_name)
+            if member.gender:
+                data.setdefault("gender", member.gender)
+
+
 def _serializer_errors(sheet, row, serializer_errors, labels):
     items = []
     for field, messages in serializer_errors.items():
@@ -438,6 +489,7 @@ def import_workbook(file_obj, request):
     project_data = _read_project_sheet(wb["Project"], errors)
     tables = {name: _read_table(wb[name], name, errors) for name in TABLE_SHEETS if name in wb.sheetnames}
     _check_work_plan(tables.get("Work Plan", []), errors)
+    _fill_from_accounts(project_data, tables, errors)
     if errors:
         return None, errors
 
