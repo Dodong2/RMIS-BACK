@@ -79,3 +79,13 @@ def delete_objects(paths):
             json={"prefixes": paths[start:start + 1000]},
         )
         resp.raise_for_status()
+
+
+def delete_documents(paths):
+    """Remove objects from the bucket (Task 15, 2026-10-30: the files of a deleted Draft project)."""
+    resp = requests.delete(
+        f"{settings.SUPABASE_URL}/storage/v1/object/{settings.SUPABASE_STORAGE_BUCKET}",
+        headers=_headers(),
+        json={"prefixes": paths},
+    )
+    resp.raise_for_status()

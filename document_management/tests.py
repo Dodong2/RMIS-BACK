@@ -197,3 +197,21 @@ class StagedUploadTests(RMISTestCase):
         self.assertEqual(self.register(other, token).status_code, 400)
         self.assertEqual(self.register(self.admin, token + "x").status_code, 400)
         self.move_document.assert_not_called()
+
+
+class StorageDeleteTests(RMISTestCase):
+    def test_delete_documents_removes_the_objects_from_the_bucket(self):
+        """Task 15 (2026-10-30): a deleted Draft's files leave Supabase Storage in one call."""
+        from unittest import mock
+
+        from django.conf import settings
+
+        from document_management.storage import delete_documents
+
+        with mock.patch("document_management.storage.requests.delete") as delete:
+            delete_documents(["P-1/ntp/v1_NTP.pdf", "P-1/moa/v1_MOA.pdf"])
+
+        url = delete.call_args.args[0]
+        self.assertTrue(url.endswith(f"/storage/v1/object/{settings.SUPABASE_STORAGE_BUCKET}"))
+        self.assertEqual(delete.call_args.kwargs["json"], {"prefixes": ["P-1/ntp/v1_NTP.pdf", "P-1/moa/v1_MOA.pdf"]})
+        delete.return_value.raise_for_status.assert_called_once()

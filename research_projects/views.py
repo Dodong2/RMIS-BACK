@@ -1,15 +1,18 @@
+import logging
 from datetime import date
 
+import requests
 from django.db import transaction
 from django.http import HttpResponse
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope, role_can
+from accounts.permissions import HasRole, ProjectVisibleMixin, acting_for, ensure_in_scope, role_can
 from budget_lib.models import allocation_periods
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from config.concurrency import AtomicMutationMixin, idempotent, lock
+from document_management.storage import delete_documents
 from outputs.serializers import ExpectedOutputSerializer
 from . import importer
 from .models import (
@@ -20,7 +23,9 @@ from .serializers import (
     ProjectTeamMemberSerializer, StudySerializer,
     TargetBeneficiarySerializer, WorkPlanMilestoneSerializer, can_edit_registration, ensure_registrant_in_scope,
 )
-from .workflow import ensure_registration_open
+from .workflow import REVIEW_STATUS_LABELS, ensure_registration_open, review_status
+
+logger = logging.getLogger(__name__)
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -149,7 +154,7 @@ class ProjectListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
 
-class ProjectDetailView(AtomicMutationMixin, ProjectVisibleMixin, generics.RetrieveUpdateAPIView):
+class ProjectDetailView(AtomicMutationMixin, ProjectVisibleMixin, generics.RetrieveUpdateDestroyAPIView):
     project_lookup = ""
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
@@ -158,6 +163,32 @@ class ProjectDetailView(AtomicMutationMixin, ProjectVisibleMixin, generics.Retri
         if self.request.method in ("PUT", "PATCH"):
             return [HasRole("projects.edit")]
         return [permissions.IsAuthenticated()]
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        """Task 15/16 (2026-10-30): only a Draft (never submitted) can be deleted, by its Project Leader (or acting
+        replacement) or the System Admin. Its rows, draft LIB and documents go with it; the stored files are removed
+        after commit, and a storage failure is only logged."""
+        project = lock(Project.objects, pk=self.get_object().pk)
+        user = request.user
+        if not (user.role and user.role.code == "system_admin") and project.lead_id not in [user.pk, *acting_for(user)]:
+            return Response({"detail": "Only the project's Project Leader can delete it."}, status=status.HTTP_403_FORBIDDEN)
+        current = review_status(project)
+        if current != "draft":
+            return Response({"detail": f"Only a Draft can be deleted; this proposal is {REVIEW_STATUS_LABELS[current]}."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        paths = list(project.documents.values_list("storage_path", flat=True))
+        project.delete()
+        if paths:
+            transaction.on_commit(lambda: _delete_stored_files(paths))
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _delete_stored_files(paths):
+    try:
+        delete_documents(paths)
+    except requests.RequestException:
+        logger.exception("Deleting the stored files of a deleted Draft project failed: %s", paths)
 
     def perform_update(self, serializer):
         old_status = serializer.instance.status

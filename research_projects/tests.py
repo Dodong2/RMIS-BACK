@@ -3,6 +3,7 @@ import io
 from decimal import Decimal
 
 import openpyxl
+import requests
 
 from accounts.testing import RMISTestCase
 from accounts.models import User
@@ -557,6 +558,72 @@ class ProjectCampusTests(RMISTestCase):
         self.assertEqual([p["project_code"] for p in self.client_for(staff).get("/api/projects/").data], ["M-1"])
         self.assertEqual(self.client_for(staff).get(f"/api/projects/{theirs.pk}/").status_code, 404)
         self.assertEqual(self.client_for(other_leader).get(f"/api/projects/{mine.pk}/").status_code, 404)
+
+
+class DraftDeleteTests(RMISTestCase):
+    """Task 15/16 (2026-10-30): a Draft proposal can be deleted by its Project Leader (or the System Admin), with its
+    rows, draft LIB and documents; nothing that was submitted can be, through the UI or the API."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+
+        from document_management.models import Document
+
+        self.leader = self.make_user("project_leader", campus="Siniloan")
+        self.project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader, campus="Siniloan")
+        self.budget = LineItemBudget.objects.create(project=self.project, version_number=1)
+        Study.objects.create(project=self.project, title="Study 1")
+        Document.objects.create(project=self.project, document_type="ntp", version_number=1, storage_path="P-1/ntp/v1_NTP.pdf",
+                                file_name="NTP.pdf", file_size=1, uploaded_by=self.leader)
+        patcher = mock.patch("research_projects.views.delete_documents")
+        self.addCleanup(patcher.stop)
+        self.delete_documents = patcher.start()
+        self.url = f"/api/projects/{self.project.pk}/"
+
+    def delete(self, user):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client_for(user).delete(self.url)
+
+    def test_the_leader_deletes_a_draft_with_its_rows_lib_and_files(self):
+        from document_management.models import Document
+
+        response = self.delete(self.leader)
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Project.objects.exists())
+        self.assertEqual((Study.objects.count(), LineItemBudget.objects.count(), Document.objects.count()), (0, 0, 0))
+        self.delete_documents.assert_called_once_with(["P-1/ntp/v1_NTP.pdf"])
+
+    def test_nothing_past_draft_can_be_deleted(self):
+        for status in ("submitted", "crc_processing", "for_checking", "returned", "endorsed", "certifying", "certified"):
+            LineItemBudget.objects.filter(pk=self.budget.pk).update(status=status)
+            with self.subTest(status=status):
+                response = self.delete(self.leader)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("Only a Draft", response.data["detail"])
+        self.assertTrue(Project.objects.exists())
+        self.delete_documents.assert_not_called()
+
+    def test_only_its_leader_or_the_system_admin_deletes_it(self):
+        staff = self.make_user("project_staff", campus="Siniloan")
+        from research_projects.models import ProjectTeamMember
+        ProjectTeamMember.objects.create(project=self.project, member_role="member", name="Staff", user=staff)
+
+        self.assertEqual(self.delete(self.make_user("project_leader", campus="Siniloan")).status_code, 404)
+        self.assertEqual(self.delete(self.make_user("crc_chair", campus="Siniloan")).status_code, 404)  # Drafts are hidden
+        self.assertEqual(self.delete(staff).status_code, 403)
+        self.assertTrue(Project.objects.exists())
+        self.assertEqual(self.delete(self.make_user("system_admin")).status_code, 204)
+
+    def test_a_storage_failure_still_deletes_the_draft(self):
+        self.delete_documents.side_effect = requests.ConnectionError("storage down")
+
+        with self.assertLogs("research_projects.views", level="ERROR"):
+            response = self.delete(self.leader)
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Project.objects.exists())
 
 class ExcelImportTests(RMISTestCase):
     def setUp(self):
