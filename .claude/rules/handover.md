@@ -94,7 +94,7 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
 
 ## Backend status (this repo)
 - Module 1 (Auth/RBAC): **2026-10-27: 9 roles, e-mail verification before approval, Reject, campus scope from User.campus — see "Last thing done"; the older notes in this line are history.** Done, stable, plus two real gaps found+fixed 2026-09-23 after the client asked where "Workplan/Procurement/Audit Logs/Settings" sidebar items map to (see below for the full mapping): (1) **`AuditLog` model + `accounts/middleware.py::AuditLogMiddleware` added** — the docx/MIT-proposal both explicitly call out "audit logging" as a Module 1 feature but nothing existed for it; the middleware logs every authenticated mutating (`POST`/`PUT`/`PATCH`/`DELETE`) request to `/api/` (actor, method, path, status_code, ip_address, timestamp) — request-level, not per-model field diffing, matching how the MIT proposal frames it ("the business logic layer... enforces authentication, role-based access control, request validation, and audit logging before any request reaches the data layer"). New endpoint `GET /api/admin/audit-logs/` (system_admin-only, filterable by `?actor=`/`?method=`). Since 2026-09-29 (`accounts.0012`) rows also carry `error_detail` (first 1000 chars of a 4xx JSON body). (2) **`seed_roles.py` had a dead `tier` kwarg** left over from a migration (`0002_role_tier` → `0003_remove_role_tier...`) that removed the `Role.tier` field without updating the seed command — running `python manage.py seed_roles` today would have crashed. Fixed by dropping the third tuple element entirely; confirmed the command runs clean now.
-- Module 2 (research_projects: Program/Project/Study/Milestone): done. **2026-10-29: the NTP number is the project code, every Step 1 field is required, `POST projects/` saves the form's tables in one transaction, submit needs 2 studies + a 6P + a beneficiary — see "Last thing done"; the notes in this line are history.** **Updated 2026-09-26**: registration now follows the
+- Module 2 (research_projects: Program/Project/Study/Milestone): done. **2026-10-29: the NTP number is the project code (saved uppercase, unique regardless of case), every Step 1 field is required, `POST projects/` saves the form's tables in one transaction, submit needs 2 studies + a 6P + a beneficiary — see "Last thing done"; the notes in this line are history.** **Updated 2026-09-26**: registration now follows the
   client's Research Proposal Form **LSPU-RDO-SF-018** (sample: `dss/Dataset/BRIDGI_1.PDF`, scanned, no text layer).
   New `Project` fields: `lead_gender`, `contact_number`, `continuing_year`, `college` (Annex A "College Unit"),
   `background`/`methodology`/`socio_economic_significance`/`monitoring_evaluation`/`references` (Sections II/IV/VI/VIII/IX),
@@ -266,24 +266,20 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-10-29 Tasks 3 and 4 (Dashboard bar; Register Approved Project redesign), on `main`, NOT pushed. Memory note: `tasks-3-4-2026-10-29`. Full suite 495/495 (local `rmis-testdb`, 2026-10-29).
-- **Step 1 required + NTP is the code** (`c700efa`, client Q-A: the NTP number is the single official R&D project code, replacing Clarification Q4's "two IDs"):
-  - `ProjectSerializer` registration needs every Step 1 field (`REQUIRED_PROJECT_FIELDS`: ntp_number, research_type, dates, total_cost, RDE thrust + priority, priority area, typology, objectives, II/IV/VI/VIII/IX, description, expected_outcomes, expected_impacts); `<p></p>` counts as blank. `is_dry_research` and `is_continuing` must be sent (N/A stays valid).
-  - An edit checks only the fields it sends, so unrelated edits (Closure status) still save. 403 comes before 400.
-  - `project_code` is read-only and copied from `ntp_number`; a used NTP/code is refused; only `system_admin` changes the NTP. No migration (project_code stays unique). `code-available/` still works, since code = NTP.
-  - Excel template: "NTP (Notice to Proceed No.)" row replaces the Project Code row; new required rows Executive Summary, Anticipated Outcomes, Long-term Potential Impacts; no more "Blank = Institutional/New/Dry". Old files still open; a legacy Project Code row without the same NTP is a row error, never copied into the NTP.
-  - SF-16 terminal report row: "NTP (Project Code)".
-- **One-request registration + submit minimums** (`783ddfb`):
-  - `POST projects/` takes optional `team`, `studies`, `outputs`, `beneficiaries`, `milestones`, `endorsers`, `line_items`, saved in one transaction through their own serializers; a bad row returns 400 `{"errors": {table: [{row, errors}]}}` and nothing is saved. Without tables the endpoint is unchanged.
-  - `create_project_lib()` = `ProjectLibView`'s body, unchanged, shared with the nested create. The Excel LIB path differs (no require_allocations, period rename, defer_scope) and was not merged.
-  - LIB submit/resubmit also needs `workflow.missing_registration_rows`: 2+ studies, 1+ 6P, 1+ beneficiary. Delete endpoints are not gated.
-- **Frontend:** consumes all of it already (rmis-frontend `6bfef48`, `936f330`, `7bdcdd1`, `0f28a53`). Nothing pending to consume.
-- Registration roles are `system_admin`, `riuh`, `project_leader` (`crc_chair` stopped registering 2026-10-24).
+2026-10-29, on `main`. Memory note: `tasks-3-4-2026-10-29`.
+- **NTP uppercase** (`6512364`, NOT pushed; the client's example NTP is `LSPU-RD-GRANT-SIN-2024-001`):
+  - `ProjectSerializer.validate_ntp_number` saves `strip().upper()`, so wizard, direct API and Excel import all store uppercase, and the existing `project_code` unique constraint also refuses a case-only duplicate. No migration (0 projects in the DB).
+  - `projects/code-available/?code=` and the Excel legacy Project Code compare uppercase too.
+  - No format regex on purpose: only one confirmed example. `LSPU-RDO-SF-005` is the form code of the Notice to Proceed template (`dss/05-NOTICE-TO-PROCEED.pdf` footer), NOT an NTP number.
+  - `research_projects` 163/163 (local `rmis-testdb`); full suite not re-run (495/495 earlier on 2026-10-29).
+- **Tasks 3 and 4** (`c700efa`, `783ddfb`, PUSHED by Carl 2026-10-29, no migration):
+  - The NTP number is the single official project code (client Q-A): `project_code` is a read-only copy of `ntp_number`; only `system_admin` changes the NTP. The column `project_code` stays as that mirror (98 references; nothing FKs on it).
+  - Every Step 1 field is required on registration (`REQUIRED_PROJECT_FIELDS`); edits check only the sent fields. Excel template has the NTP row; a legacy Project Code row that differs from the NTP is a row error.
+  - `POST projects/` takes optional nested tables in one transaction (400 `{errors: {table: [{row, errors}]}}`). LIB submit needs 2+ studies, 1+ 6P, 1+ beneficiary, plus the NOA/NTP/MOA documents (`research_projects/workflow.py`). The NTP *document* (Step 5) is separate from the NTP number and unchanged.
+- **Frontend:** consumes everything (rmis-frontend `2abd745` for the uppercase input). Nothing pending to consume; no API shape changed.
 
 ## Next thing to do in this repo
-1. Carl:
-   - Browser-test locally, then push + deploy backend and frontend TOGETHER (the deployed wizard can't register against this backend, and the new wizard needs it). No migration.
-   - Tell the client before a demo: more required registration fields, re-download the Excel template, submitting needs 2 studies + a 6P + a beneficiary. DB has 0 projects (2026-10-29), so nothing existing is blocked.
-2. Open client questions: Q-B (is "mandatory TOE" the TOE Signed Date, the Terms of Engagement document, or both; which step); Q-E ("Upload approved proposal" from rmis-flow.png Box 2; no document type for it yet). Don't build either until answered.
+1. Carl: push backend `6512364` together with frontend `2abd745`, then browser-check: lowercase NTP shows uppercase, a case-only duplicate is refused, the leader still can't change the NTP in Edit. No migration.
+2. Open client questions: Q-B (is "mandatory TOE" the TOE Signed Date, the Terms of Engagement document, or both; which step); Q-E ("Upload approved proposal" from rmis-flow.png Box 2; no document type yet). Don't build either until answered. NTP format rule: only if the client later gives a full specification.
 3. Known gaps, not approved: other JWTs stay valid after a password change; a backend gate on `VerifyRecordView`; the 1.9-3.2 s GET latency check.
 4. Every task goes through `dss/CLAUDE.md` (plan, then GO TASK N, then report, then STOP).
