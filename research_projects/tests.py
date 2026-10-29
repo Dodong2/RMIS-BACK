@@ -1264,6 +1264,180 @@ class WorkPlanExcelTests(RMISTestCase):
             self.assertEqual(self.post(self.make_user(code)).status_code, 403, code)
 
 
+
+class LibExcelTests(RMISTestCase):
+    """Task 12 (2026-10-29): Step 4 Budget (LIB) has its own Excel template and import, separate from Upload via Excel.
+    The periods follow the Step 1 Start and End Dates exactly; the import is all-or-nothing and saves nothing."""
+
+    TEMPLATE_URL = "/api/projects/lib-template/"
+    PARSE_URL = "/api/projects/parse-lib/"
+    FIXED = ["Particulars", "Item", "Specification (optional)", "Unit", "Qty", "Unit Cost (₱)", "Total (₱)"]
+    ONE_YEAR = {"start_date": "2027-01-01", "target_end_date": "2027-12-31"}
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.make_user("system_admin")
+
+    def template(self, dates=None, user=None):
+        return self.client_for(user or self.admin).get(self.TEMPLATE_URL, dates or self.ONE_YEAR)
+
+    def workbook(self, dates=None):
+        return openpyxl.load_workbook(io.BytesIO(self.template(dates).content))
+
+    def header_row(self, sheet):
+        return next(r for r in range(1, 20) if sheet.cell(row=r, column=1).value == "Particulars")
+
+    def fill(self, sheet, rows):
+        first = self.header_row(sheet) + 1
+        for offset, values in enumerate(rows):
+            for column, value in enumerate(values, start=1):
+                sheet.cell(row=first + offset, column=column, value=value)
+        return first
+
+    def parse(self, workbook, dates=None, user=None):
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+        buffer.name = "lib.xlsx"
+        return self.client_for(user or self.admin).post(self.PARSE_URL, {"file": buffer, **(dates or self.ONE_YEAR)}, format="multipart")
+
+    def test_the_template_is_one_lib_sheet_with_the_projects_periods_and_a_legend_below(self):
+        response = self.template()
+        sheet = openpyxl.load_workbook(io.BytesIO(response.content))["LIB"]
+        header = self.header_row(sheet)
+        column_a = [sheet.cell(row=r, column=1).value for r in range(header + 1, sheet.max_row + 1)]
+        legend_text = " ".join(str(c.value) for row in sheet.iter_rows(min_row=header + 1) for c in row if c.value)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("rmis_lib_template.xlsx", response["Content-Disposition"])
+        self.assertEqual(openpyxl.load_workbook(io.BytesIO(response.content)).sheetnames, ["LIB"])
+        self.assertEqual([c.value for c in sheet[header] if c.value], self.FIXED + ["Q1", "Q2", "Q3", "Q4"])
+        self.assertIn("LEGEND", column_a)
+        self.assertIn("2027-01-01", " ".join(str(c.value) for row in sheet.iter_rows(max_row=header) for c in row if c.value))
+        self.assertIn("Office Supplies Expenses", legend_text)
+
+    def test_the_template_periods_follow_the_project_duration(self):
+        cases = [
+            ({"start_date": "2027-01-01", "target_end_date": "2027-08-31"}, ["Q1", "Q2", "Q3"]),
+            ({"start_date": "2027-01-01", "target_end_date": "2028-03-31"}, ["Y1Q1", "Y1Q2", "Y1Q3", "Y1Q4", "Y2Q1"]),
+            ({"start_date": "2027-01-01", "target_end_date": "2028-12-31"}, [f"Y{y}Q{q}" for y in (1, 2) for q in (1, 2, 3, 4)]),
+        ]
+        for dates, periods in cases:
+            sheet = self.workbook(dates)["LIB"]
+            self.assertEqual([c.value for c in sheet[self.header_row(sheet)] if c.value][len(self.FIXED):], periods, dates)
+
+    def test_the_template_needs_valid_project_dates(self):
+        for dates in ({}, {"start_date": "2027-01-01"}, {"start_date": "2027-13-01", "target_end_date": "2027-12-31"},
+                      {"start_date": "2027-12-31", "target_end_date": "2027-01-01"}):
+            response = self.client_for(self.admin).get(self.TEMPLATE_URL, dates)
+            self.assertEqual(response.status_code, 400, dates)
+            self.assertTrue(response.data["errors"], dates)
+
+    def test_a_filled_template_maps_each_column_to_the_lib_row_and_saves_nothing(self):
+        workbook = self.workbook()
+        self.fill(workbook["LIB"], [
+            ["MOOE", "office supplies expenses", "PAPER, 80 gsm, A4", "unit", 10, 225, None, 2250, None, None, None],
+            ["PS", "Honoraria", None, "month", 2, "5,000", None, 5000, 5000, None, None],
+        ])
+        LibItem.objects.get_or_create(category="ps", name="Honoraria")
+
+        response = self.parse(workbook)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["rows"], [
+            {"category": "mooe", "description": "Office Supplies Expenses", "specification": "PAPER, 80 gsm, A4", "unit": "unit",
+             "quantity": "10", "unit_cost": "225", "amount": "2250.00",
+             "allocations": [{"period": "Q1", "amount": "2250.00"}, {"period": "Q2", "amount": "0.00"},
+                             {"period": "Q3", "amount": "0.00"}, {"period": "Q4", "amount": "0.00"}]},
+            {"category": "ps", "description": "Honoraria", "specification": "", "unit": "month",
+             "quantity": "2", "unit_cost": "5000", "amount": "10000.00",
+             "allocations": [{"period": "Q1", "amount": "5000.00"}, {"period": "Q2", "amount": "5000.00"},
+                             {"period": "Q3", "amount": "0.00"}, {"period": "Q4", "amount": "0.00"}]},
+        ])
+        self.assertFalse(LineItem.objects.exists())
+        self.assertFalse(LineItemBudget.objects.exists())
+
+    def test_a_multi_year_lib_maps_each_amount_to_its_year_and_quarter(self):
+        dates = {"start_date": "2027-01-01", "target_end_date": "2028-03-31"}
+        workbook = self.workbook(dates)
+        self.fill(workbook["LIB"], [["CO", "Office Equipment", "Printer with Scanner (3 in 1)", "unit", 2, 15000, None, 0, 30000, 0, 0, 0]])
+
+        response = self.parse(workbook, dates)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["rows"][0]["allocations"], [
+            {"period": "Y1Q1", "amount": "0.00"}, {"period": "Y1Q2", "amount": "30000.00"}, {"period": "Y1Q3", "amount": "0.00"},
+            {"period": "Y1Q4", "amount": "0.00"}, {"period": "Y2Q1", "amount": "0.00"},
+        ])
+
+    def test_a_workbook_for_another_duration_lists_the_missing_and_extra_periods(self):
+        workbook = self.workbook()  # Q1-Q4
+        self.fill(workbook["LIB"], [["MOOE", "Office Supplies Expenses", None, "unit", 1, 100, None, 100]])
+
+        response = self.parse(workbook, {"start_date": "2027-01-01", "target_end_date": "2028-03-31"})
+
+        self.assertEqual(response.status_code, 400)
+        messages = " ".join(e["message"] for e in response.data["errors"])
+        for period in ("Y1Q1", "Y1Q4", "Y2Q1", "Q1", "Q4"):
+            self.assertIn(period, messages)
+        self.assertNotIn("rows", response.data)
+
+    def test_row_errors_name_the_row_and_nothing_comes_back(self):
+        workbook = self.workbook()
+        first = self.fill(workbook["LIB"], [
+            ["MOOE", "Office Supplies Expenses", None, "unit", 1, 100, None, 100],
+            ["XYZ", "Office Supplies Expenses", None, "unit", 1, 100, None, 100],
+            ["MOOE", "Common Office Supplies", None, "unit", 1, 100, None, 100],
+            ["MOOE", "Training Expenses", None, "unit", 1, 100, None, 60, 30],
+            ["MOOE", "Training Expenses", None, "unit", "two", 100, None, 200],
+            ["MOOE", "Training Expenses", None, None, 1, 100, None, 100],
+            ["CO", "Office Equipment", None, "unit", 1, -5, None, -5],
+        ])
+
+        response = self.parse(workbook)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(sorted({e["row"] for e in response.data["errors"]}), [first + n for n in range(1, 7)])
+        self.assertTrue(all(e["sheet"] == "LIB" for e in response.data["errors"]))
+
+    def test_an_empty_lib_a_missing_sheet_or_a_non_workbook_is_rejected(self):
+        self.assertEqual(self.parse(self.workbook()).status_code, 400)
+
+        other = openpyxl.Workbook()
+        other.active.title = "Budget Requirements"
+        self.assertEqual(self.parse(other).status_code, 400)
+
+        buffer = io.BytesIO(b"not an excel file")
+        buffer.name = "lib.xlsx"
+        response = self.client_for(self.admin).post(self.PARSE_URL, {"file": buffer, **self.ONE_YEAR}, format="multipart")
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_import_needs_the_project_dates(self):
+        workbook = self.workbook()
+        self.fill(workbook["LIB"], [["MOOE", "Office Supplies Expenses", None, "unit", 1, 100, None, 25, 25, 25, 25]])
+
+        response = self.parse(workbook, {"start_date": "", "target_end_date": "2027-12-31"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response.data["errors"])
+
+    def test_a_failed_import_keeps_no_file_on_the_server(self):
+        from document_management.models import Document
+
+        self.parse(self.workbook())
+
+        self.assertFalse(Document.objects.exists())
+
+    def test_only_registrants_can_use_it(self):
+        workbook = self.workbook()
+        self.fill(workbook["LIB"], [["MOOE", "Office Supplies Expenses", None, "unit", 1, 100, None, 100]])
+        leader = self.make_user("project_leader")
+
+        self.assertEqual((self.template(user=leader).status_code, self.parse(workbook, user=leader).status_code), (200, 200))
+        for code in ("project_staff", "finance_budget"):
+            user = self.make_user(code)
+            self.assertEqual((self.template(user=user).status_code, self.parse(workbook, user=user).status_code), (403, 403), code)
+
 class ProjectReadScopeTests(RMISTestCase):
     """Strict RBAC (client meeting 2026-10-01): leaders and staff read only projects they lead or belong to."""
 

@@ -16,7 +16,8 @@ from openpyxl.utils import get_column_letter
 from accounts.models import STAFF_ID_MESSAGE, STAFF_ID_PATTERN, User
 from accounts.permissions import LEADER_ROLES
 from budget_lib.models import LibItem, LineItem, allocation_periods
-from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer, line_total
+from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer, catalog_item_name, clean_allocations, line_total
+from rest_framework.exceptions import ValidationError
 from outputs.models import SIX_PS
 from outputs.serializers import ExpectedOutputSerializer
 
@@ -482,6 +483,178 @@ def read_work_plan(file_obj):
         {"title": data["title"], "start_date": str(data.get("start_date") or ""), "target_date": str(data["target_date"])}
         for _, data in rows
     ], []
+
+
+# Task 12 (2026-10-29): Step 4 Budget (LIB)'s own workbook, LIB.png's column order plus the SF-018 Section X specific
+# item, then one column per period of the project. Rows below the header up to the LEGEND row are the LIB.
+LIB_SHEET = "LIB"
+LIB_COLUMNS = [
+    ("Particulars", "category", "choice", CATEGORIES),
+    ("Item", "description", "text", None),
+    ("Specification (optional)", "specification", "text", None),
+    ("Unit", "unit", "choice", LineItem.UNIT_CHOICES),
+    ("Qty", "quantity", "decimal", None),
+    ("Unit Cost (₱)", "unit_cost", "decimal", None),
+    ("Total (₱)", "amount", "decimal", None),
+]
+LIB_BLANK_ROWS = 30
+LIB_LEGEND = "LEGEND"
+
+
+def lib_periods(start_date, target_end_date):
+    """The project's LIB periods from Step 1's dates (YYYY-MM-DD), by allocation_periods. Returns (periods, errors)."""
+    dates = {}
+    for field, label, value in (("start_date", "Start Date", start_date), ("target_end_date", "Target End Date", target_end_date)):
+        try:
+            dates[field] = datetime.date.fromisoformat(str(value or "").strip())
+        except ValueError:
+            return None, [{"sheet": None, "row": None, "field": label,
+                           "message": f"Set a valid {label} in Step 1 Project Details first."}]
+    periods = allocation_periods(Project(**dates))
+    if periods is None:
+        return None, [{"sheet": None, "row": None, "field": "Target End Date", "message": "The Target End Date is before the Start Date."}]
+    return periods, []
+
+
+def _period_meaning(period):
+    """Y2Q3 -> months 19-21 from the Start Date; Q3 -> months 7-9."""
+    year, quarter = (int(period[1:period.index("Q")]), int(period[-1])) if period[0] == "Y" else (1, int(period[1:]))
+    first = (year - 1) * 12 + (quarter - 1) * 3 + 1
+    return f"Year {year}, Quarter {quarter}: months {first}-{first + 2} counted from the Start Date"
+
+
+def build_lib_template(start_date, target_end_date, periods):
+    wb = openpyxl.Workbook()
+    sheet = wb.active
+    sheet.title = LIB_SHEET
+    sheet.append(["LIB - Line-Item Budget (LSPU-RDO-SF-018, X. Budget Requirements)"])
+    sheet.append([f"Project Start Date: {start_date}   Target End Date: {target_end_date}   Budget periods: {', '.join(periods)}"])
+    sheet.append(["One row per item. Particulars = PS, MOOE or CO. Item = an LIB Item of that class (see the LEGEND). "
+                  "Specification = the specific item, e.g. PAPER, 80 gsm (optional)."])
+    sheet.append(["Total = Qty x Unit Cost. Put the peso amount of each period; the periods must add up to the Total. "
+                  "Keep the columns and the LEGEND row as they are; insert more rows above the LEGEND if needed."])
+    sheet.append([])
+    sheet.append([header for header, *_ in LIB_COLUMNS] + periods)
+    header = sheet.max_row
+    for cell in sheet[1] + sheet[header]:
+        cell.font = Font(bold=True)
+    for row in range(header + 1, header + 1 + LIB_BLANK_ROWS):
+        sheet.cell(row=row, column=7, value=f'=IF(AND(E{row}<>"",F{row}<>""),E{row}*F{row},"")')
+    for i, width in enumerate((14, 40, 32, 10, 8, 14, 14)):
+        sheet.column_dimensions[get_column_letter(i + 1)].width = width
+    for i in range(len(periods)):
+        sheet.column_dimensions[get_column_letter(len(LIB_COLUMNS) + i + 1)].width = 12
+
+    sheet.append([])
+    sheet.append([LIB_LEGEND])
+    sheet.cell(row=sheet.max_row, column=1).font = Font(bold=True)
+    sheet.append(["Budget periods (from the Start Date and Target End Date in Step 1)"])
+    for period in periods:
+        sheet.append([period, _period_meaning(period)])
+    sheet.append([])
+    sheet.append(["Particulars", "Meaning", "LIB Items of the class (System Admin > LIB Items), for the Item column"])
+    for code, short, meaning in CATEGORY_LEGEND:
+        items = "; ".join(LibItem.objects.filter(category=code, is_active=True).order_by("name").values_list("name", flat=True))
+        sheet.append([short, meaning, items])
+        sheet.cell(row=sheet.max_row, column=3).alignment = Alignment(wrap_text=True, vertical="top")
+    sheet.append([])
+    sheet.append(["Unit", ", ".join(label for _, label in LineItem.UNIT_CHOICES)])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def _first_message(exc):
+    detail = exc.detail
+    while isinstance(detail, (dict, list)):
+        detail = next(iter(detail.values())) if isinstance(detail, dict) else detail[0]
+    return str(detail)
+
+
+def read_lib(file_obj, periods):
+    """The LIB sheet as Manual Entry LIB rows, checked with the LineItem rules (catalog Item, Qty x Unit Cost, a split
+    over exactly the project's periods). Returns (rows, errors); all-or-nothing, nothing is saved."""
+    def error(row, field, message):
+        return {"sheet": LIB_SHEET, "row": row, "field": field, "message": message}
+
+    try:
+        wb = openpyxl.load_workbook(file_obj, data_only=True)
+    except Exception as exc:  # not an xlsx, or corrupted
+        return [], [{"sheet": None, "row": None, "field": "file", "message": f"Could not read workbook: {exc}"}]
+    if LIB_SHEET not in wb.sheetnames:
+        return [], [{"sheet": None, "row": None, "field": "file", "message": "Missing the 'LIB' sheet; use the Download LIB Template file."}]
+    sheet = wb[LIB_SHEET]
+    header = next((r for r in range(1, min(sheet.max_row, 30) + 1) if _norm(sheet.cell(row=r, column=1).value or "") == "particulars"), None)
+    if header is None:
+        return [], [error(None, "Header", "Missing the header row (Particulars, Item, ...); use the Download LIB Template file.")]
+    titles = [sheet.cell(row=header, column=c).value for c in range(1, sheet.max_column + 1)]
+    errors = [error(header, label, f"Column {i + 1} must be '{label}'.")
+              for i, (label, *_) in enumerate(LIB_COLUMNS) if _norm(titles[i] if i < len(titles) else "") != _norm(label)]
+    found = [str(t).replace(" ", "").upper() for t in titles[len(LIB_COLUMNS):] if t not in (None, "")]
+    missing = [p for p in periods if p not in found]
+    extra = [p for p in dict.fromkeys(found) if p not in periods]
+    if missing:
+        errors.append(error(header, "Budget periods", f"Missing period column(s) {', '.join(missing)}. This project's periods are {', '.join(periods)}."))
+    if extra:
+        errors.append(error(header, "Budget periods", f"Period column(s) {', '.join(extra)} are outside this project's Start and End Dates ({', '.join(periods)})."))
+    if len(found) != len(set(found)):
+        errors.append(error(header, "Budget periods", "A period column appears more than once."))
+    if errors:
+        return [], errors
+    period_columns = {str(t).replace(" ", "").upper(): c for c, t in enumerate(titles, start=1) if c > len(LIB_COLUMNS) and t}
+
+    rows = []
+    for r in range(header + 1, sheet.max_row + 1):
+        if _norm(sheet.cell(row=r, column=1).value or "") == _norm(LIB_LEGEND):
+            break
+        # Total is only Excel's own Qty x Unit Cost; the row is read from the other cells
+        cells = [sheet.cell(row=r, column=c).value for c in range(1, len(titles) + 1)]
+        if all(v is None or (isinstance(v, str) and not v.strip()) for i, v in enumerate(cells) if i != 6):
+            continue
+        data, row_errors = {}, []
+        for i, (label, field, kind, choices) in enumerate(LIB_COLUMNS[:6]):
+            try:
+                data[field] = _convert(cells[i], kind, choices)
+            except CellError as exc:
+                row_errors.append(error(r, label, str(exc)))
+        for i, (label, field, *_) in enumerate(LIB_COLUMNS[:6]):
+            if field != "specification" and data.get(field) is None and not any(e["field"] == label for e in row_errors):
+                row_errors.append(error(r, label, f"Enter the {label.replace(' (₱)', '')}."))
+        if data.get("specification") and len(data["specification"]) > 300:
+            row_errors.append(error(r, "Specification (optional)", "Keep it to 300 characters."))
+        for field, label in (("quantity", "Qty"), ("unit_cost", "Unit Cost (₱)")):
+            if data.get(field) is not None and Decimal(data[field]) < 0:
+                row_errors.append(error(r, label, "Can't be negative."))
+        if not row_errors:
+            try:
+                data["description"] = catalog_item_name(data["category"], data["description"])
+            except ValidationError as exc:
+                row_errors.append(error(r, "Item", _first_message(exc)))
+        if not row_errors:
+            amount = line_total(data["quantity"], data["unit_cost"])
+            split = []
+            for period in periods:
+                try:
+                    split.append({"period": period, "amount": _convert(cells[period_columns[period] - 1], "decimal", None) or "0"})
+                except CellError as exc:
+                    row_errors.append(error(r, period, str(exc)))
+            if amount <= 0:
+                row_errors.append(error(r, "Total (₱)", "Qty x Unit Cost must be more than 0."))
+            if not row_errors:
+                try:
+                    data["allocations"] = clean_allocations(split, periods, amount)
+                except ValidationError as exc:
+                    row_errors.append(error(r, "Budget periods", _first_message(exc)))
+            data["amount"] = str(amount)
+        errors.extend(row_errors)
+        if not row_errors:
+            rows.append({"specification": "", **{k: v for k, v in data.items() if v is not None}})
+    if not rows and not errors:
+        errors.append(error(None, "Items", "The LIB sheet has no items. Fill at least one row above the LEGEND."))
+    if errors:
+        return [], errors
+    order = ["category", "description", "specification", "unit", "quantity", "unit_cost", "amount", "allocations"]
+    return [{k: row[k] for k in order} for row in rows], []
 
 
 def _pick_account(data, staff_field, email_field, error):

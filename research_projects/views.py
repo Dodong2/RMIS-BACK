@@ -248,6 +248,44 @@ class WorkPlanTemplateView(APIView):
         return response
 
 
+class LibTemplateView(APIView):
+    """GET ?start_date=&target_end_date= (Step 1's dates): Step 4 Budget (LIB)'s own Excel template, one column per
+    period of that duration (Task 12, 2026-10-29)."""
+
+    permission_classes = [HasRole("projects.register")]
+
+    def get(self, request):
+        start, end = request.query_params.get("start_date"), request.query_params.get("target_end_date")
+        periods, errors = importer.lib_periods(start, end)
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+        response = HttpResponse(importer.build_lib_template(start, end, periods), content_type=XLSX_TYPE)
+        response["Content-Disposition"] = 'attachment; filename="rmis_lib_template.xlsx"'
+        return response
+
+
+class LibImportView(APIView):
+    """POST multipart `file` + start_date + target_end_date: the LIB sheet as {"rows": [...]} for Step 4, checked
+    against the project's periods and the LineItem rules. All-or-nothing; saves nothing, and the upload is read in
+    the request only (Task 12, 2026-10-29)."""
+
+    permission_classes = [HasRole("projects.register")]
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        periods, errors = importer.lib_periods(request.data.get("start_date"), request.data.get("target_end_date"))
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response({"errors": [{"sheet": None, "row": None, "field": "file", "message": "Choose the filled LIB .xlsx file."}]},
+                            status=status.HTTP_400_BAD_REQUEST)
+        rows, errors = importer.read_lib(file_obj, periods)
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"rows": rows})
+
+
 class ProjectImportView(APIView):
     """POST multipart `file`: registers one project (plus team, studies, 6Ps, beneficiaries, LIB, work plan)
     from a filled template. All-or-nothing: any row error rolls the whole import back and lists every error.
