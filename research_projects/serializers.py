@@ -358,7 +358,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         return validate_funding_type(value)
 
     def validate_ntp_number(self, value):
-        value = value.strip()
+        value = value.strip().upper()  # client 2026-10-29: NTP letters are uppercase, from the wizard, API or Excel
         others = Project.objects.exclude(pk=self.instance.pk) if self.instance else Project.objects.all()
         if value and (others.filter(project_code=value).exists() or others.filter(ntp_number=value).exists()):
             raise serializers.ValidationError(f"A project with NTP {value} already exists.")

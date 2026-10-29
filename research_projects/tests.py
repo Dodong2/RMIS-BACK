@@ -90,6 +90,17 @@ class StepOneRequiredTests(RMISTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("ntp_number", response.data)
 
+    def test_the_ntp_number_is_saved_uppercase_and_case_does_not_make_it_new(self):
+        """Client 2026-10-29: NTP letters are uppercase (e.g. LSPU-RD-GRANT-SIN-2024-001), from any source."""
+        response = self.register(project_payload(self.leader, ntp_number=" lspu-rd-grant-sin-2024-001 "))
+        again = self.register(project_payload(self.leader, ntp_number="LSPU-RD-Grant-SIN-2024-001", title="Second"))
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual((response.data["ntp_number"], response.data["project_code"]),
+                         ("LSPU-RD-GRANT-SIN-2024-001", "LSPU-RD-GRANT-SIN-2024-001"))
+        self.assertEqual(again.status_code, 400)
+        self.assertIn("ntp_number", again.data)
+
     def test_only_the_system_admin_changes_the_ntp_and_the_code_follows(self):
         project_id = self.register(project_payload(self.leader, ntp_number="NTP-1")).data["id"]
 
@@ -298,7 +309,7 @@ class ManualRegistrationTests(RMISTestCase):
         Project.objects.create(title="P", project_code="LSPU-1", funding_type="core_funded", lead=other)
         client = self.client_for(leader)
 
-        taken = client.get("/api/projects/code-available/", {"code": " LSPU-1 "})
+        taken = client.get("/api/projects/code-available/", {"code": " lspu-1 "})
         free = client.get("/api/projects/code-available/", {"code": "LSPU-2"})
         staff = self.client_for(self.make_user("project_staff")).get("/api/projects/code-available/", {"code": "LSPU-2"})
 
@@ -715,11 +726,20 @@ class ExcelImportTests(RMISTestCase):
         self.workbook["Project"].append(["LSPU Faculty Research Number (Project Code)", "OTHER-1"])
         self.assertEqual(self.upload().status_code, 400)
 
-        self.workbook["Project"].cell(row=self.workbook["Project"].max_row, column=2).value = "LSPU-X1"
+        self.workbook["Project"].cell(row=self.workbook["Project"].max_row, column=2).value = "lspu-x1"
         response = self.upload()
 
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(Project.objects.get().project_code, "LSPU-X1")
+
+    def test_an_excel_ntp_is_saved_uppercase(self):
+        self.fill_project(**{"NTP (Notice to Proceed No.)": "lspu-rd-grant-sin-2024-001"})
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Project.objects.values_list("ntp_number", "project_code").get(),
+                         ("LSPU-RD-GRANT-SIN-2024-001", "LSPU-RD-GRANT-SIN-2024-001"))
 
     def test_the_template_has_the_ntp_row_and_the_new_required_rows(self):
         labels = [row[0].value for row in self.workbook["Project"].iter_rows(min_row=2)]

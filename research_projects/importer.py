@@ -367,7 +367,7 @@ def _read_project_sheet(ws, errors):
             if field == "legacy_project_code":
                 legacy_row = row_number
     legacy = data.pop("legacy_project_code", None)
-    if legacy is not None and str(legacy).strip() != str(data.get("ntp_number", "")).strip():
+    if legacy is not None and str(legacy).strip().upper() != str(data.get("ntp_number", "")).strip().upper():
         errors.append({"sheet": "Project", "row": legacy_row, "field": LEGACY_PROJECT_CODE_LABEL, "message": (
             f"The Project Code is no longer used; the NTP number is the project's code. Put the NTP in the "
             f"'{NTP_LABEL}' row (download the new template) and leave this row blank."

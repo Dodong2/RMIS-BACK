@@ -176,7 +176,7 @@ class ProjectCodeAvailableView(APIView):
     permission_classes = [HasRole("projects.register")]
 
     def get(self, request):
-        code = request.query_params.get("code", "").strip()
+        code = request.query_params.get("code", "").strip().upper()
         if not code:
             return Response({"code": "Pass the project code as ?code=."}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"code": code, "available": not Project.objects.filter(project_code=code).exists()})
