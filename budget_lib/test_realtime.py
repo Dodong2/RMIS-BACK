@@ -8,7 +8,7 @@ from realtime.notify import to_role, to_user
 from research_projects.models import Project
 
 from .models import LineItem, LineItemBudget
-from .tests import attach_approval_documents
+from .tests import add_registration_rows, attach_approval_documents
 
 BUDGET_ROLES = {"system_admin", "crc_chair", "finance_budget"}
 
@@ -27,6 +27,7 @@ class LibSignalTests(RMISTestCase):
         self.budget = LineItemBudget.objects.create(project=self.project, version_number=1)
         LineItem.objects.create(budget=self.budget, category="mooe", description="Travel", amount=Decimal("1000"))
         attach_approval_documents(self.project, self.leader)
+        add_registration_rows(self.project)
 
     def act(self, user, step, **data):
         return self.client_for(user).post(f"/api/budget/budgets/{self.budget.id}/{step}/", data, format="json")

@@ -52,6 +52,19 @@ def missing_approval_documents(project):
     return [labels[t] for t in APPROVAL_DOCUMENT_TYPES if t not in have]
 
 
+def missing_registration_rows(project):
+    """The form's minimums the project doesn't meet yet (client 2026-10-29, Task 4). Checked when the project is
+    submitted, not on each delete, so Edit Registration can still save row by row."""
+    missing = []
+    if project.studies.count() < 2:
+        missing.append("at least 2 Study Component Titles")
+    if not project.expected_outputs.exists():
+        missing.append("at least 1 6P expected output")
+    if not project.target_beneficiaries.exists():
+        missing.append("at least 1 Target Beneficiary")
+    return missing
+
+
 def registration_changes(serializer, attrs, fields=None, exclude=()):
     """True when this save creates a row or changes one of `fields` (default: every field but `exclude`)."""
     if serializer.instance is None:

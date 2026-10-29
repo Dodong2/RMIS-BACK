@@ -10,6 +10,7 @@ from accounts.permissions import HasRole, ProjectVisibleMixin, ensure_in_scope, 
 from budget_lib.models import allocation_periods
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from config.concurrency import AtomicMutationMixin, idempotent, lock
+from outputs.serializers import ExpectedOutputSerializer
 from . import importer
 from .models import (
     CollegeUnit, CooperatingAgency, EndorserChoice, FundingType, Program, RdeThrust, Project, ProjectStatusHistory, ProjectTeamMember, Study, TargetBeneficiary, WorkPlanMilestone,
@@ -34,6 +35,15 @@ REGISTRATION_ROLES = ["system_admin", "riuh", "project_leader"]
 EDIT_ROLES = REGISTRATION_ROLES + ["crc_chair"]
 # Leaders capture their own work plan (Module Structure M2); ensure_in_scope limits them to their projects.
 MILESTONE_ROLES = ["system_admin", "crc_chair", "project_leader"]
+
+# Client 2026-10-29 (Task 4): Manual Entry may send the form's tables with the project. They are saved in the same
+# transaction through the serializers of their own endpoints, so one bad row leaves nothing behind. A table that
+# isn't sent, or is sent empty, adds no rows; "line_items" is the draft LIB (create_project_lib).
+REGISTRATION_TABLES = {
+    "team": ProjectTeamMemberSerializer, "studies": StudySerializer, "outputs": ExpectedOutputSerializer,
+    "beneficiaries": TargetBeneficiarySerializer, "milestones": WorkPlanMilestoneSerializer,
+    "endorsers": ProjectEndorserSerializer,
+}
 
 
 class AdminChoiceListCreateView(generics.ListCreateAPIView):
@@ -101,7 +111,37 @@ class ProjectListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
 
     @idempotent  # registration: a retried submit replays the first result instead of a duplicate-code error
     def create(self, request, *args, **kwargs):
-        return super().create(request, *args, **kwargs)
+        tables = {key: request.data[key] for key in (*REGISTRATION_TABLES, "line_items") if key in request.data}
+        if not tables:
+            return super().create(request, *args, **kwargs)
+        serializer = self.get_serializer(data={k: v for k, v in request.data.items() if k not in tables})
+        serializer.is_valid(raise_exception=True)
+        project = serializer.save()
+        context = self.get_serializer_context()
+        errors = {}
+        for key, rows in tables.items():
+            if not isinstance(rows, list):
+                errors[key] = "Send a list."
+                continue
+            if key == "line_items":
+                row_errors = create_project_lib(project, rows, request)[1] if rows else []
+            else:
+                row_errors = []
+                for index, row in enumerate(rows, start=1):  # in order, so endorsers keep their Annex A order
+                    if not isinstance(row, dict):
+                        row_errors.append({"row": index, "errors": "Send each row as an object."})
+                        continue
+                    item = REGISTRATION_TABLES[key](data={**row, "project": project.pk}, context=context)
+                    if item.is_valid():
+                        item.save()
+                    else:
+                        row_errors.append({"row": index, "errors": item.errors})
+            if row_errors:
+                errors[key] = row_errors
+        if errors:
+            transaction.set_rollback(True)  # idempotent() commits a 4xx response's work otherwise
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(project).data, status=status.HTTP_201_CREATED)
 
     def get_permissions(self):
         if self.request.method == "POST":
@@ -142,6 +182,25 @@ class ProjectCodeAvailableView(APIView):
         return Response({"code": code, "available": not Project.objects.filter(project_code=code).exists()})
 
 
+def create_project_lib(project, rows, request):
+    """The registration's draft LIB v1: the budget and its line items. Returns (budget, row errors); the caller rolls
+    back when there are errors. Shared by ProjectLibView and Manual Entry's registration (client 2026-10-29)."""
+    # Every row needs its per-year/per-quarter split once the project has dates (client meeting 2026-10-14)
+    context = {"request": request, "require_allocations": allocation_periods(project) is not None}
+    budget = LineItemBudgetSerializer(data={"project": project.pk}, context=context)
+    budget.is_valid(raise_exception=True)
+    budget = budget.save()
+    errors = []
+    for index, row in enumerate(rows, start=1):
+        data = importer.fill_line_item_amount({**row, "budget": budget.pk})
+        item = LineItemSerializer(data=data, context=context)
+        if item.is_valid():
+            item.save()
+        else:
+            errors.append({"row": index, "errors": item.errors})
+    return budget, errors
+
+
 class ProjectLibView(APIView):
     """POST {"line_items": [{category, description, fiscal_year?, unit, quantity, unit_cost, amount?, allocations}]}: the registration
     wizard's Budget Requirements step (client meeting 2026-10-01, #11) as draft LIB v1. Gated by projects.register,
@@ -159,20 +218,8 @@ class ProjectLibView(APIView):
         if project.budgets.exists():
             return Response({"detail": "This project already has a LIB. Edit it under Budget Management."},
                             status=status.HTTP_400_BAD_REQUEST)
-        # Every row needs its per-year/per-quarter split once the project has dates (client meeting 2026-10-14)
-        context = {"request": request, "require_allocations": allocation_periods(project) is not None}
         with transaction.atomic():
-            budget = LineItemBudgetSerializer(data={"project": project.pk}, context=context)
-            budget.is_valid(raise_exception=True)
-            budget = budget.save()
-            errors = []
-            for index, row in enumerate(rows, start=1):
-                data = importer.fill_line_item_amount({**row, "budget": budget.pk})
-                item = LineItemSerializer(data=data, context=context)
-                if item.is_valid():
-                    item.save()
-                else:
-                    errors.append({"row": index, "errors": item.errors})
+            budget, errors = create_project_lib(project, rows, request)
             if errors:
                 transaction.set_rollback(True)
                 return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)

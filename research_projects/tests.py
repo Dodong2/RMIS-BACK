@@ -6,7 +6,10 @@ import openpyxl
 from accounts.testing import RMISTestCase
 from accounts.models import User
 from budget_lib.models import LibItem, LineItem, LineItemBudget
-from research_projects.models import CollegeUnit, CooperatingAgency, Project, ProjectEndorser, RdeThrust, WorkPlanMilestone
+from outputs.models import ExpectedOutput
+from research_projects.models import (
+    CollegeUnit, CooperatingAgency, Project, ProjectEndorser, RdeThrust, Study, TargetBeneficiary, WorkPlanMilestone,
+)
 from research_projects.rde_agenda import seed_rde_agenda
 from research_projects.serializers import REQUIRED_PROJECT_FIELDS
 
@@ -104,6 +107,89 @@ class StepOneRequiredTests(RMISTestCase):
         response = self.client_.patch(f"/api/projects/{project.pk}/", {"title": "Old, renamed"}, format="json")
 
         self.assertEqual(response.status_code, 200, response.data)
+
+
+class NestedRegistrationTests(RMISTestCase):
+    """Client 2026-10-29 (Task 4): Manual Entry sends the form's tables with the project, saved all-or-nothing."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin, self.leader = self.make_user("system_admin"), self.make_user("project_leader")
+
+    def payload(self, **tables):
+        data = project_payload(self.leader)
+        data.update({
+            "team": [{"member_role": "co_leader", "name": "Archieval M. Jain", "gender": "male", "user": None}],
+            "studies": [{"title": "Study 1"}, {"title": "Study 2"}],
+            "outputs": [{"category": "publications", "description": "Journal article", "target_count": 2}],
+            "beneficiaries": [{"group": "Faculty", "description": "CTE faculty", "total": 10}],
+            "milestones": [{"title": "Data gathering", "start_date": "2027-02-01", "target_date": "2027-04-30"}],
+            "endorsers": [{"role_code": "", "user": None, "name": "Dean A", "designation": "Dean", "signed_on": None},
+                          {"role_code": "", "user": None, "name": "Director B", "designation": "RDS Director", "signed_on": None}],
+            "line_items": [{"category": "mooe", "description": "Traveling Expenses - Local", "fiscal_year": 2027, "unit": "lot",
+                            "quantity": "1", "unit_cost": "100000", "allocations": [{"period": "Q1", "amount": "100000"}]}],
+        })
+        data.update(tables)
+        return data
+
+    def register(self, payload, **headers):
+        return self.client_for(self.admin).post("/api/projects/", payload, format="json", **headers)
+
+    def saved_rows(self):
+        return (Project.objects.count(), Study.objects.count(), ExpectedOutput.objects.count(),
+                TargetBeneficiary.objects.count(), WorkPlanMilestone.objects.count(), ProjectEndorser.objects.count(),
+                LineItemBudget.objects.count(), LineItem.objects.count())
+
+    def test_the_project_and_its_tables_are_saved_together(self):
+        response = self.register(self.payload())
+
+        self.assertEqual(response.status_code, 201, response.data)
+        project = Project.objects.get()
+        self.assertEqual(response.data["id"], project.pk)
+        self.assertEqual(self.saved_rows(), (1, 2, 1, 1, 1, 2, 1, 1))
+        self.assertEqual(project.team_members.get().name, "Archieval M. Jain")
+        self.assertEqual(list(project.endorsers.order_by("id").values_list("name", flat=True)), ["Dean A", "Director B"])
+        budget = LineItemBudget.objects.get()
+        self.assertEqual((budget.version_number, budget.status), (1, "draft"))
+        self.assertEqual(float(budget.line_items.get().amount), 100000)
+
+    def test_one_bad_row_saves_nothing(self):
+        response = self.register(self.payload(beneficiaries=[{"group": "", "description": "x", "total": 1}]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["errors"]["beneficiaries"][0]["row"], 1)
+        self.assertEqual(self.saved_rows(), (0,) * 8)
+
+    def test_the_lib_keeps_the_lib_steps_rules(self):
+        # A dated project's line items need their quarterly split, as on POST projects/<id>/lib/
+        row = {"category": "mooe", "description": "Traveling Expenses - Local", "unit": "lot", "quantity": "1", "unit_cost": "100"}
+
+        response = self.register(self.payload(line_items=[row]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("line_items", response.data["errors"])
+        self.assertEqual(self.saved_rows(), (0,) * 8)
+
+    def test_a_table_that_is_not_a_list_is_refused(self):
+        response = self.register(self.payload(studies=None, team="Archieval"))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(set(response.data["errors"]), {"studies", "team"})
+        self.assertFalse(Project.objects.exists())
+
+    def test_empty_tables_add_no_rows(self):
+        response = self.register(self.payload(team=[], outputs=[], milestones=[], endorsers=[], line_items=[]))
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(self.saved_rows(), (1, 2, 0, 1, 0, 0, 0, 0))
+
+    def test_a_retried_registration_replays_instead_of_saving_twice(self):
+        first = self.register(self.payload(), HTTP_IDEMPOTENCY_KEY="register-0001")
+        again = self.register(self.payload(), HTTP_IDEMPOTENCY_KEY="register-0001")
+
+        self.assertEqual((first.status_code, again.status_code), (201, 201))
+        self.assertEqual(again.data["id"], first.data["id"])
+        self.assertEqual(self.saved_rows(), (1, 2, 1, 1, 1, 2, 1, 1))
 
 
 class ManualRegistrationTests(RMISTestCase):
@@ -1661,8 +1747,27 @@ class ProjectReviewWorkflowTests(RMISTestCase):
         self.assertIn("Memorandum of Agreement (MOA)", response.data["detail"])
         self.assertNotIn("Notice to Proceed", response.data["detail"])
         self.attach("notice_of_approval", "moa")
+        Study.objects.create(project=self.project, title="S2")
+        TargetBeneficiary.objects.create(project=self.project, group="Faculty", description="CTE", total=10)
         self.assertEqual(self.client_for(self.leader).post(f"/api/budget/budgets/{self.budget.pk}/submit/").status_code, 200)
         self.assertEqual(self.review_status(), "submitted")
+
+    def test_submitting_needs_2_studies_a_6p_and_a_beneficiary(self):
+        # Client 2026-10-29 (Task 4): the form's minimums, checked on submit so Edit can still save row by row
+        self.attach("notice_of_approval", "ntp", "moa")
+        self.output.delete()
+        submit = lambda: self.client_for(self.leader).post(f"/api/budget/budgets/{self.budget.pk}/submit/")
+
+        refused = submit()
+
+        self.assertEqual(refused.status_code, 400)
+        for text in ("2 Study Component Titles", "6P expected output", "Target Beneficiary"):
+            self.assertIn(text, refused.data["detail"])
+        self.assertEqual(self.review_status(), "draft")
+        Study.objects.create(project=self.project, title="S2")
+        ExpectedOutput.objects.create(project=self.project, category="publications", description="D")
+        TargetBeneficiary.objects.create(project=self.project, group="Faculty", description="CTE", total=10)
+        self.assertEqual(submit().status_code, 200)
 
     def test_nobody_edits_a_submitted_registration(self):
         self.lib_status("submitted")

@@ -20,6 +20,16 @@ def attach_approval_documents(project, user):
                                 file_name=f"{document_type}.pdf", file_size=1, uploaded_by=user)
 
 
+def add_registration_rows(project):
+    """The form's minimums that submitting the project also needs: 2 studies, a 6P, a beneficiary (client 2026-10-29)."""
+    from outputs.models import ExpectedOutput
+    from research_projects.models import Study, TargetBeneficiary
+
+    Study.objects.bulk_create([Study(project=project, title="Study 1"), Study(project=project, title="Study 2")])
+    ExpectedOutput.objects.create(project=project, category="publications", description="Journal article", target_count=1)
+    TargetBeneficiary.objects.create(project=project, group="Faculty", description="CTE faculty", total=10)
+
+
 class LibWorkflowTests(RMISTestCase):
     def setUp(self):
         super().setUp()
@@ -33,6 +43,7 @@ class LibWorkflowTests(RMISTestCase):
         self.budget = LineItemBudget.objects.create(project=self.project, version_number=1)
         self.item = LineItem.objects.create(budget=self.budget, category="mooe", description="Travel", amount=Decimal("1000"))
         attach_approval_documents(self.project, self.leader)
+        add_registration_rows(self.project)
 
     def act(self, user, action, **data):
         return self.client_for(user).post(f"/api/budget/budgets/{self.budget.id}/{action}/", data, format="json")
