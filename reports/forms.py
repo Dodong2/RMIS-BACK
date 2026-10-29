@@ -149,7 +149,7 @@ def appendix_f_form(project_id):
             "kind": "table",
             "header": [],
             "rows": [
-                ["Project Code", project.project_code],
+                ["NTP (Project Code)", project.project_code],  # the NTP number is the code (client 2026-10-29)
                 ["Project Leader", _name(project.lead)],
                 ["Co-Project Leader/s", "; ".join(m.name for m in team if m.member_role == "co_leader")],
                 ["Project Team", "; ".join(m.name for m in team if m.member_role != "co_leader")],

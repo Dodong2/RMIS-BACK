@@ -14,7 +14,7 @@ class LeaderCapConcurrencyTests(ConcurrencyTestCase):
         def register(registrar, code):
             client = self.client_for(registrar)
             return lambda: client.post("/api/projects/", project_payload(
-                leader, project_code=code, funding_type="institutional", status="active"), format="json")
+                leader, ntp_number=code, funding_type="institutional", status="active"), format="json")
 
         first, second = self.run_concurrently(register(registrar_a, "INST-1"), register(registrar_b, "INST-2"))
         self.assertEqual(sorted([first.status_code, second.status_code]), [201, 400])

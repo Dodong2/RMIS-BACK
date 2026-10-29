@@ -1,5 +1,6 @@
 from accounts.testing import RMISTestCase
 from research_projects.models import FundingType, Project
+from research_projects.tests import project_payload
 
 
 class FundingTypeTests(RMISTestCase):
@@ -46,10 +47,8 @@ class FundingTypeTests(RMISTestCase):
     def test_projects_accept_admin_types_and_refuse_unknown_ones(self):
         FundingType.objects.create(code="lgu_funded", name="LGU-Funded")
         leader = self.make_user("project_leader")
-        base = {"title": "P", "lead": leader.pk, "sdgs": [4], "sectors": ["education"]}
-
-        added = self.admin.post("/api/projects/", {**base, "project_code": "P-1", "funding_type": "lgu_funded"}, format="json")
-        unknown = self.admin.post("/api/projects/", {**base, "project_code": "P-2", "funding_type": "nope"}, format="json")
+        added = self.admin.post("/api/projects/", project_payload(leader, ntp_number="P-1", funding_type="lgu_funded"), format="json")
+        unknown = self.admin.post("/api/projects/", project_payload(leader, ntp_number="P-2", funding_type="nope"), format="json")
 
         self.assertEqual(added.status_code, 201, added.data)
         self.assertEqual(unknown.status_code, 400)

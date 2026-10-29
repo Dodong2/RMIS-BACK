@@ -22,6 +22,24 @@ RICH_TEXT_ATTRIBUTES = {"a": {"href"}, "td": {"colspan", "rowspan"}, "th": {"col
 HTML_TAG = re.compile(r"</?[a-zA-Z][^>]*>")
 
 
+# Client 2026-10-29 (Task 4): every Step 1 field of Register Approved Project is required, for Manual Entry, the Excel
+# import and Edit. funding_type, sdgs, sectors and title are required elsewhere already.
+REQUIRED_PROJECT_FIELDS = (
+    "ntp_number", "research_type", "start_date", "target_end_date", "total_cost", "rde_thrust", "rde_priority",
+    "research_priority_area", "research_typology", "objectives", *RICH_TEXT_FIELDS,
+    "description", "expected_outcomes", "expected_impacts",
+)
+# Picked on registration, never left to the model default; Not Applicable (null) is a valid pick for Wet/Dry
+EXPLICIT_CHOICE_FIELDS = ("is_dry_research", "is_continuing")
+
+
+def is_blank(value):
+    """Empty, or rich text with only tags and spaces (an emptied editor sends "<p></p>")."""
+    if isinstance(value, str):
+        return not HTML_TAG.sub("", value).replace("&nbsp;", " ").strip()
+    return value is None or value == []
+
+
 def clean_rich_text(value):
     """Sanitized HTML; text without any tag (older entries, Excel cells) is kept exactly as typed."""
     if not value or not HTML_TAG.search(value):
@@ -315,6 +333,8 @@ class ProjectSerializer(serializers.ModelSerializer):
             "recommended_by_vprde", "recommended_by_vprde_on", "approved_by_president",
             "created_at", "review_status", "review_status_label",
         ]
+        # Client 2026-10-29 (Task 4, Q-A): the NTP number is the official R&D project code; validate() copies it here
+        read_only_fields = ["project_code"]
 
     def get_review_status(self, obj):
         return review_status(obj)
@@ -336,6 +356,13 @@ class ProjectSerializer(serializers.ModelSerializer):
 
     def validate_funding_type(self, value):
         return validate_funding_type(value)
+
+    def validate_ntp_number(self, value):
+        value = value.strip()
+        others = Project.objects.exclude(pk=self.instance.pk) if self.instance else Project.objects.all()
+        if value and (others.filter(project_code=value).exists() or others.filter(ntp_number=value).exists()):
+            raise serializers.ValidationError(f"A project with NTP {value} already exists.")
+        return value
 
     def validate_sdgs(self, value):
         if not isinstance(value, list) or any(
@@ -379,12 +406,27 @@ class ProjectSerializer(serializers.ModelSerializer):
             ensure_campus_is_leads(attrs, lead)
         validate_rde_alignment(self, attrs)
         ensure_project_leader_registers_self(self, lead)
-        ensure_leader_keeps(self, attrs, ["project_code", "lead", "program"])
+        ensure_leader_keeps(self, attrs, ["lead", "program"])
         if self.instance is not None:
             ensure_registration_editor(self, self.instance, attrs)
             ensure_registration_open(self.instance, registration_changes(self, attrs, exclude=("status",)))
         program = attrs.get("program", getattr(self.instance, "program", None))
         ensure_registrant_in_scope(self, self.instance, leads=[lead, program.lead if program else None])
+        # Registration needs every field; an edit only can't blank one, so unrelated edits of older records still save
+        missing = {
+            field: "This field is required."
+            for field in REQUIRED_PROJECT_FIELDS if (self.instance is None or field in attrs) and is_blank(attrs.get(field))
+        }
+        if self.instance is None:
+            missing |= {field: "Select an option." for field in EXPLICIT_CHOICE_FIELDS if field not in self.initial_data}
+        if missing:
+            raise serializers.ValidationError(missing)
+        if "ntp_number" in attrs:
+            request = self.context.get("request")
+            if (self.instance is not None and attrs["ntp_number"] != self.instance.ntp_number and request is not None
+                    and not (request.user.role and request.user.role.code == "system_admin")):
+                raise serializers.ValidationError({"ntp_number": "Only the System Admin can change the NTP."})
+            attrs["project_code"] = attrs["ntp_number"]
         validate_lead_concurrency(
             lead, funding_type, Project.objects.all(),
             self.instance.pk if self.instance else None, default_cap=3,

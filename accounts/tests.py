@@ -712,11 +712,11 @@ class AuditLogTests(RMISTestCase):
     def test_a_rejected_write_keeps_the_validation_message(self):
         riuh = self.make_user("riuh")  # a registrant (the CRC Chair no longer registers, client 2026-10-24)
 
-        self.client_for(riuh).post("/api/projects/", {"title": "No code"}, format="json")
+        self.client_for(riuh).post("/api/projects/", {"title": "No leader"}, format="json")
 
         log = AuditLog.objects.get()
         self.assertEqual(log.status_code, 400)
-        self.assertIn("project_code", log.error_detail)
+        self.assertIn("lead", log.error_detail)
 
     def test_reads_are_not_audit_logged(self):
         admin = self.make_user("system_admin")

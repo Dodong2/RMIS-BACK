@@ -8,15 +8,102 @@ from accounts.models import User
 from budget_lib.models import LibItem, LineItem, LineItemBudget
 from research_projects.models import CollegeUnit, CooperatingAgency, Project, ProjectEndorser, RdeThrust, WorkPlanMilestone
 from research_projects.rde_agenda import seed_rde_agenda
+from research_projects.serializers import REQUIRED_PROJECT_FIELDS
 
 
 def project_payload(lead, **overrides):
+    """Every Step 1 field filled (client 2026-10-29); the NTP number is the project code."""
+    seed_rde_agenda(RdeThrust)  # a TransactionTestCase flush also drops the migration-seeded agenda
     data = {
-        "title": "Bridging Academia and Communities", "project_code": "LSPU-1", "funding_type": "core_funded",
+        "title": "Bridging Academia and Communities", "ntp_number": "LSPU-1", "funding_type": "core_funded",
         "lead": lead.id, "sdgs": [4, 17], "sectors": ["education"],
+        "research_type": "applied", "is_dry_research": True, "is_continuing": False,
+        "start_date": "2027-01-01", "target_end_date": "2027-12-31", "total_cost": "100000.00",
+        "rde_thrust": RdeThrust.objects.get(code="1").name, "rde_priority": RdeThrust.objects.get(code="1.3").name,
+        "research_priority_area": "education_teacher_training", "research_typology": ["quantitative"],
+        "objectives": "1. Map community needs", "background": "<p>Background</p>", "methodology": "<p>Method</p>",
+        "socio_economic_significance": "<p>Significance</p>", "monitoring_evaluation": "<p>M&amp;E</p>",
+        "references": "<p>References</p>", "description": "Summary", "expected_outcomes": "Outcomes",
+        "expected_impacts": "Impacts",
     }
     data.update(overrides)
     return data
+
+
+class StepOneRequiredTests(RMISTestCase):
+    """Client 2026-10-29 (Task 4): every Step 1 field is required and the NTP number is the project code."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin, self.leader = self.make_user("system_admin"), self.make_user("project_leader")
+        self.client_ = self.client_for(self.admin)
+
+    def register(self, payload):
+        return self.client_.post("/api/projects/", payload, format="json")
+
+    def test_each_step_1_field_is_required(self):
+        for field in REQUIRED_PROJECT_FIELDS:
+            payload = project_payload(self.leader)
+            del payload[field]
+            response = self.register(payload)
+            self.assertEqual(response.status_code, 400, field)
+            self.assertIn(field, response.data, field)
+        self.assertFalse(Project.objects.exists())
+
+    def test_blank_values_and_an_emptied_editor_count_as_missing(self):
+        response = self.register(project_payload(
+            self.leader, ntp_number="  ", research_typology=[], background="<p></p>", methodology="<p>&nbsp;</p>",
+        ))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue({"ntp_number", "research_typology", "background", "methodology"} <= set(response.data))
+
+    def test_wet_dry_and_new_continuing_must_be_picked(self):
+        payload = project_payload(self.leader)
+        del payload["is_dry_research"], payload["is_continuing"]
+
+        response = self.register(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(set(response.data), {"is_dry_research", "is_continuing"})
+
+    def test_not_applicable_is_a_valid_pick(self):
+        response = self.register(project_payload(self.leader, is_dry_research=None, research_type="not_applicable"))
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual((response.data["is_dry_research"], response.data["research_type"]), (None, "not_applicable"))
+
+    def test_the_ntp_number_is_the_project_code(self):
+        response = self.register(project_payload(self.leader, ntp_number=" NTP-2027-001 ", project_code="IGNORED"))
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual((response.data["ntp_number"], response.data["project_code"]), ("NTP-2027-001", "NTP-2027-001"))
+
+    def test_an_ntp_number_already_used_as_a_code_is_refused(self):
+        Project.objects.create(title="Old", project_code="NTP-1", funding_type="core_funded", lead=self.leader)
+
+        response = self.register(project_payload(self.leader, ntp_number="NTP-1"))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ntp_number", response.data)
+
+    def test_only_the_system_admin_changes_the_ntp_and_the_code_follows(self):
+        project_id = self.register(project_payload(self.leader, ntp_number="NTP-1")).data["id"]
+
+        by_leader = self.client_for(self.leader).patch(f"/api/projects/{project_id}/", {"ntp_number": "NTP-9"}, format="json")
+        by_admin = self.client_.patch(f"/api/projects/{project_id}/", {"ntp_number": "NTP-2"}, format="json")
+
+        self.assertEqual(by_leader.status_code, 400)
+        self.assertEqual(by_admin.status_code, 200, by_admin.data)
+        self.assertEqual(Project.objects.values_list("ntp_number", "project_code").get(), ("NTP-2", "NTP-2"))
+
+    def test_an_edit_of_an_older_record_only_checks_the_fields_it_sends(self):
+        project = Project.objects.create(title="Old", project_code="OLD-1", funding_type="core_funded", lead=self.leader,
+                                         sdgs=[4], sectors=["education"])
+
+        response = self.client_.patch(f"/api/projects/{project.pk}/", {"title": "Old, renamed"}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
 
 
 class ManualRegistrationTests(RMISTestCase):
@@ -92,18 +179,21 @@ class ManualRegistrationTests(RMISTestCase):
     def test_leader_can_edit_their_own_project_but_not_the_crc_owned_fields(self):
         leader = self.make_user("project_leader")
         project = Project.objects.create(
-            title="P", project_code="P-1", funding_type="core_funded", lead=leader, sdgs=[4], sectors=["education"],
+            title="P", project_code="P-1", ntp_number="P-1", funding_type="core_funded", lead=leader, sdgs=[4],
+            sectors=["education"],
         )
         client = self.client_for(leader)
 
-        edited = client.patch(f"/api/projects/{project.id}/", {"title": "Better title", "project_code": "P-1"}, format="json")
-        recoded = client.patch(f"/api/projects/{project.id}/", {"project_code": "P-2"}, format="json")
+        edited = client.patch(f"/api/projects/{project.id}/", {"title": "Better title", "ntp_number": "P-1"}, format="json")
+        renumbered = client.patch(f"/api/projects/{project.id}/", {"ntp_number": "P-2"}, format="json")
+        recoded = client.patch(f"/api/projects/{project.id}/", {"project_code": "P-3"}, format="json")
 
         self.assertEqual(edited.status_code, 200, edited.data)
-        self.assertEqual(recoded.status_code, 400)
-        self.assertIn("project_code", recoded.data)
+        self.assertEqual(renumbered.status_code, 400)
+        self.assertIn("ntp_number", renumbered.data)
+        self.assertEqual(recoded.status_code, 200)  # read-only since the NTP is the code (2026-10-29), so ignored
         project.refresh_from_db()
-        self.assertEqual((project.title, project.project_code), ("Better title", "P-1"))
+        self.assertEqual((project.title, project.ntp_number, project.project_code), ("Better title", "P-1", "P-1"))
 
     def test_project_leader_cannot_edit_another_leaders_project(self):
         leader, other = self.make_user("project_leader"), self.make_user("project_leader")
@@ -274,11 +364,11 @@ class ProjectCampusTests(RMISTestCase):
     def test_registration_takes_the_leaders_campus(self):
         blank = self.client_for(self.admin).post("/api/projects/", project_payload(self.leader), format="json")
         own = self.client_for(self.leader).post(
-            "/api/projects/", project_payload(self.leader, project_code="LSPU-2", title="Second", campus="siniloan"),
+            "/api/projects/", project_payload(self.leader, ntp_number="LSPU-2", title="Second", campus="siniloan"),
             format="json",
         )
         other = self.client_for(self.admin).post(
-            "/api/projects/", project_payload(self.leader, project_code="LSPU-3", title="Third", campus="Sta. Cruz"),
+            "/api/projects/", project_payload(self.leader, ntp_number="LSPU-3", title="Third", campus="Sta. Cruz"),
             format="json",
         )
 
@@ -325,13 +415,33 @@ class ExcelImportTests(RMISTestCase):
     def fill_project(self, **values):
         defaults = {
             "Title": "Bridging Academia and Communities",
-            "LSPU Faculty Research Number (Project Code)": "LSPU-X1",
+            "NTP (Notice to Proceed No.)": "LSPU-X1",
+            "Funding Type": "Institutional",
             "Project Leader E-mail Address": "Leader@LSPU.test",
             "Project Leader Gender": "Female",
             "Start Date": datetime.datetime(2026, 1, 1),
+            "End Date": datetime.datetime(2026, 12, 31),
+            "Total Project/Study Cost": 100000,
             "Sector": "Education, Community Development",
+            "New or Continuing": "New Proposal",
+            "Basic or Applied Research": "Applied Research",
+            "Wet or Dry Research": "Dry Research",
+            "Research Priority Area": "Education and Teacher's Training",
+            "Research Typology": "Quantitative Research",
             "Sustainable Development Goals (SDGs)": "4, 11, 17",
+            "RDE Thrust": RdeThrust.objects.get(code="1").name,
+            "RDE Priority Area": RdeThrust.objects.get(code="1.3").name,
             "College Unit - Implementing Unit": "cte",
+            # Every Step 1 field is required since 2026-10-29
+            "II. Background of the Study": "Background",
+            "III. Objectives of the Study": "Map community needs",
+            "IV. Project Descriptions/Methodology": "Methodology",
+            "VI. Socio-Economic Significance": "Significance",
+            "VIII. Monitoring/Evaluation": "Monitoring",
+            "IX. List of References": "References",
+            "Executive Summary": "Summary",
+            "Anticipated Outcomes": "Outcomes",
+            "Long-term Potential Impacts": "Impacts",
         }
         defaults.update(values)
         for row in self.workbook["Project"].iter_rows(min_row=2):
@@ -413,7 +523,7 @@ class ExcelImportTests(RMISTestCase):
         project = Project.objects.get()
         self.assertEqual((project.college, project.implementing_unit), ("CTE", "CTE"))
 
-        self.fill_project(**{"LSPU Faculty Research Number (Project Code)": "LSPU-X2", "College Unit - Implementing Unit": "CCS"})
+        self.fill_project(**{"NTP (Notice to Proceed No.)": "LSPU-X2", "College Unit - Implementing Unit": "CCS"})
         response = self.upload()
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["errors"][0]["field"], "College Unit - Implementing Unit")
@@ -430,7 +540,7 @@ class ExcelImportTests(RMISTestCase):
         )
         self.assertEqual(project.cooperating_agencies, "DOST-PCAARRD, LGU of Siniloan, Laguna")
 
-        self.fill_project(**{"LSPU Faculty Research Number (Project Code)": "LSPU-X2", "RDE Thrust": "Space", "Cooperating Agency/ies": "DOST-PCAARRD; CHED"})
+        self.fill_project(**{"NTP (Notice to Proceed No.)": "LSPU-X2", "RDE Thrust": "Space", "Cooperating Agency/ies": "DOST-PCAARRD; CHED"})
         fields = sorted(e["field"] for e in self.upload().data["errors"])
         self.assertEqual(fields, ["Cooperating Agency/ies", "RDE Thrust"])
 
@@ -489,10 +599,48 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual((response.data["is_dry_research"], response.data["research_type"]), (None, "not_applicable"))
 
-    def test_blank_wet_or_dry_is_still_dry(self):
-        self.fill_project()
+    def test_blank_wet_or_dry_new_or_continuing_and_funding_type_must_be_filled(self):
+        # Client 2026-10-29: no more "Blank = Dry", "Blank = New Proposal" or "Blank = Institutional"
+        self.fill_project(**{"Wet or Dry Research": None, "New or Continuing": None})
+        choices = self.upload()
+        self.fill_project(**{"Funding Type": None})
+        funding = self.upload()
 
-        self.assertIs(self.upload().data["is_dry_research"], True)
+        self.assertEqual(choices.status_code, 400)
+        self.assertTrue({"Wet or Dry Research", "New or Continuing"} <= {e["field"] for e in choices.data["errors"]}, choices.data)
+        self.assertEqual(funding.status_code, 400)
+        self.assertIn("Funding Type", {e["field"] for e in funding.data["errors"]})
+        self.assertFalse(Project.objects.exists())
+
+    def test_an_old_template_with_only_the_project_code_is_refused(self):
+        self.fill_project(**{"NTP (Notice to Proceed No.)": None})
+        sheet = self.workbook["Project"]
+        sheet.append(["LSPU Faculty Research Number (Project Code)", "LSPU-OLD"])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 400)
+        messages = {e["field"]: e["message"] for e in response.data["errors"]}
+        self.assertIn("no longer used", messages["LSPU Faculty Research Number (Project Code)"])
+        self.assertFalse(Project.objects.exists())
+
+    def test_a_project_code_row_with_a_different_ntp_is_refused_and_the_same_one_is_fine(self):
+        self.fill_project()
+        self.workbook["Project"].append(["LSPU Faculty Research Number (Project Code)", "OTHER-1"])
+        self.assertEqual(self.upload().status_code, 400)
+
+        self.workbook["Project"].cell(row=self.workbook["Project"].max_row, column=2).value = "LSPU-X1"
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Project.objects.get().project_code, "LSPU-X1")
+
+    def test_the_template_has_the_ntp_row_and_the_new_required_rows(self):
+        labels = [row[0].value for row in self.workbook["Project"].iter_rows(min_row=2)]
+
+        self.assertIn("NTP (Notice to Proceed No.)", labels)
+        self.assertNotIn("LSPU Faculty Research Number (Project Code)", labels)
+        self.assertTrue({"Executive Summary", "Anticipated Outcomes", "Long-term Potential Impacts"} <= set(labels))
 
     def work_plan(self):
         return list(WorkPlanMilestone.objects.order_by("id").values_list("title", "start_date", "target_date"))
@@ -609,7 +757,8 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(preview["lead_email"], "leader@lspu.test")
         self.assertEqual(preview["co_leaders"], [{"name": "Archieval M. Jain", "gender": "male"}])
         self.assertEqual(preview["objectives"], ["Train teachers", "Map communities"])
-        self.assertEqual((preview["rde_thrust"], preview["rde_priority"]), ("", ""))
+        self.assertEqual((preview["rde_thrust"], preview["rde_priority"]),
+                         (RdeThrust.objects.get(code="1").name, RdeThrust.objects.get(code="1.3").name))
         self.assertEqual(preview["budget"][0], {
             "category": "mooe", "description": "Traveling Expenses - Local", "unit": "pax", "quantity": 4, "unit_cost": 2500, "total": 10000,
             "allocations": [],
@@ -1045,7 +1194,7 @@ class EditRegisteredProjectTests(RMISTestCase):
         c = self.client_for(self.leader)
         ok = lambda r: self.assertIn(r.status_code, (200, 201, 204), getattr(r, "data", r))
         ok(c.patch(f"/api/projects/{self.project.pk}/", {"title": "New", "sectors": ["education", "others"], "sector_other": "X",
-                                                         "objectives": "1. A\n2. B", "start_date": None}, format="json"))
+                                                         "objectives": "1. A\n2. B", "start_date": "2027-02-01"}, format="json"))
         ok(c.patch(f"/api/project-team/{self.member.pk}/", {"member_role": "co_leader", "name": "B", "gender": "female"}, format="json"))
         ok(c.post("/api/project-team/", {"project": self.project.pk, "member_role": "member", "name": "C", "gender": ""}, format="json"))
         ok(c.patch(f"/api/studies/{self.study.pk}/", {"title": "S1b"}, format="json"))
@@ -1062,7 +1211,8 @@ class EditRegisteredProjectTests(RMISTestCase):
 
         self.project.refresh_from_db()
         self.assertEqual((self.project.title, self.project.sector_other), ("New", "X"))
-        self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"project_code": "LSPU-10"}, format="json").status_code, 400)
+        self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"ntp_number": "LSPU-10"}, format="json").status_code, 400)
+        self.assertEqual(c.patch(f"/api/projects/{self.project.pk}/", {"start_date": None}, format="json").status_code, 400)
 
     def test_only_the_system_admin_and_the_projects_leader_edit_it(self):
         from budget_lib.models import BudgetReview
@@ -1228,10 +1378,12 @@ class NotApplicableClassificationTests(RMISTestCase):
         self.assertEqual((read["is_dry_research"], read["research_type"]), (None, "not_applicable"))
 
     def test_the_existing_values_still_save(self):
-        for dry, kind in ((False, "basic"), (True, "applied"), (True, "")):
+        for dry, kind in ((False, "basic"), (True, "applied")):
             response = self.client_.patch(self.url, {"is_dry_research": dry, "research_type": kind}, format="json")
             self.assertEqual(response.status_code, 200, response.data)
             self.assertEqual((response.data["is_dry_research"], response.data["research_type"]), (dry, kind))
+        # Required since 2026-10-29: it can't be blanked any more
+        self.assertEqual(self.client_.patch(self.url, {"research_type": ""}, format="json").status_code, 400)
 
     def test_a_new_project_is_still_dry_by_default(self):
         self.assertIs(Project.objects.get(pk=self.project.pk).is_dry_research, True)
@@ -1414,7 +1566,7 @@ class DuplicateTitleTests(RMISTestCase):
 
     def test_the_same_title_is_refused_even_with_other_spacing_or_capitals(self):
         for title in ("Bridging Academia and Communities", "  bridging academia   AND communities "):
-            response = self.client_for(self.admin).post("/api/projects/", project_payload(self.leader, title=title, project_code="NEW-1"), format="json")
+            response = self.client_for(self.admin).post("/api/projects/", project_payload(self.leader, title=title, ntp_number="NEW-1"), format="json")
 
             self.assertEqual(response.status_code, 400, title)
             self.assertEqual(str(response.data["title"][0]), "A project titled \"Bridging Academia and Communities\" already exists.")
@@ -1422,7 +1574,7 @@ class DuplicateTitleTests(RMISTestCase):
 
     def test_a_different_title_registers(self):
         response = self.client_for(self.admin).post(
-            "/api/projects/", project_payload(self.leader, title="Bridging Academia and Communities 2", project_code="NEW-1"), format="json",
+            "/api/projects/", project_payload(self.leader, title="Bridging Academia and Communities 2", ntp_number="NEW-1"), format="json",
         )
 
         self.assertEqual(response.status_code, 201, response.data)

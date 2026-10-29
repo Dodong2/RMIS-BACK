@@ -99,8 +99,8 @@ class ProjectRdeAlignmentTests(RdeAgendaTestCase):
         self.assertIn("rde_priority", response.data)
 
     def test_thrust_and_priority_area_go_together(self):
-        self.assertEqual(self.register(rde_thrust=self.thrust).status_code, 400)
-        self.assertEqual(self.register(rde_priority=self.priority).status_code, 400)
+        self.assertEqual(self.register(rde_thrust=self.thrust, rde_priority="").status_code, 400)
+        self.assertEqual(self.register(rde_thrust="", rde_priority=self.priority).status_code, 400)
 
     def test_unknown_thrust_is_rejected(self):
         self.assertEqual(self.register(rde_thrust="Space", rde_priority="1.1 - Space").status_code, 400)

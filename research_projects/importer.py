@@ -35,6 +35,10 @@ COLLEGE_UNIT_LABEL = "College Unit - Implementing Unit"
 ADMIN_CHOICE_PAGES = {CollegeUnit: "College Units", RdeThrust: "RDE Thrusts", CooperatingAgency: "Cooperating Agencies"}
 # Templates downloaded before the merge still have the two old rows; read either as the merged field.
 OLD_COLLEGE_UNIT_LABELS = ("Implementing Unit", "College Unit")
+# Client 2026-10-29 (Task 4, Q-A): the NTP number is the official code. Older templates have the Project Code row
+# instead; it is never copied into the NTP, so such a file needs the NTP row filled.
+NTP_LABEL = "NTP (Notice to Proceed No.)"
+LEGACY_PROJECT_CODE_LABEL = "LSPU Faculty Research Number (Project Code)"
 
 # (label in column A, serializer field, kind, choices, note in column C). Order follows the form.
 class _FundingTypes:
@@ -50,39 +54,42 @@ FUNDING_TYPES = _FundingTypes()
 
 PROJECT_FIELDS = [
     ("Title", "title", "text", None, "Required"),
-    ("LSPU Faculty Research Number (Project Code)", "project_code", "text", None, "Required, must be unique"),
+    (NTP_LABEL, "ntp_number", "text", None, "Required, must be unique; the NTP number is the project's official code"),
     ("Program Code (if under a Program)", "program", "program", None, "Optional; code of an existing RMIS Program"),
-    ("Funding Type", "funding_type", "choice", FUNDING_TYPES, "Blank = Institutional (LSPU-Funded)"),
+    ("Funding Type", "funding_type", "choice", FUNDING_TYPES, "Required"),
     ("Project Leader Staff ID", "lead_staff_id", "staff_id", None,
      "RMIS account with the Project Leader role; format the cell as Text so leading zeros stay"),
     ("Project Leader E-mail Address", "lead", "user", None, "Used when the Staff ID is blank"),
     ("Project Leader Gender", "lead_gender", "choice", Project.GENDER_CHOICES, "Male or Female"),
     ("Contact No./s.", "contact_number", "text", None, ""),
-    ("Start Date", "start_date", "date", None, "Date cell or YYYY-MM-DD"),
-    ("End Date", "target_end_date", "date", None, "Date cell or YYYY-MM-DD"),
-    ("Total Project/Study Cost", "total_cost", "decimal", None, "Number"),
+    ("Start Date", "start_date", "date", None, "Required; date cell or YYYY-MM-DD"),
+    ("End Date", "target_end_date", "date", None, "Required; date cell or YYYY-MM-DD"),
+    ("Total Project/Study Cost", "total_cost", "decimal", None, "Required; number"),
     ("Campus", "campus", "text", None, ""),
     (COLLEGE_UNIT_LABEL, "implementing_unit", "admin_choice", CollegeUnit, "Must match System Admin > College Units"),
     ("Cooperating Agency/ies", "cooperating_agencies", "admin_choices", CooperatingAgency,
      "One or more, separated by semicolons; must match System Admin > Cooperating Agencies"),
     ("Sector", "sectors", "multi", Project.SECTOR_CHOICES, "Required; one or more, comma-separated"),
     ("Sector (if Others)", "sector_other", "text", None, "Required when Sector includes Others"),
-    ("New or Continuing", "is_continuing", "choice", NEW_OR_CONTINUING, "Blank = New Proposal"),
+    ("New or Continuing", "is_continuing", "choice", NEW_OR_CONTINUING, "Required: New Proposal or Continuing"),
     ("Continuing Year", "continuing_year", "int", None, "2, 3, ... (continuing proposals only)"),
-    ("Basic or Applied Research", "research_type", "choice", Project.RESEARCH_TYPE_CHOICES, ""),
-    ("Wet or Dry Research", "is_dry_research", "choice", WET_OR_DRY, "Blank = Dry"),
-    ("Research Priority Area", "research_priority_area", "choice", Project.PRIORITY_AREA_CHOICES, ""),
-    ("Research Typology", "research_typology", "multi", Project.TYPOLOGY_CHOICES, "One or more, comma-separated"),
+    ("Basic or Applied Research", "research_type", "choice", Project.RESEARCH_TYPE_CHOICES, "Required"),
+    ("Wet or Dry Research", "is_dry_research", "choice", WET_OR_DRY, "Required: Wet, Dry or Not Applicable"),
+    ("Research Priority Area", "research_priority_area", "choice", Project.PRIORITY_AREA_CHOICES, "Required"),
+    ("Research Typology", "research_typology", "multi", Project.TYPOLOGY_CHOICES, "Required; one or more, comma-separated"),
     ("Sustainable Development Goals (SDGs)", "sdgs", "sdgs", None, "Required; goal numbers 1-17, comma-separated"),
-    ("RDE Thrust", "rde_thrust", "admin_choice", RdeThrust, "Optional; must match System Admin > RDE Thrusts"),
+    ("RDE Thrust", "rde_thrust", "admin_choice", RdeThrust, "Required; must match System Admin > RDE Thrusts"),
     ("RDE Priority Area", "rde_priority", "admin_choice", RdeThrust,
-     "Required with an RDE Thrust; a priority area under that thrust, e.g. 1.3 - Artificial Intelligence and Machine Learning"),
-    ("II. Background of the Study", "background", "text", None, ""),
-    ("III. Objectives of the Study", "objectives", "text", None, ""),
-    ("IV. Project Descriptions/Methodology", "methodology", "text", None, ""),
-    ("VI. Socio-Economic Significance", "socio_economic_significance", "text", None, ""),
-    ("VIII. Monitoring/Evaluation", "monitoring_evaluation", "text", None, ""),
-    ("IX. List of References", "references", "text", None, "APA format"),
+     "Required; a priority area under the RDE Thrust, e.g. 1.3 - Artificial Intelligence and Machine Learning"),
+    ("II. Background of the Study", "background", "text", None, "Required"),
+    ("III. Objectives of the Study", "objectives", "text", None, "Required"),
+    ("IV. Project Descriptions/Methodology", "methodology", "text", None, "Required"),
+    ("VI. Socio-Economic Significance", "socio_economic_significance", "text", None, "Required"),
+    ("VIII. Monitoring/Evaluation", "monitoring_evaluation", "text", None, "Required"),
+    ("IX. List of References", "references", "text", None, "Required; APA format"),
+    ("Executive Summary", "description", "text", None, "Required"),
+    ("Anticipated Outcomes", "expected_outcomes", "text", None, "Required; one per line"),
+    ("Long-term Potential Impacts", "expected_impacts", "text", None, "Required; one per line"),
     ("Date Submitted (Project Leader)", "proposal_submitted_on", "date", None, "Annex A"),
     ("Endorsed By (Dean/Associate Dean)", "endorsed_by_dean", "text", None, "Annex A"),
     ("Date Endorsed by Dean", "endorsed_by_dean_on", "date", None, "Annex A"),
@@ -343,7 +350,9 @@ def _read_project_sheet(ws, errors):
     by_label = {_norm(label): (field, kind, choices) for label, field, kind, choices, _ in PROJECT_FIELDS}
     for old in OLD_COLLEGE_UNIT_LABELS:
         by_label[_norm(old)] = by_label[_norm(COLLEGE_UNIT_LABEL)]
+    by_label[_norm(LEGACY_PROJECT_CODE_LABEL)] = ("legacy_project_code", "text", None)
     data = {}
+    legacy_row = None
     for row_number, row in enumerate(ws.iter_rows(min_row=2, max_col=2, values_only=True), start=2):
         if not row or row[0] is None or _norm(row[0]) not in by_label:
             continue
@@ -355,13 +364,20 @@ def _read_project_sheet(ws, errors):
             continue
         if value is not None:
             data[field] = value
+            if field == "legacy_project_code":
+                legacy_row = row_number
+    legacy = data.pop("legacy_project_code", None)
+    if legacy is not None and str(legacy).strip() != str(data.get("ntp_number", "")).strip():
+        errors.append({"sheet": "Project", "row": legacy_row, "field": LEGACY_PROJECT_CODE_LABEL, "message": (
+            f"The Project Code is no longer used; the NTP number is the project's code. Put the NTP in the "
+            f"'{NTP_LABEL}' row (download the new template) and leave this row blank."
+        )})
     if "is_continuing" in data:
         data["is_continuing"] = data["is_continuing"] == "continuing"
     if "is_dry_research" in data:
         data["is_dry_research"] = None if data["is_dry_research"] == "not_applicable" else data["is_dry_research"] == "dry"
     if "implementing_unit" in data:
         data["college"] = data["implementing_unit"]
-    data.setdefault("funding_type", "institutional")
     return data
 
 
