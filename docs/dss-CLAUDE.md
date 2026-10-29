@@ -325,3 +325,15 @@ Any change that blocks, locks, hides or filters something (workflow gate, status
 - which of those apply to the CURRENT data (read-only DB check);
 - what a user has to do to reach them again.
 Repeat this in the task report so Carl can warn the client before a demo.
+
+## TEST GUIDE MAINTENANCE (Carl 2026-10-29)
+
+`dss/RMIS_Test_Guide_2026-10-28.docx` is the living test guide. Keep that filename unless Carl approves another.
+- After every completed `GO TASK N` (not wrapup/handover), update it in the same task, unasked. A task isn't fully documented until the guide is updated. This replaces the old "test guide only on request" habit; the chat report still stays short.
+- Before editing, read the current DOCX and keep its structure, terminology and language (Taglish steps). Edit the existing file (unzip → `word/document.xml` → zip, `anthropic-skills:docx`), back it up to the scratchpad first, never recreate it or overwrite it with an older copy.
+- Revise every existing case the task changed (feature, workflow, UI, field, validation, permission, API, calculation, statistic, analytics). Add cases for the new behavior: inputs, expected outputs, validation, access per role (allowed and denied), errors, edge cases. Keep unaffected cases. Add regression cases for calculations, totals, permissions, data relationships and workflows the task touches.
+- Each section states its status separately: implemented; automated tests run and passed (which, how many); failed; not yet executed/verified (browser). Never mark a test passed because the code exists or tsc passed.
+- Verify after editing: validate the XML, render to PDF and look at the pages, and diff the text to confirm earlier valid cases are still there.
+- Report: what was added, which cases were revised, what was kept, what is still unverified.
+- Don't change app code for the guide. Don't commit, push or delete for it. `dss/` isn't a repo, so the DOCX isn't committed.
+- If the DOCX can't be found, read or safely edited, STOP and tell Carl. Don't skip the update or create a replacement without approval.
