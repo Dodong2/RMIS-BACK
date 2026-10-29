@@ -307,6 +307,33 @@ def _add_category_legend(wb):
             cell.alignment = Alignment(wrap_text=True, vertical="top")
 
 
+def _add_table_sheet(sheet, name):
+    columns = TABLE_SHEETS[name]
+    sheet.append([header for header, *_ in columns])
+    for i, (header, _, kind, choices) in enumerate(columns):
+        sheet.column_dimensions[get_column_letter(i + 1)].width = max(18, len(header) + 4)
+        if kind == "staff_id":
+            sheet.column_dimensions[get_column_letter(i + 1)].number_format = "@"
+        allowed = _allowed(kind, choices)
+        if allowed:
+            legend = ". See the Legend sheet." if name == "Budget Requirements" and header == "Category" else ""
+            sheet.cell(row=1, column=i + 1).comment = Comment(f"Allowed: {allowed}{legend}", "RMIS")
+
+
+def build_work_plan_template():
+    """Client 2026-10-29 (Task 10): only the Work Plan sheet, the same columns as the registration template, for
+    Manual Entry's XI. Work Plan import (read_work_plan)."""
+    wb = openpyxl.Workbook()
+    sheet = wb.active
+    sheet.title = "Work Plan"
+    _add_table_sheet(sheet, "Work Plan")
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
 def build_template():
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -327,17 +354,8 @@ def build_template():
     ws.column_dimensions["C"].width = 70
     for cell in ws["B"]:
         cell.alignment = Alignment(wrap_text=True, vertical="top")
-    for name, columns in TABLE_SHEETS.items():
-        sheet = wb.create_sheet(name)
-        sheet.append([header for header, *_ in columns])
-        for i, (header, _, kind, choices) in enumerate(columns):
-            sheet.column_dimensions[get_column_letter(i + 1)].width = max(18, len(header) + 4)
-            if kind == "staff_id":
-                sheet.column_dimensions[get_column_letter(i + 1)].number_format = "@"
-            allowed = _allowed(kind, choices)
-            if allowed:
-                legend = ". See the Legend sheet." if name == "Budget Requirements" and header == "Category" else ""
-                sheet.cell(row=1, column=i + 1).comment = Comment(f"Allowed: {allowed}{legend}", "RMIS")
+    for name in TABLE_SHEETS:
+        _add_table_sheet(wb.create_sheet(name), name)
     _add_category_legend(wb)
     for sheet in wb.worksheets:
         for cell in sheet[1]:

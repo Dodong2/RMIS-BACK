@@ -1202,6 +1202,29 @@ class WorkPlanExcelTests(RMISTestCase):
         ])
         self.assertFalse(WorkPlanMilestone.objects.exists())
 
+    def test_the_work_plan_template_has_only_the_work_plan_sheet_and_imports(self):
+        """Client 2026-10-29 (Task 10): a Work Plan-only template for Manual Entry, same columns as the full one."""
+        response = self.client_for(self.admin).get("/api/projects/work-plan-template/")
+        template = openpyxl.load_workbook(io.BytesIO(response.content))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("rmis_work_plan_template.xlsx", response["Content-Disposition"])
+        self.assertEqual(template.sheetnames, ["Work Plan"])
+        self.assertEqual([c.value for c in template["Work Plan"][1]], ["Activity", "Start Date", "End Date"])
+
+        template["Work Plan"].append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+        imported = self.post(workbook=template)
+
+        self.assertEqual(imported.status_code, 200, imported.data)
+        self.assertEqual(imported.data["rows"], [{"title": "Logistic preparations", "start_date": "2026-01-01", "target_date": "2026-03-31"}])
+        self.assertFalse(WorkPlanMilestone.objects.exists())
+
+    def test_the_work_plan_template_is_for_registrants_only(self):
+        staff = self.client_for(self.make_user("project_staff")).get("/api/projects/work-plan-template/")
+        leader = self.client_for(self.make_user("project_leader")).get("/api/projects/work-plan-template/")
+
+        self.assertEqual((staff.status_code, leader.status_code), (403, 200))
+
     def test_the_full_registration_template_works_too(self):
         template = openpyxl.load_workbook(io.BytesIO(self.client_for(self.admin).get("/api/projects/import-template/").content))
         template["Work Plan"].append(["Logistic preparations", "2026-01-01", "2026-03-31"])

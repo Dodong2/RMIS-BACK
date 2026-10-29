@@ -237,6 +237,17 @@ class ProjectImportTemplateView(APIView):
         return response
 
 
+class WorkPlanTemplateView(APIView):
+    """Work Plan-only Excel template for Manual Entry's XI. Work Plan import (client 2026-10-29, Task 10)."""
+
+    permission_classes = [HasRole("projects.register")]
+
+    def get(self, request):
+        response = HttpResponse(importer.build_work_plan_template(), content_type=XLSX_TYPE)
+        response["Content-Disposition"] = 'attachment; filename="rmis_work_plan_template.xlsx"'
+        return response
+
+
 class ProjectImportView(APIView):
     """POST multipart `file`: registers one project (plus team, studies, 6Ps, beneficiaries, LIB, work plan)
     from a filled template. All-or-nothing: any row error rolls the whole import back and lists every error.
