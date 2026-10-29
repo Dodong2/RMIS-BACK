@@ -8,6 +8,7 @@ from config.concurrency import lock
 from realtime.notify import notify, project_audience
 from research_projects.workflow import missing_approval_documents, missing_registration_rows
 from .models import LibItem, LineItem, LineItemBudget
+from .notifications import proposal_submitted
 from .serializers import LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, review_budget, total_cost_problem
 
 # Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
@@ -193,6 +194,9 @@ class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.G
 
         budget = review_budget(budget, user, to_status, action, remarks)
         lib_signal(budget)
+        if self.step in ("submit", "resubmit"):
+            # Task 15 (2026-10-30): the campus CRC/CRD get an e-mail once the submission is saved
+            transaction.on_commit(lambda: proposal_submitted(budget, resubmitted=self.step == "resubmit"))
         return Response(LineItemBudgetSerializer(budget).data)
 
     def refuse(self, detail, code=status.HTTP_400_BAD_REQUEST):

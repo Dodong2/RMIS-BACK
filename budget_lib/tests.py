@@ -5,6 +5,8 @@ Chair. Every step is kept in the review history, each submission with a snapshot
 from datetime import date
 from decimal import Decimal
 
+import requests
+
 from accounts.testing import RMISTestCase
 from research_projects.models import Project
 
@@ -302,3 +304,76 @@ class LineItemSpecificationTests(RMISTestCase):
         submitted = self.act(self.leader, "submit").data["reviews"][0]
 
         self.assertEqual(submitted["snapshot"][0]["specification"], "Bus fare, Manila")
+
+
+class SubmissionEmailTests(RMISTestCase):
+    """Task 15 (2026-10-30): when the Project Leader submits (or resubmits) a proposal, every active CRC/CRD of the
+    project's campus gets a Brevo e-mail with the leader, the title and the budget per project year."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader", campus="Siniloan", first_name="Ana", last_name="Reyes")
+        self.project = Project.objects.create(
+            title="Bridging <Academia>", project_code="P-1", funding_type="core_funded", lead=self.leader, campus="Siniloan",
+            total_cost="15000", start_date=date(2027, 1, 1), target_end_date=date(2028, 3, 31),
+        )
+        self.budget = LineItemBudget.objects.create(project=self.project, version_number=1)
+        LineItem.objects.create(budget=self.budget, category="mooe", description="Training Expenses", amount=Decimal("10000"),
+                                allocations=[{"period": "Y1Q1", "amount": "4000.00"}, {"period": "Y1Q4", "amount": "6000.00"}] +
+                                            [{"period": p, "amount": "0.00"} for p in ("Y1Q2", "Y1Q3", "Y2Q1")])
+        LineItem.objects.create(budget=self.budget, category="co", description="Office Equipment", amount=Decimal("5000"),
+                                allocations=[{"period": "Y2Q1", "amount": "5000.00"}])
+        attach_approval_documents(self.project, self.leader)
+        add_registration_rows(self.project)
+        self.crc = [self.make_user("crc_chair", campus="Siniloan"), self.make_user("crc_chair", campus="siniloan")]
+        self.make_user("crc_chair", campus="Sta. Cruz")
+        self.make_user("crc_chair", campus="Siniloan", is_active=False)
+        self.make_user("crc_chair", campus="Siniloan", account_status="suspended")
+        self.brevo_post.reset_mock()
+
+    def step(self, name):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client_for(self.leader).post(f"/api/budget/budgets/{self.budget.pk}/{name}/")
+
+    def sent(self):
+        return [call.kwargs["json"] for call in self.brevo_post.call_args_list]
+
+    def test_submitting_e_mails_every_active_crc_crd_of_the_campus_with_the_budget_per_year(self):
+        response = self.step("submit")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        mails = self.sent()
+        self.assertEqual(sorted(m["to"][0]["email"] for m in mails), sorted(u.email for u in self.crc))
+        mail = mails[0]
+        self.assertEqual(mail["subject"], "New Project Proposal Submitted — Bridging <Academia>")
+        for text in ("Ana Reyes", self.leader.email, "Bridging &lt;Academia&gt;", "Year 1", "₱10,000.00", "Year 2", "₱5,000.00",
+                     "₱15,000.00", "open your RMIS account to review"):
+            self.assertIn(text, mail["htmlContent"])
+
+    def test_no_e_mail_while_it_is_a_draft_or_when_a_submit_is_repeated(self):
+        self.client_for(self.leader).patch(f"/api/budget/line-items/{LineItem.objects.first().pk}/", {"justification": "x"}, format="json")
+        self.assertEqual(self.sent(), [])
+
+        self.step("submit")
+        repeated = self.step("submit")
+
+        self.assertEqual(repeated.status_code, 400)
+        self.assertEqual(len(self.sent()), 2)
+
+    def test_a_failed_e_mail_keeps_the_submission(self):
+        self.brevo_post.side_effect = requests.ConnectionError("Brevo down")
+
+        response = self.step("submit")
+
+        self.assertEqual(response.status_code, 200)
+        self.budget.refresh_from_db()
+        self.assertEqual(self.budget.status, "submitted")
+
+    def test_a_resubmission_e_mails_the_campus_crc_crd_again(self):
+        LineItemBudget.objects.filter(pk=self.budget.pk).update(status="returned")
+
+        response = self.step("resubmit")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(self.sent()), 2)
+        self.assertEqual(self.sent()[0]["subject"], "Project Proposal Resubmitted — Bridging <Academia>")
