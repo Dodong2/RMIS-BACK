@@ -23,11 +23,12 @@ HTML_TAG = re.compile(r"</?[a-zA-Z][^>]*>")
 
 
 # Client 2026-10-29 (Task 4): every Step 1 field of Register Approved Project is required, for Manual Entry, the Excel
-# import and Edit. funding_type, sdgs, sectors and title are required elsewhere already.
+# import and Edit. funding_type, sdgs, sectors and title are required elsewhere already. Tasks 6/8 (same day): Research
+# Priority Area (the RDE Agenda replaces it) and the Proposal Content fields (II, IV, VI, VIII, IX, Executive Summary,
+# Outcomes, Impacts) are no longer asked; their columns stay optional for older records and the SF-018.
 REQUIRED_PROJECT_FIELDS = (
     "ntp_number", "research_type", "start_date", "target_end_date", "total_cost", "rde_thrust", "rde_priority",
-    "research_priority_area", "research_typology", "objectives", *RICH_TEXT_FIELDS,
-    "description", "expected_outcomes", "expected_impacts",
+    "research_typology", "objectives",
 )
 # Picked on registration, never left to the model default; Not Applicable (null) is a valid pick for Wet/Dry
 EXPLICIT_CHOICE_FIELDS = ("is_dry_research", "is_continuing")

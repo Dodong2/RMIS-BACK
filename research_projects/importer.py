@@ -75,21 +75,12 @@ PROJECT_FIELDS = [
     ("Continuing Year", "continuing_year", "int", None, "2, 3, ... (continuing proposals only)"),
     ("Basic or Applied Research", "research_type", "choice", Project.RESEARCH_TYPE_CHOICES, "Required"),
     ("Wet or Dry Research", "is_dry_research", "choice", WET_OR_DRY, "Required: Wet, Dry or Not Applicable"),
-    ("Research Priority Area", "research_priority_area", "choice", Project.PRIORITY_AREA_CHOICES, "Required"),
     ("Research Typology", "research_typology", "multi", Project.TYPOLOGY_CHOICES, "Required; one or more, comma-separated"),
     ("Sustainable Development Goals (SDGs)", "sdgs", "sdgs", None, "Required; goal numbers 1-17, comma-separated"),
     ("RDE Thrust", "rde_thrust", "admin_choice", RdeThrust, "Required; must match System Admin > RDE Thrusts"),
     ("RDE Priority Area", "rde_priority", "admin_choice", RdeThrust,
      "Required; a priority area under the RDE Thrust, e.g. 1.3 - Artificial Intelligence and Machine Learning"),
-    ("II. Background of the Study", "background", "text", None, "Required"),
     ("III. Objectives of the Study", "objectives", "text", None, "Required"),
-    ("IV. Project Descriptions/Methodology", "methodology", "text", None, "Required"),
-    ("VI. Socio-Economic Significance", "socio_economic_significance", "text", None, "Required"),
-    ("VIII. Monitoring/Evaluation", "monitoring_evaluation", "text", None, "Required"),
-    ("IX. List of References", "references", "text", None, "Required; APA format"),
-    ("Executive Summary", "description", "text", None, "Required"),
-    ("Anticipated Outcomes", "expected_outcomes", "text", None, "Required; one per line"),
-    ("Long-term Potential Impacts", "expected_impacts", "text", None, "Required; one per line"),
     ("Date Submitted (Project Leader)", "proposal_submitted_on", "date", None, "Annex A"),
     ("Endorsed By (Dean/Associate Dean)", "endorsed_by_dean", "text", None, "Annex A"),
     ("Date Endorsed by Dean", "endorsed_by_dean_on", "date", None, "Annex A"),
@@ -346,8 +337,23 @@ def build_template():
     return buffer.getvalue()
 
 
+# Client 2026-10-29 (Tasks 6/8): no longer in the template or required, but a filled row of an older template is still
+# read and saved, so nothing it carries is dropped.
+LEGACY_PROJECT_FIELDS = [
+    ("Research Priority Area", "research_priority_area", "choice", Project.PRIORITY_AREA_CHOICES, ""),
+    ("II. Background of the Study", "background", "text", None, ""),
+    ("IV. Project Descriptions/Methodology", "methodology", "text", None, ""),
+    ("VI. Socio-Economic Significance", "socio_economic_significance", "text", None, ""),
+    ("VIII. Monitoring/Evaluation", "monitoring_evaluation", "text", None, ""),
+    ("IX. List of References", "references", "text", None, ""),
+    ("Executive Summary", "description", "text", None, ""),
+    ("Anticipated Outcomes", "expected_outcomes", "text", None, ""),
+    ("Long-term Potential Impacts", "expected_impacts", "text", None, ""),
+]
+
+
 def _read_project_sheet(ws, errors):
-    by_label = {_norm(label): (field, kind, choices) for label, field, kind, choices, _ in PROJECT_FIELDS}
+    by_label = {_norm(label): (field, kind, choices) for label, field, kind, choices, _ in PROJECT_FIELDS + LEGACY_PROJECT_FIELDS}
     for old in OLD_COLLEGE_UNIT_LABELS:
         by_label[_norm(old)] = by_label[_norm(COLLEGE_UNIT_LABEL)]
     by_label[_norm(LEGACY_PROJECT_CODE_LABEL)] = ("legacy_project_code", "text", None)
@@ -511,7 +517,7 @@ def import_workbook(file_obj, request):
 
     serializer = ProjectSerializer(data=project_data, context=context)
     if not serializer.is_valid():
-        labels = {field: label for label, field, *_ in PROJECT_FIELDS}
+        labels = {field: label for label, field, *_ in PROJECT_FIELDS + LEGACY_PROJECT_FIELDS}
         return None, _serializer_errors("Project", None, serializer.errors, labels)
     project = serializer.save()
     for name_field, date_field, designation, role_code in ANNEX_A_SIGNATORIES:

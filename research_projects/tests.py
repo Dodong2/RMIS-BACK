@@ -55,11 +55,34 @@ class StepOneRequiredTests(RMISTestCase):
 
     def test_blank_values_and_an_emptied_editor_count_as_missing(self):
         response = self.register(project_payload(
-            self.leader, ntp_number="  ", research_typology=[], background="<p></p>", methodology="<p>&nbsp;</p>",
+            self.leader, ntp_number="  ", research_typology=[], objectives="<p></p>", background="<p></p>",
         ))
 
         self.assertEqual(response.status_code, 400)
-        self.assertTrue({"ntp_number", "research_typology", "background", "methodology"} <= set(response.data))
+        self.assertTrue({"ntp_number", "research_typology", "objectives"} <= set(response.data))
+        self.assertNotIn("background", response.data)
+
+    def test_priority_area_and_proposal_content_are_no_longer_required(self):
+        """Client 2026-10-29 (Tasks 6/8): RDE Agenda replaces Research Priority Area; Proposal Content is dropped except
+        the Objectives."""
+        removed = ("research_priority_area", "background", "methodology", "socio_economic_significance",
+                   "monitoring_evaluation", "references", "description", "expected_outcomes", "expected_impacts")
+        payload = {k: v for k, v in project_payload(self.leader).items() if k not in removed}
+
+        response = self.register(payload)
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Project.objects.values_list("research_priority_area", "background", "objectives").get(),
+                         ("", "", "1. Map community needs"))
+
+    def test_an_edit_without_the_dropped_fields_keeps_their_values(self):
+        project_id = self.register(project_payload(self.leader, background="<p>Old background</p>")).data["id"]
+
+        response = self.client_.patch(f"/api/projects/{project_id}/", {"title": "New title"}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(Project.objects.values_list("title", "background", "research_priority_area").get(),
+                         ("New title", "<p>Old background</p>", "education_teacher_training"))
 
     def test_wet_dry_and_new_continuing_must_be_picked(self):
         payload = project_payload(self.leader)
@@ -741,12 +764,28 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(Project.objects.values_list("ntp_number", "project_code").get(),
                          ("LSPU-RD-GRANT-SIN-2024-001", "LSPU-RD-GRANT-SIN-2024-001"))
 
-    def test_the_template_has_the_ntp_row_and_the_new_required_rows(self):
+    def test_the_template_has_the_ntp_row_and_not_the_dropped_rows(self):
         labels = [row[0].value for row in self.workbook["Project"].iter_rows(min_row=2)]
 
         self.assertIn("NTP (Notice to Proceed No.)", labels)
+        self.assertIn("III. Objectives of the Study", labels)
         self.assertNotIn("LSPU Faculty Research Number (Project Code)", labels)
-        self.assertTrue({"Executive Summary", "Anticipated Outcomes", "Long-term Potential Impacts"} <= set(labels))
+        for dropped in ("Research Priority Area", "II. Background of the Study", "IV. Project Descriptions/Methodology",
+                        "VI. Socio-Economic Significance", "VIII. Monitoring/Evaluation", "IX. List of References",
+                        "Executive Summary", "Anticipated Outcomes", "Long-term Potential Impacts"):
+            self.assertNotIn(dropped, labels)
+
+    def test_an_older_template_still_saves_the_dropped_rows(self):
+        self.fill_project()
+        for label, value in (("Research Priority Area", "Health and Health Profession"),
+                             ("II. Background of the Study", "Old background"), ("Executive Summary", "Old summary")):
+            self.workbook["Project"].append([label, value])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Project.objects.values_list("research_priority_area", "background", "description").get(),
+                         ("health", "Old background", "Old summary"))
 
     def work_plan(self):
         return list(WorkPlanMilestone.objects.order_by("id").values_list("title", "start_date", "target_date"))
