@@ -113,6 +113,8 @@ class LineItem(models.Model):
     budget = models.ForeignKey(LineItemBudget, on_delete=models.CASCADE, related_name="line_items")
     category = models.CharField(max_length=10, choices=CATEGORY_CHOICES)
     description = models.CharField(max_length=300)
+    # Task 12 (2026-10-29): SF-018 Section X's specific item under the LIB Item, e.g. "PAPER, 80 gsm"; free text
+    specification = models.CharField(max_length=300, blank=True)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     # Client feedback 2026-10-06: registration LIB rows are Unit / Qty / Unit Cost, and amount = quantity x unit_cost
     unit = models.CharField(max_length=10, choices=UNIT_CHOICES, blank=True)

@@ -249,3 +249,55 @@ class LibWorkflowTests(RMISTestCase):
         self.assertIn("budget", response.data)
         self.item.refresh_from_db()
         self.assertEqual(self.item.budget_id, self.budget.id)
+
+
+class LineItemSpecificationTests(RMISTestCase):
+    """Task 12 (2026-10-29): an LIB row can name its specific item (SF-018 Section X, e.g. "PAPER, 80 gsm" under Office
+    Supplies Expenses) beside the LIB Item it is picked from."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader")
+        self.project = Project.objects.create(
+            title="P", project_code="P-1", funding_type="core_funded", lead=self.leader, campus="San Pablo",
+            total_cost="1000", start_date=date(2026, 1, 1), target_end_date=date(2026, 12, 31),
+        )
+        self.budget = LineItemBudget.objects.create(project=self.project, version_number=1)
+        self.item = LineItem.objects.create(budget=self.budget, category="mooe", description="Travel", amount=Decimal("1000"))
+        attach_approval_documents(self.project, self.leader)
+        add_registration_rows(self.project)
+
+    act = LibWorkflowTests.act
+
+    def test_a_row_keeps_its_specific_item_beside_the_lib_item(self):
+        row = {"budget": self.budget.id, "category": "mooe", "description": "Office Supplies Expenses",
+               "specification": "  PAPER, 80 gsm, A4  ", "amount": "10"}
+
+        response = self.client_for(self.leader).post("/api/budget/line-items/", row, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual((response.data["description"], response.data["specification"]), ("Office Supplies Expenses", "PAPER, 80 gsm, A4"))
+
+    def test_the_specific_item_is_optional_and_older_rows_have_none(self):
+        row = {"budget": self.budget.id, "category": "mooe", "description": "Training Expenses", "amount": "10"}
+
+        response = self.client_for(self.leader).post("/api/budget/line-items/", row, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["specification"], "")
+        self.assertEqual(LineItem.objects.get(pk=self.item.pk).specification, "")
+
+    def test_the_lib_item_still_comes_from_lib_items(self):
+        row = {"budget": self.budget.id, "category": "mooe", "description": "PAPER, 80 gsm", "specification": "PAPER, 80 gsm", "amount": "10"}
+
+        response = self.client_for(self.leader).post("/api/budget/line-items/", row, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("description", response.data)
+
+    def test_a_submission_snapshot_keeps_the_specific_item(self):
+        LineItem.objects.filter(pk=self.item.pk).update(specification="Bus fare, Manila")
+
+        submitted = self.act(self.leader, "submit").data["reviews"][0]
+
+        self.assertEqual(submitted["snapshot"][0]["specification"], "Bus fare, Manila")
