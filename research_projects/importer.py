@@ -83,17 +83,6 @@ PROJECT_FIELDS = [
     ("RDE Priority Area", "rde_priority", "admin_choice", RdeThrust,
      "Required; a priority area under the RDE Thrust, e.g. 1.3 - Artificial Intelligence and Machine Learning"),
     ("III. Objectives of the Study", "objectives", "text", None, "Required"),
-    ("Date Submitted (Project Leader)", "proposal_submitted_on", "date", None, "Annex A"),
-    ("Endorsed By (Dean/Associate Dean)", "endorsed_by_dean", "text", None, "Annex A"),
-    ("Date Endorsed by Dean", "endorsed_by_dean_on", "date", None, "Annex A"),
-    ("Noted By (RDS Director/Chairperson)", "noted_by_rds_director", "text", None, "Annex A"),
-    ("Date Noted by RDS Director", "noted_by_rds_director_on", "date", None, "Annex A"),
-    ("Recommending Approval (Campus Director)", "recommended_by_campus_director", "text", None, "Annex A"),
-    ("Date Recommended by Campus Director", "recommended_by_campus_director_on", "date", None, "Annex A"),
-    ("Recommending Approval (VPRDE)", "recommended_by_vprde", "text", None, "Annex A"),
-    ("Date Recommended by VPRDE", "recommended_by_vprde_on", "date", None, "Annex A"),
-    ("Approved By (University President)", "approved_by_president", "text", None, "Annex A"),
-    ("Date Approved by University President", "proposal_approved_on", "date", None, "Annex A"),
 ]
 
 # Table sheets: sheet name -> [(column header, serializer field, kind, choices)]
@@ -143,6 +132,8 @@ TABLE_SHEETS = {
         ("Fiscal Year", "fiscal_year", "int", None),
         ("Category", "category", "choice", CATEGORIES),
         ("Particulars", "description", "text", None),
+        # Task 14 (2026-10-29): the specific item under the LIB Item, as in Manual Entry and the LIB template
+        ("Specification (optional)", "specification", "text", None),
         ("Unit", "unit", "choice", LineItem.UNIT_CHOICES),
         ("Qty", "quantity", "decimal", None),
         ("Unit Cost", "unit_cost", "decimal", None),
@@ -378,6 +369,18 @@ LEGACY_PROJECT_FIELDS = [
     ("Executive Summary", "description", "text", None, ""),
     ("Anticipated Outcomes", "expected_outcomes", "text", None, ""),
     ("Long-term Potential Impacts", "expected_impacts", "text", None, ""),
+    # Tasks 13/14 (2026-10-29): Annex A and its dates left the registration; an older file's rows still become endorsers
+    ("Date Submitted (Project Leader)", "proposal_submitted_on", "date", None, "Annex A"),
+    ("Endorsed By (Dean/Associate Dean)", "endorsed_by_dean", "text", None, "Annex A"),
+    ("Date Endorsed by Dean", "endorsed_by_dean_on", "date", None, "Annex A"),
+    ("Noted By (RDS Director/Chairperson)", "noted_by_rds_director", "text", None, "Annex A"),
+    ("Date Noted by RDS Director", "noted_by_rds_director_on", "date", None, "Annex A"),
+    ("Recommending Approval (Campus Director)", "recommended_by_campus_director", "text", None, "Annex A"),
+    ("Date Recommended by Campus Director", "recommended_by_campus_director_on", "date", None, "Annex A"),
+    ("Recommending Approval (VPRDE)", "recommended_by_vprde", "text", None, "Annex A"),
+    ("Date Recommended by VPRDE", "recommended_by_vprde_on", "date", None, "Annex A"),
+    ("Approved By (University President)", "approved_by_president", "text", None, "Annex A"),
+    ("Date Approved by University President", "proposal_approved_on", "date", None, "Annex A"),
 ]
 
 
@@ -833,7 +836,8 @@ def proposal_preview(project):
         "monitoring_evaluation": project.monitoring_evaluation,
         "references": project.references,
         "budget": [
-            {"category": i.category, "description": i.description, "unit": i.get_unit_display() if i.unit else "",
+            {"category": i.category, "description": i.description, "specification": i.specification,
+             "unit": i.get_unit_display() if i.unit else "",
              "quantity": float(i.quantity) if i.quantity is not None else None,
              "unit_cost": float(i.unit_cost) if i.unit_cost is not None else None, "total": float(i.amount),
              "allocations": [{"period": a["period"], "amount": float(a["amount"])} for a in i.allocations]}

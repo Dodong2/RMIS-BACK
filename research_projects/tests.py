@@ -1,5 +1,6 @@
 import datetime
 import io
+from decimal import Decimal
 
 import openpyxl
 
@@ -581,7 +582,7 @@ class ExcelImportTests(RMISTestCase):
         self.workbook["Project Team"].append(["Team Member", "EIU Coordinators", None, None])
         self.workbook["Expected Outputs (6Ps)"].append(["Patent", "Novel technology", 1])
         self.workbook["Target Beneficiaries"].append(["Community beneficiaries", "Farmers", 2000])
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", "pax", 4, 2500, None])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", None, "pax", 4, 2500, None])
         self.workbook["Work Plan"].append(["Logistic preparations", datetime.datetime(2026, 1, 1), datetime.datetime(2026, 3, 31)])
 
         response = self.upload()
@@ -612,8 +613,8 @@ class ExcelImportTests(RMISTestCase):
         """Client 2026-10-17 (yearly.png): a multi-year project's LIB rows carry Y1 Q1 .. Y3 Q4 amounts."""
         self.fill_project(**{"End Date": datetime.datetime(2027, 3, 31)})
         #                                    FY    Cat     Particulars      Unit  Qty Cost   Total Y1Q1  Q2    Q3    Q4    Y2Q1
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", "lot", 1, 10000, None, 5000, None, 2500, None, 2500])
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Office Supplies Expenses", "lot", 1, 1000, None, 900])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", None, "lot", 1, 10000, None, 5000, None, 2500, None, 2500])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Office Supplies Expenses", None, "lot", 1, 1000, None, 900])
 
         response = self.upload()
 
@@ -628,7 +629,7 @@ class ExcelImportTests(RMISTestCase):
 
     def test_one_year_project_reads_the_year_1_quarters_as_q1_to_q4(self):
         self.fill_project(**{"End Date": datetime.datetime(2026, 12, 31)})
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", "lot", 1, 10000, None, None, 6000, None, 4000])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", None, "lot", 1, 10000, None, None, 6000, None, 4000])
 
         response = self.upload()
 
@@ -739,7 +740,7 @@ class ExcelImportTests(RMISTestCase):
         self.fill_project()
         for category, item in (("PS", "Honoraria"), ("Maintenance and Other Operating Expenses", "Training Expenses"),
                                ("Equipment Outlay", "Office Equipment"), ("CO", "Books")):
-            self.workbook["Budget Requirements"].append([2026, category, item, "lot", 1, 1000, None])
+            self.workbook["Budget Requirements"].append([2026, category, item, None, "lot", 1, 1000, None])
 
         response = self.upload()
 
@@ -808,7 +809,11 @@ class ExcelImportTests(RMISTestCase):
         self.assertNotIn("LSPU Faculty Research Number (Project Code)", labels)
         for dropped in ("Research Priority Area", "II. Background of the Study", "IV. Project Descriptions/Methodology",
                         "VI. Socio-Economic Significance", "VIII. Monitoring/Evaluation", "IX. List of References",
-                        "Executive Summary", "Anticipated Outcomes", "Long-term Potential Impacts"):
+                        "Executive Summary", "Anticipated Outcomes", "Long-term Potential Impacts",
+                        # Task 13/14 (2026-10-29): Annex A and its dates left the registration
+                        "Date Submitted (Project Leader)", "Endorsed By (Dean/Associate Dean)", "Date Endorsed by Dean",
+                        "Noted By (RDS Director/Chairperson)", "Recommending Approval (Campus Director)",
+                        "Recommending Approval (VPRDE)", "Approved By (University President)", "Date Approved by University President"):
             self.assertNotIn(dropped, labels)
 
     def test_an_older_template_still_saves_the_dropped_rows(self):
@@ -822,6 +827,35 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(Project.objects.values_list("research_priority_area", "background", "description").get(),
                          ("health", "Old background", "Old summary"))
+
+    def test_budget_rows_keep_their_specification_and_the_preview_shows_it(self):
+        """Task 14 (2026-10-29): Budget Requirements has Specification (optional), as Manual Entry and the LIB template do."""
+        header = [c.value for c in self.workbook["Budget Requirements"][1]]
+        self.assertEqual(header[:5], ["Fiscal Year", "Category", "Particulars", "Specification (optional)", "Unit"])
+        self.fill_project()
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Office Supplies Expenses", "PAPER, 80 gsm, A4", "unit", 10, 225, None, 2250])
+        buffer = io.BytesIO()
+        self.workbook.save(buffer)
+        buffer.seek(0)
+        buffer.name = "registration.xlsx"
+
+        response = self.client_for(self.admin).post("/api/projects/import/?dry_run=1", {"file": buffer}, format="multipart")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["draft"]["line_items"][0]["specification"], "PAPER, 80 gsm, A4")
+        self.assertEqual((response.data["preview"]["budget"][0]["description"], response.data["preview"]["budget"][0]["specification"]),
+                         ("Office Supplies Expenses", "PAPER, 80 gsm, A4"))
+
+    def test_an_older_template_without_the_specification_column_still_imports(self):
+        self.fill_project()
+        self.workbook["Budget Requirements"].delete_cols(4)
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", "pax", 4, 2500, None])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(LineItem.objects.values_list("description", "specification", "amount").get(),
+                         ("Traveling Expenses - Local", "", Decimal("10000.00")))
 
     def work_plan(self):
         return list(WorkPlanMilestone.objects.order_by("id").values_list("title", "start_date", "target_date"))
@@ -896,8 +930,12 @@ class ExcelImportTests(RMISTestCase):
 
         self.assertEqual(response.data["preview"]["work_plan"], [{"title": "Data analysis", "start_date": "2026-07-01", "target_date": "2026-09-30"}])
 
-    def test_annex_a_on_the_project_sheet_becomes_endorser_rows(self):
-        self.fill_project(**{"Endorsed By (Dean/Associate Dean)": "Adriel G. Roman", "Recommending Approval (VPRDE)": "Robert C. Agatep"})
+    def test_an_older_templates_annex_a_rows_still_become_endorser_rows(self):
+        # Task 13/14 (2026-10-29): Annex A is no longer in the template; an older file's rows are still read and saved
+        self.fill_project()
+        for label, value in (("Endorsed By (Dean/Associate Dean)", "Adriel G. Roman"), ("Recommending Approval (VPRDE)", "Robert C. Agatep"),
+                             ("Date Approved by University President", datetime.datetime(2025, 12, 1))):
+            self.workbook["Project"].append([label, value])
 
         response = self.upload()
 
@@ -907,6 +945,7 @@ class ExcelImportTests(RMISTestCase):
             ("Adriel G. Roman", "Dean/Associate Dean", ""),
             ("Robert C. Agatep", "Vice President for Research, Development and Extension", "vprei"),
         ])
+        self.assertEqual(Project.objects.get().proposal_approved_on, datetime.date(2025, 12, 1))
 
     def test_any_bad_row_rolls_back_the_whole_import_and_lists_the_error(self):
         self.fill_project()
@@ -922,7 +961,7 @@ class ExcelImportTests(RMISTestCase):
         """Client meeting 2026-10-01 (#9): the Excel mode View button previews the SF-018 without registering."""
         self.fill_project(**{"III. Objectives of the Study": "1. Train teachers\n2. Map communities"})
         self.workbook["Project Team"].append(["Co-Project Leader", "Archieval M. Jain", "Male", None])
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", "pax", 4, 2500, None])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", None, "pax", 4, 2500, None])
         counts = lambda: (Project.objects.count(), ProjectEndorser.objects.count(), LineItem.objects.count())
         before = counts()
 
@@ -941,19 +980,20 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual((preview["rde_thrust"], preview["rde_priority"]),
                          (RdeThrust.objects.get(code="1").name, RdeThrust.objects.get(code="1.3").name))
         self.assertEqual(preview["budget"][0], {
-            "category": "mooe", "description": "Traveling Expenses - Local", "unit": "pax", "quantity": 4, "unit_cost": 2500, "total": 10000,
+            "category": "mooe", "description": "Traveling Expenses - Local", "specification": "", "unit": "pax", "quantity": 4, "unit_cost": 2500, "total": 10000,
             "allocations": [],
         })
         self.assertEqual(counts(), before)
 
     def test_dry_run_returns_an_editable_draft_and_saves_nothing(self):
         """Client 2026-10-23: an uploaded workbook can be reviewed and edited in Manual Entry before + Register Project."""
-        self.fill_project(**{"Endorsed By (Dean/Associate Dean)": "Adriel G. Roman"})
+        self.fill_project()
+        self.workbook["Project"].append(["Endorsed By (Dean/Associate Dean)", "Adriel G. Roman"])
         self.workbook["Project Team"].append(["Co-Project Leader", "Archieval M. Jain", "Male", None])
         self.workbook["Study Components"].append(["Study on soils", None])
         self.workbook["Expected Outputs (6Ps)"].append(["Patent", "Novel technology", 1])
         self.workbook["Target Beneficiaries"].append(["Farmers", "Rice farmers", 200])
-        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", "pax", 4, 2500, None])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", None, "pax", 4, 2500, None])
         self.workbook["Work Plan"].append(["Logistic preparations", "2026-01-01", "2026-03-31"])
         counts = lambda: (Project.objects.count(), ProjectEndorser.objects.count(), LineItem.objects.count(), WorkPlanMilestone.objects.count())
         before = counts()
