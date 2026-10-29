@@ -1,4 +1,4 @@
-> **STALE (2026-10-23, still true 2026-10-28):** the branch/push/migration workflow and module notes below are history; the current state is in "Last thing done" at the bottom. Work is on `main`, Carl pushes and runs every `migrate`, and tasks are gated by `dss/CLAUDE.md` (parent folder, `../CLAUDE.md`) (GO TASK N). Use this file only for module history.
+> **STALE (2026-10-23, still true 2026-10-29):** the branch/push/migration workflow and module notes below are history; the current state is in "Last thing done" at the bottom. Work is on `main`, Carl pushes and runs every `migrate`, and tasks are gated by `dss/CLAUDE.md` (parent folder, `../CLAUDE.md`) (GO TASK N). Use this file only for module history.
 
 # RMIS Backend — Current Status
 
@@ -94,7 +94,7 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
 
 ## Backend status (this repo)
 - Module 1 (Auth/RBAC): **2026-10-27: 9 roles, e-mail verification before approval, Reject, campus scope from User.campus — see "Last thing done"; the older notes in this line are history.** Done, stable, plus two real gaps found+fixed 2026-09-23 after the client asked where "Workplan/Procurement/Audit Logs/Settings" sidebar items map to (see below for the full mapping): (1) **`AuditLog` model + `accounts/middleware.py::AuditLogMiddleware` added** — the docx/MIT-proposal both explicitly call out "audit logging" as a Module 1 feature but nothing existed for it; the middleware logs every authenticated mutating (`POST`/`PUT`/`PATCH`/`DELETE`) request to `/api/` (actor, method, path, status_code, ip_address, timestamp) — request-level, not per-model field diffing, matching how the MIT proposal frames it ("the business logic layer... enforces authentication, role-based access control, request validation, and audit logging before any request reaches the data layer"). New endpoint `GET /api/admin/audit-logs/` (system_admin-only, filterable by `?actor=`/`?method=`). Since 2026-09-29 (`accounts.0012`) rows also carry `error_detail` (first 1000 chars of a 4xx JSON body). (2) **`seed_roles.py` had a dead `tier` kwarg** left over from a migration (`0002_role_tier` → `0003_remove_role_tier...`) that removed the `Role.tier` field without updating the seed command — running `python manage.py seed_roles` today would have crashed. Fixed by dropping the third tuple element entirely; confirmed the command runs clean now.
-- Module 2 (research_projects: Program/Project/Study/Milestone): done. **Updated 2026-09-26**: registration now follows the
+- Module 2 (research_projects: Program/Project/Study/Milestone): done. **2026-10-29: the NTP number is the project code, every Step 1 field is required, `POST projects/` saves the form's tables in one transaction, submit needs 2 studies + a 6P + a beneficiary — see "Last thing done"; the notes in this line are history.** **Updated 2026-09-26**: registration now follows the
   client's Research Proposal Form **LSPU-RDO-SF-018** (sample: `dss/Dataset/BRIDGI_1.PDF`, scanned, no text layer).
   New `Project` fields: `lead_gender`, `contact_number`, `continuing_year`, `college` (Annex A "College Unit"),
   `background`/`methodology`/`socio_economic_significance`/`monitoring_evaluation`/`references` (Sections II/IV/VI/VIII/IX),
@@ -266,24 +266,24 @@ defaults to flag: procurement delay = 30 days, "near renewal" = 90 days, personn
   - **PDF/DOCX table rendering is intentionally plain** (reportlab `Table`/python-docx `Light Grid Accent 1` style, no logos/letterhead/pagination beyond reportlab's automatic page breaks) — not styled to match the actual LSPU Appendix E/F/G paper forms pixel-for-pixel, since those exact templates weren't available as a design reference, only their field lists (already used to build Module 10's JSON shape). Flag if the client needs the generated files to visually match the official paper forms.
 
 ## Last thing done in this repo
-2026-10-28 Task 2 (Profile page), on `main`, PUSHED. Memory note: `profile-task2-2026-10-28`. Full suite 477/477 (local `rmis-testdb`).
-- **Own profile** (`a79e72a`, accounts 0028):
-  - `GET/PATCH auth/profile/` is always `request.user`. PATCH takes only first_name, last_name, gender and mobile_number, all filled and valid, at least one really changed. Any other field is a 400.
-  - Campus and College Unit are read-only for every role (campus drives `scoped_projects` and the Project Leader campus lock). The System Admin still changes them in User & Access.
-  - `User.profile_edit_count`: 3 successful edits max (one conditional UPDATE, so two concurrent saves can't both use the last edit); the 4th is a 403. Admin edits neither use nor reset it.
-  - `PATCH auth/user/` no longer writes anything.
-- **Password change** (same commit): `OLD_PASSWORD_FIELD_ENABLED`, so `auth/password/change/` needs the current password. Google accounts (unusable password) can't use it. `auth/user/` gains `has_password`.
-- **Excel Staff ID** (`14b38f4`):
-  - Template gets "Project Leader Staff ID" and a Project Team "Staff ID (optional)" column (Text cells). Staff ID picks the account, e-mail is the fallback, so older templates still work; both filled but different accounts is an error.
-  - Cells read as typed, never zero-padded; a bad or unknown Staff ID is an error with a "format the cell as Text" hint.
-  - Blank leader gender/contact and blank team name/gender are filled from the account.
-- **Migrations:** accounts 0028 MIGRATED (checked with `showmigrations`, 2026-10-28).
-- **Frontend:** everything above has its UI (rmis-frontend `a768881`, `3828e10`). Nothing is pending to consume.
-- The 2026-10-27 batch (9 roles, e-mail verification, Reject, campus scope, cleanup; `8cae785`..`20c2975`) is pushed and migrated too (accounts 0025-0027).
+2026-10-29 Tasks 3 and 4 (Dashboard bar; Register Approved Project redesign), on `main`, NOT pushed. Memory note: `tasks-3-4-2026-10-29`. Full suite 495/495 (local `rmis-testdb`, 2026-10-29).
+- **Step 1 required + NTP is the code** (`c700efa`, client Q-A: the NTP number is the single official R&D project code, replacing Clarification Q4's "two IDs"):
+  - `ProjectSerializer` registration needs every Step 1 field (`REQUIRED_PROJECT_FIELDS`: ntp_number, research_type, dates, total_cost, RDE thrust + priority, priority area, typology, objectives, II/IV/VI/VIII/IX, description, expected_outcomes, expected_impacts); `<p></p>` counts as blank. `is_dry_research` and `is_continuing` must be sent (N/A stays valid).
+  - An edit checks only the fields it sends, so unrelated edits (Closure status) still save. 403 comes before 400.
+  - `project_code` is read-only and copied from `ntp_number`; a used NTP/code is refused; only `system_admin` changes the NTP. No migration (project_code stays unique). `code-available/` still works, since code = NTP.
+  - Excel template: "NTP (Notice to Proceed No.)" row replaces the Project Code row; new required rows Executive Summary, Anticipated Outcomes, Long-term Potential Impacts; no more "Blank = Institutional/New/Dry". Old files still open; a legacy Project Code row without the same NTP is a row error, never copied into the NTP.
+  - SF-16 terminal report row: "NTP (Project Code)".
+- **One-request registration + submit minimums** (`783ddfb`):
+  - `POST projects/` takes optional `team`, `studies`, `outputs`, `beneficiaries`, `milestones`, `endorsers`, `line_items`, saved in one transaction through their own serializers; a bad row returns 400 `{"errors": {table: [{row, errors}]}}` and nothing is saved. Without tables the endpoint is unchanged.
+  - `create_project_lib()` = `ProjectLibView`'s body, unchanged, shared with the nested create. The Excel LIB path differs (no require_allocations, period rename, defer_scope) and was not merged.
+  - LIB submit/resubmit also needs `workflow.missing_registration_rows`: 2+ studies, 1+ 6P, 1+ beneficiary. Delete endpoints are not gated.
+- **Frontend:** consumes all of it already (rmis-frontend `6bfef48`, `936f330`, `7bdcdd1`, `0f28a53`). Nothing pending to consume.
+- Registration roles are `system_admin`, `riuh`, `project_leader` (`crc_chair` stopped registering 2026-10-24).
 
 ## Next thing to do in this repo
 1. Carl:
-   - Deploy backend + frontend together (both pushed).
-   - Browser-check: /profile (3-edit lock, Campus/College read-only, password change with the current password, Google account shows no password), Excel import with Staff IDs (leading zero), plus the still-open 2026-10-27 checks (register → verify e-mail → Approve/Reject → login, Google sign-up, CRC/CRD and Project Leader nav, campus lock). The Brevo verification e-mail has not been sent live yet.
-2. Known gaps, not approved: other JWTs stay valid after a password change (no blacklist); a backend gate on `VerifyRecordView`; a read-only check of the 1.9-3.2 s GET latency.
-3. Wait for the client's next changes. Every task goes through `dss/CLAUDE.md` (plan, then GO TASK N, then report, then STOP).
+   - Browser-test locally, then push + deploy backend and frontend TOGETHER (the deployed wizard can't register against this backend, and the new wizard needs it). No migration.
+   - Tell the client before a demo: more required registration fields, re-download the Excel template, submitting needs 2 studies + a 6P + a beneficiary. DB has 0 projects (2026-10-29), so nothing existing is blocked.
+2. Open client questions: Q-B (is "mandatory TOE" the TOE Signed Date, the Terms of Engagement document, or both; which step); Q-E ("Upload approved proposal" from rmis-flow.png Box 2; no document type for it yet). Don't build either until answered.
+3. Known gaps, not approved: other JWTs stay valid after a password change; a backend gate on `VerifyRecordView`; the 1.9-3.2 s GET latency check.
+4. Every task goes through `dss/CLAUDE.md` (plan, then GO TASK N, then report, then STOP).
