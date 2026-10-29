@@ -141,6 +141,38 @@ class StagedUploadTests(RMISTestCase):
             self.assertEqual((response.data["document_type"], response.data["version_number"]), (document_type, 1))
         self.move_document.assert_called_with(self.upload_document.call_args.args[1], "P-1/moa/v1_MOA.pdf")
 
+    def test_the_uploader_can_view_a_staged_file_before_registering(self):
+        """Task 13 (2026-10-29): View on Supporting Documents opens the uploaded file itself, through a signed URL."""
+        from document_management import serializers as document_serializers
+
+        token = self.stage(self.admin, "Approved Proposal.pdf").data["staged_token"]
+
+        response = self.client_for(self.admin).post("/api/documents/documents/staged-url/", {"staged_token": token})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data, {"url": "https://signed.example/file", "file_name": "Approved Proposal.pdf"})
+        document_serializers.get_signed_url.assert_called_with(self.upload_document.call_args.args[1])
+        self.assertFalse(Document.objects.exists())
+
+    def test_a_staged_file_is_only_viewable_by_its_uploader_with_a_valid_token(self):
+        from unittest import mock
+
+        from django.core import signing
+
+        from document_management.serializers import STAGED_SALT
+
+        url = "/api/documents/documents/staged-url/"
+        token = self.stage(self.admin).data["staged_token"]
+        with mock.patch("django.core.signing.time.time", return_value=0):
+            expired = signing.dumps({"path": "_staged/x/old.pdf", "name": "old.pdf", "size": 1, "user": self.admin.id}, salt=STAGED_SALT)
+
+        other = self.client_for(self.make_user("project_leader")).post(url, {"staged_token": token})
+        forged = self.client_for(self.admin).post(url, {"staged_token": token + "x"})
+        old = self.client_for(self.admin).post(url, {"staged_token": expired})
+        anonymous = self.client.post(url, {"staged_token": token})
+
+        self.assertEqual((other.status_code, forged.status_code, old.status_code, anonymous.status_code), (400, 400, 400, 401))
+
     def test_a_staged_file_is_moved_into_the_project_on_register(self):
         staged = self.stage(self.admin)
         self.assertEqual(staged.status_code, 201)

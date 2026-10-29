@@ -54,6 +54,27 @@ def _storage_error(exc, path):
     return serializers.ValidationError({"file": f"The file storage rejected the upload: {detail[:200]}"})
 
 
+def load_staged(token, user):
+    """The staged upload a token names, if it is valid, not expired and the user's own; raises otherwise."""
+    try:
+        staged = signing.loads(token, salt=STAGED_SALT, max_age=STAGED_MAX_AGE)
+    except signing.BadSignature:
+        raise serializers.ValidationError({"staged_token": "Upload expired or invalid. Upload the file again."})
+    if staged["user"] != user.id:
+        raise serializers.ValidationError({"staged_token": "This upload belongs to another user."})
+    return staged
+
+
+def staged_file_url(token, user):
+    """Task 13 (2026-10-29): a short-lived signed URL of the user's own staged upload, for View before registering."""
+    staged = load_staged(token, user)
+    try:
+        return {"url": get_signed_url(staged["path"]), "file_name": staged["name"]}
+    except requests.RequestException:
+        logger.exception("Signing the staged file %s failed", staged["path"])
+        raise serializers.ValidationError({"staged_token": "Could not open the file right now. Try again."})
+
+
 class StagedUploadSerializer(serializers.Serializer):
     """Register Approved Project uploads its documents before the project exists (so the user sees a progress bar
     and can't register with a half-finished upload). The file goes to a per-user staging folder, and the client
@@ -133,13 +154,7 @@ class DocumentSerializer(serializers.ModelSerializer):
         if file_obj:
             _validate_file(file_obj)
         else:
-            try:
-                staged = signing.loads(token, salt=STAGED_SALT, max_age=STAGED_MAX_AGE)
-            except signing.BadSignature:
-                raise serializers.ValidationError({"staged_token": "Upload expired or invalid. Upload the file again."})
-            if staged["user"] != self.context["request"].user.id:
-                raise serializers.ValidationError({"staged_token": "This upload belongs to another user."})
-            attrs["staged"] = staged
+            attrs["staged"] = load_staged(token, self.context["request"].user)
         return attrs
 
     def create(self, validated_data):

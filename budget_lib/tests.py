@@ -12,7 +12,8 @@ from .models import LineItem, LineItemBudget
 
 
 def attach_approval_documents(project, user):
-    """Step 7's Notice of Approval, NTP and MOA, which submitting the project's LIB needs (client 2026-10-24)."""
+    """The Supporting Documents attachments (Approve Proposal, NTP, and the optional MOA); submitting the project's LIB needs
+    the first two (client 2026-10-24, Task 13)."""
     from document_management.models import Document
 
     for document_type in ("notice_of_approval", "ntp", "moa"):

@@ -8,7 +8,7 @@ from accounts.permissions import HasRole, acting_for, role_can, visible_document
 from config.concurrency import lock
 from research_projects.models import Project
 from .models import Document, DocumentShare
-from .serializers import DocumentListSerializer, DocumentSerializer, DocumentShareSerializer, StagedUploadSerializer, store_generated_document
+from .serializers import DocumentListSerializer, DocumentSerializer, DocumentShareSerializer, StagedUploadSerializer, staged_file_url, store_generated_document
 
 
 class DocumentListCreateView(generics.ListCreateAPIView):
@@ -42,6 +42,16 @@ class StagedDocumentUploadView(APIView):
         serializer = StagedUploadSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         return Response(serializer.save(), status=status.HTTP_201_CREATED)
+
+
+class StagedDocumentUrlView(APIView):
+    """POST {staged_token}: {url, file_name}, a short-lived signed URL of the user's own staged upload, for View on
+    Supporting Documents before the project is registered (Task 13, 2026-10-29)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        return Response(staged_file_url(request.data.get("staged_token") or "", request.user))
 
 
 class ProposalFormSaveView(APIView):

@@ -23,8 +23,9 @@ class Document(models.Model):
         ("terminal_report", "Terminal Report"),
         ("accomplishment_report", "Accomplishment Report"),
         ("proposal_form", "Research Proposal Form (SF-018)"),
-        # Register Approved Project Step 7, each required (client 2026-10-24)
-        ("notice_of_approval", "Notice of Approval"),
+        # Register Approved Project Supporting Documents (client 2026-10-24). Task 13 (2026-10-29): the first is labelled
+        # Approve Proposal (the approved proposal, client flow Box 2) and is required with the NTP; the MOA is optional
+        ("notice_of_approval", "Approve Proposal"),
         ("ntp", "Notice to Proceed (NTP)"),
         ("moa", "Memorandum of Agreement (MOA)"),
         ("thesis", "Thesis"),

@@ -2029,19 +2029,24 @@ class ProjectReviewWorkflowTests(RMISTestCase):
 
         self.assertEqual(self.review_status(), "draft")
 
-    def test_submitting_needs_the_notice_of_approval_ntp_and_moa(self):
+    def test_submitting_needs_the_approve_proposal_and_ntp_but_not_the_moa(self):
+        # Task 13 (2026-10-29): the Notice of Approval slot is labelled Approve Proposal; the MOA is optional now
+        submit = lambda: self.client_for(self.leader).post(f"/api/budget/budgets/{self.budget.pk}/submit/")
+
+        nothing = submit()
+
+        self.assertEqual(nothing.status_code, 400)
+        self.assertIn("Approve Proposal", nothing.data["detail"])
+        self.assertIn("Notice to Proceed", nothing.data["detail"])
+        self.assertNotIn("MOA", nothing.data["detail"])
         self.attach("ntp")
-
-        response = self.client_for(self.leader).post(f"/api/budget/budgets/{self.budget.pk}/submit/")
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("Notice of Approval", response.data["detail"])
-        self.assertIn("Memorandum of Agreement (MOA)", response.data["detail"])
-        self.assertNotIn("Notice to Proceed", response.data["detail"])
-        self.attach("notice_of_approval", "moa")
+        only_ntp = submit()
+        self.assertEqual(only_ntp.status_code, 400)
+        self.assertNotIn("Notice to Proceed", only_ntp.data["detail"])
+        self.attach("notice_of_approval")
         Study.objects.create(project=self.project, title="S2")
         TargetBeneficiary.objects.create(project=self.project, group="Faculty", description="CTE", total=10)
-        self.assertEqual(self.client_for(self.leader).post(f"/api/budget/budgets/{self.budget.pk}/submit/").status_code, 200)
+        self.assertEqual(submit().status_code, 200)
         self.assertEqual(self.review_status(), "submitted")
 
     def test_submitting_needs_2_studies_a_6p_and_a_beneficiary(self):

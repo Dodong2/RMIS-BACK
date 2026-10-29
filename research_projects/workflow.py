@@ -26,8 +26,9 @@ FROM_LIB_STATUS = {
     "certifying": "pending_budget_review",
     "certified": "reviews_completed",
 }
-# Step 7 of Register Approved Project (client 2026-10-24); required before the Project Leader submits.
-APPROVAL_DOCUMENT_TYPES = ("notice_of_approval", "ntp", "moa")
+# Supporting Documents of Register Approved Project; required before the Project Leader submits (client 2026-10-24).
+# Task 13 (2026-10-29): Approve Proposal (code notice_of_approval) and the NTP; the MOA is optional.
+APPROVAL_DOCUMENT_TYPES = ("notice_of_approval", "ntp")
 
 
 def review_status(project):
