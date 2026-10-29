@@ -6,14 +6,17 @@ LIB's Submit is the project's Submit and there is no second status to keep in st
 from rest_framework import serializers
 from rest_framework.fields import empty
 
+# Task 17 (2026-10-30): the client's labels, the same on every dashboard. Codes stay; for_budget_review is new: the
+# CRC/CRD forwarded the LIB (Ready for Certification) and the Budget Officer hasn't started (pending_budget_review).
 REVIEW_STATUS_LABELS = {
     "draft": "Draft",
     "submitted": "Submitted",
-    "pending_research_review": "Pending Research Review",
-    "returned_research": "Returned for Revision – Research",
-    "pending_budget_review": "Pending Budget Review",
-    "returned_budget": "Returned for Revision – Budget",
-    "reviews_completed": "Reviews Completed",
+    "pending_research_review": "Ongoing Review - CRC/CRD",
+    "returned_research": "Returned for Revision - CRC/CRD",
+    "for_budget_review": "For Budget Review",
+    "pending_budget_review": "Ongoing Review - Budget",
+    "returned_budget": "Returned Review - Budget",
+    "reviews_completed": "Active",
 }
 # The Project Leader can still change the registration (Carl 2026-10-24, D6: never after submitting, unless returned).
 EDITABLE_REVIEW_STATUSES = ("draft", "returned_research", "returned_budget")
@@ -22,7 +25,7 @@ FROM_LIB_STATUS = {
     "submitted": "submitted",
     "crc_processing": "pending_research_review",
     "for_checking": "pending_research_review",
-    "endorsed": "pending_budget_review",
+    "endorsed": "for_budget_review",
     "certifying": "pending_budget_review",
     "certified": "reviews_completed",
 }

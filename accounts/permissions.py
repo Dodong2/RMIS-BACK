@@ -100,6 +100,14 @@ def visible_projects(user):
         # Client 2026-10-18, kept for the merged leader role 2026-10-27: a leader sees only the projects they lead (or
         # lead as acting replacement), not ones where they are listed as Co-Project Leader or team member.
         return Project.objects.filter(lead__in=[user.pk, *acting_for(user)])
+    if code == "finance_budget":
+        # Task 17 (2026-10-30): Finance sees a proposal once the CRC/CRD forwards it, as with its LIB list
+        from django.db.models import Exists, OuterRef
+        from budget_lib.models import LineItemBudget
+        from budget_lib.views import BUDGET_OFFICER_STATUSES
+
+        forwarded = LineItemBudget.objects.filter(project=OuterRef("pk"), is_current=True, status__in=BUDGET_OFFICER_STATUSES)
+        return scoped_projects(user).filter(Exists(forwarded))
     if code == "project_staff":
         leads = [user.pk, *acting_for(user)]
         return Project.objects.filter(

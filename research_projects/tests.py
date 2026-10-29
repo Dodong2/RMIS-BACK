@@ -521,6 +521,43 @@ class ProjectCampusTests(RMISTestCase):
         self.assertIsNone(scoped_projects(self.make_user("vprei", campus="Siniloan")))  # university-wide
 
 
+    def test_every_crc_and_finance_user_of_a_campus_sees_its_proposals_by_status_and_no_other_campus(self):
+        """Task 17 (2026-10-30): all CRC/CRD and all Finance users of a campus share its proposals; Drafts stay hidden
+        and Finance sees a proposal once the CRC/CRD forwards it (For Budget Review onward, like the LIB list)."""
+        def project(code, lib_status, campus="Siniloan"):
+            row = Project.objects.create(title=code, project_code=code, funding_type="core_funded", campus=campus,
+                                         lead=self.leader if campus == "Siniloan" else self.make_user("project_leader"))
+            if lib_status:
+                LineItemBudget.objects.create(project=row, version_number=1, status=lib_status)
+            return row
+
+        draft, submitted, forwarded, active = project("D-1", "draft"), project("S-1", "submitted"), project("F-1", "endorsed"), project("A-1", "certified")
+        elsewhere = project("X-1", "endorsed", campus="Sta. Cruz")
+        listed = lambda user: sorted(p["project_code"] for p in self.client_for(user).get("/api/projects/").data)
+        detail = lambda user, row: self.client_for(user).get(f"/api/projects/{row.pk}/").status_code
+
+        for crc in (self.make_user("crc_chair", campus="Siniloan"), self.make_user("crc_chair", campus="Siniloan")):
+            self.assertEqual(listed(crc), ["A-1", "F-1", "S-1"])
+            self.assertEqual((detail(crc, draft), detail(crc, elsewhere)), (404, 404))
+        for officer in (self.make_user("finance_budget", campus="Siniloan"), self.make_user("finance_budget", campus="Siniloan")):
+            self.assertEqual(listed(officer), ["A-1", "F-1"])
+            self.assertEqual((detail(officer, submitted), detail(officer, draft), detail(officer, elsewhere)), (404, 404, 404))
+        self.assertEqual(listed(self.make_user("crc_chair", campus="Sta. Cruz")), ["X-1"])
+        self.assertEqual(listed(self.leader), ["A-1", "D-1", "F-1", "S-1"])
+        self.assertEqual(detail(self.leader, elsewhere), 404)
+
+    def test_project_staff_see_only_their_projects_and_another_leaders_draft_stays_private(self):
+        mine = Project.objects.create(title="M", project_code="M-1", funding_type="core_funded", lead=self.leader, campus="Siniloan")
+        other_leader = self.make_user("project_leader", campus="Siniloan")
+        theirs = Project.objects.create(title="T", project_code="T-1", funding_type="core_funded", lead=other_leader, campus="Siniloan")
+        staff = self.make_user("project_staff", campus="Siniloan")
+        from research_projects.models import ProjectTeamMember
+        ProjectTeamMember.objects.create(project=mine, member_role="member", name="Staff", user=staff)
+
+        self.assertEqual([p["project_code"] for p in self.client_for(staff).get("/api/projects/").data], ["M-1"])
+        self.assertEqual(self.client_for(staff).get(f"/api/projects/{theirs.pk}/").status_code, 404)
+        self.assertEqual(self.client_for(other_leader).get(f"/api/projects/{mine.pk}/").status_code, 404)
+
 class ExcelImportTests(RMISTestCase):
     def setUp(self):
         super().setUp()
@@ -2056,13 +2093,28 @@ class ProjectReviewWorkflowTests(RMISTestCase):
         for status, hold, expected in (
             ("draft", None, "draft"), ("submitted", None, "submitted"), ("crc_processing", None, "pending_research_review"),
             ("for_checking", None, "pending_research_review"), ("returned", "held_crc", "returned_research"),
-            ("endorsed", None, "pending_budget_review"), ("certifying", None, "pending_budget_review"),
+            # Task 17 (2026-10-30): forwarded to the Budget Officer (Ready for Certification) is its own status
+            ("endorsed", None, "for_budget_review"), ("certifying", None, "pending_budget_review"),
             ("returned", "held_budget", "returned_budget"), ("certified", None, "reviews_completed"),
         ):
             self.lib_status(status, hold)
             self.assertEqual(self.review_status(), expected, status)
         response = self.client_for(self.leader).get(f"/api/projects/{self.project.pk}/")
-        self.assertEqual(response.data["review_status_label"], "Reviews Completed")
+        self.assertEqual(response.data["review_status_label"], "Active")
+
+    def test_the_review_status_labels_are_the_clients(self):
+        """Task 17 (2026-10-30): the labels every dashboard shows, the same for the Project Leader and the CRC/CRD."""
+        from research_projects.workflow import REVIEW_STATUS_LABELS
+
+        self.assertEqual(REVIEW_STATUS_LABELS, {
+            "draft": "Draft", "submitted": "Submitted", "pending_research_review": "Ongoing Review - CRC/CRD",
+            "returned_research": "Returned for Revision - CRC/CRD", "for_budget_review": "For Budget Review",
+            "pending_budget_review": "Ongoing Review - Budget", "returned_budget": "Returned Review - Budget",
+            "reviews_completed": "Active",
+        })
+        self.lib_status("submitted")  # a Draft is hidden from the CRC/CRD
+        crc_view = self.client_for(self.crc).get(f"/api/projects/{self.project.pk}/").data
+        self.assertEqual(crc_view["review_status_label"], self.client_for(self.leader).get(f"/api/projects/{self.project.pk}/").data["review_status_label"])
 
     def test_a_project_without_a_lib_is_a_draft(self):
         LineItemBudget.objects.all().delete()

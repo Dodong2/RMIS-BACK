@@ -378,12 +378,18 @@ class DraftsHiddenFromReviewersTests(RMISTestCase):
         LineItemBudget.objects.create(project=self.submitted, version_number=1, status="submitted")
 
     def test_crc_chair_and_budget_officer_see_only_submitted_projects(self):
-        for role in ("crc_chair", "finance_budget"):
+        # Task 17 (2026-10-30): the Budget Officer sees a proposal only once the CRC/CRD forwards it (For Budget Review)
+        from budget_lib.models import LineItemBudget
+
+        for role, codes in (("crc_chair", ["S-1"]), ("finance_budget", [])):
             client = self.client_for(self.make_user(role))
 
-            self.assertEqual([p["project_code"] for p in client.get("/api/projects/").data], ["S-1"], role)
+            self.assertEqual([p["project_code"] for p in client.get("/api/projects/").data], codes, role)
             self.assertEqual(client.get(f"/api/projects/{self.draft.pk}/").status_code, 404, role)
-            self.assertEqual(client.get("/api/dashboard/projects/").data["total_projects"], 1, role)
+            self.assertEqual(client.get("/api/dashboard/projects/").data["total_projects"], len(codes), role)
+        LineItemBudget.objects.filter(project=self.submitted).update(status="endorsed")
+        officer = self.client_for(self.make_user("finance_budget"))
+        self.assertEqual([p["project_code"] for p in officer.get("/api/projects/").data], ["S-1"])
 
     def test_crc_chair_analytics_and_budget_list_skip_drafts(self):
         client = self.client_for(self.make_user("crc_chair"))
