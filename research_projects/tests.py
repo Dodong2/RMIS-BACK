@@ -688,6 +688,42 @@ class ExcelImportTests(RMISTestCase):
         self.assertIn("Office Equipment", by_code["CO"][3])
         self.assertTrue(any("Particulars" in str(row) for row in rows))
 
+    def test_new_system_admin_choices_show_in_the_next_template(self):
+        """Client 2026-10-29 (Task 11): the template reads the System Admin lists on each download."""
+        CollegeUnit.objects.create(name="CNEW - College of New Things")
+        thrust = RdeThrust.objects.get(code="1")
+        RdeThrust.objects.create(name="1.9 - Brand New Priority", code="1.9", title="Brand New Priority", parent=thrust)
+
+        template = self.client_for(self.admin).get("/api/projects/import-template/")
+        workbook = openpyxl.load_workbook(io.BytesIO(template.content))
+        notes = {row[0]: row[2] for row in workbook["Project"].iter_rows(min_row=2, values_only=True)}
+        legend = {row[0]: row[1] for row in workbook["Legend"].iter_rows(values_only=True) if row[0]}
+
+        self.assertIn("CNEW - College of New Things", notes["College Unit - Implementing Unit"])
+        self.assertIn("1.9 - Brand New Priority", legend[thrust.name])
+        self.assertIn("1.3 - ", legend[thrust.name])
+
+    def test_campus_row_lists_the_account_campuses_and_refuses_others(self):
+        notes = {row[0].value: row[2].value for row in self.workbook["Project"].iter_rows(min_row=2)}
+        for campus in ("San Pablo City", "Siniloan", "Los Baños", "Sta. Cruz"):
+            self.assertIn(campus, notes["Campus"])
+
+        self.fill_project(Campus="Calamba")
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(any(e["field"] == "Campus" for e in response.data["errors"]), response.data)
+
+    def test_campus_is_read_case_insensitively(self):
+        leader = User.objects.get(email__iexact="leader@lspu.test")
+        User.objects.filter(pk=leader.pk).update(campus="Sta. Cruz")
+        self.fill_project(Campus="sta. cruz")
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Project.objects.get().campus, "Sta. Cruz")
+
     def test_legend_lists_only_active_lib_items(self):
         LibItem.objects.filter(name="Honoraria").update(is_active=False)
 

@@ -65,7 +65,8 @@ PROJECT_FIELDS = [
     ("Start Date", "start_date", "date", None, "Required; date cell or YYYY-MM-DD"),
     ("End Date", "target_end_date", "date", None, "Required; date cell or YYYY-MM-DD"),
     ("Total Project/Study Cost", "total_cost", "decimal", None, "Required; number"),
-    ("Campus", "campus", "text", None, ""),
+    # Client 2026-10-29 (Task 11): the campus list of the accounts (User.CAMPUS_CHOICES), the same as Manual Entry
+    ("Campus", "campus", "choice", User.CAMPUS_CHOICES, "The Project Leader's campus; blank = the leader's campus"),
     (COLLEGE_UNIT_LABEL, "implementing_unit", "admin_choice", CollegeUnit, "Must match System Admin > College Units"),
     ("Cooperating Agency/ies", "cooperating_agencies", "admin_choices", CooperatingAgency,
      "One or more, separated by semicolons; must match System Admin > Cooperating Agencies"),
@@ -294,6 +295,15 @@ def _add_category_legend(wb):
         sheet.column_dimensions[column].width = width
     for row in sheet.iter_rows(min_row=3, max_row=5):
         for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+    # Client 2026-10-29 (Task 11): the RDE Priority Area row must name a priority area of its thrust; read per download
+    sheet.append([])
+    sheet.append(["RDE Agenda - RDE Thrust and RDE Priority Area rows (System Admin > RDE Thrusts)"])
+    sheet.cell(row=sheet.max_row, column=1).font = Font(bold=True)
+    sheet.append(["RDE Thrust", "RDE Priority Areas under it (put one in the RDE Priority Area row)"])
+    for thrust in RdeThrust.objects.filter(parent=None):
+        sheet.append([thrust.name, "; ".join(thrust.priorities.values_list("name", flat=True))])
+        for cell in sheet[sheet.max_row]:
             cell.alignment = Alignment(wrap_text=True, vertical="top")
 
 
