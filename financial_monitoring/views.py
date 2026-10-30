@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import BudgetScopedMixin, HasRole, role_can, scoped_projects
-from budget_lib.models import LineItemBudget
+from budget_lib.models import LineItem, LineItemBudget
 from config.concurrency import idempotent, lock
 from realtime.notify import notify, project_audience
 from .models import (
@@ -27,7 +27,9 @@ from .serializers import (
     line_item_balance,
     uncommitted_balance,
     post_procurement_disbursement,
+    project_years,
     review_realignment,
+    year_balance,
 )
 
 
@@ -199,7 +201,7 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
         params = self.request.query_params
         if params.get("project"):
             qs = qs.filter(line_item__budget__project_id=params["project"])
-        for param in ("status", "fiscal_year", "quarter"):
+        for param in ("status", "project_year", "fiscal_year", "quarter"):
             if params.get(param):
                 qs = qs.filter(**{param: params[param]})
         if params.get("overdue") == "true":
@@ -280,7 +282,7 @@ class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):
         procurement = lock(ProcurementRequest.objects.all(), pk=self.get_object().pk)
         if procurement.status != "returned_for_revision":
             return Response({"detail": "Only a request returned for revision can be resubmitted."}, status=status.HTTP_400_BAD_REQUEST)
-        data = {k: v for k, v in request.data.items() if k in ("description", "amount")}
+        data = {k: v for k, v in request.data.items() if k in ("description", "amount", "project_year", "quarter")}
         data["remarks"] = request.data.get("remarks", "")  # the leader's note replaces the Procurement Office's return reason
         serializer = self.get_serializer(procurement, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -288,6 +290,19 @@ class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):
         record_procurement_event(procurement, "returned_for_revision", request.user, data["remarks"])
         procurement_signal("procurement.updated", procurement)
         return Response(serializer.data)
+
+
+class ProcurementBalanceView(APIView):
+    """Task 22 (2026-10-30): a LIB item's procurement figures per project year (and its quarters) for the New
+    Procurement Request modal; the same year_balance() the request validation uses."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        items = in_scope(LineItem.objects.select_related("budget__project"), request.user, "budget__project")
+        item = generics.get_object_or_404(items, pk=request.query_params.get("line_item") or 0)
+        years = project_years(item.budget.project)
+        return Response({"line_item": item.pk, "years": [year_balance(item, year) for year in years]})
 
 
 class BudgetSummaryView(APIView):

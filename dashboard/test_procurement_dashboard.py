@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
+from financial_monitoring.tests import with_year_one
 from financial_monitoring.models import BudgetRealignment, Disbursement, ProcurementRequest, ProcurementStatusEvent
 from research_projects.models import Project
 
@@ -31,11 +32,11 @@ class ProcurementDashboardTests(RMISTestCase):
             title=code, project_code=code, funding_type="core_funded", lead=self.leader, campus=campus, college="CCS",
         )
         budget = LineItemBudget.objects.create(project=project, version_number=1, status="certified")
-        return LineItem.objects.create(budget=budget, category="mooe", description="Office Supplies Expenses", amount=amount)
+        return with_year_one(LineItem.objects.create(budget=budget, category="mooe", description="Office Supplies Expenses", amount=amount))
 
     def file(self, item, amount, description="Reagents"):
         response = self.leader_client.post(PR_URL, {
-            "line_item": item.id, "description": description, "amount": str(amount), "fiscal_year": 2026, "quarter": 4,
+            "line_item": item.id, "description": description, "amount": str(amount), "project_year": 1, "quarter": 4,
         })
         self.assertEqual(response.status_code, 201, response.data)
         return ProcurementRequest.objects.get(pk=response.data["id"])
@@ -147,7 +148,7 @@ class FinanceSharedAccountsTests(RMISTestCase):
         for code, campus in (("P-1", "Siniloan"), ("P-2", "Santa Cruz")):
             project = Project.objects.create(title=code, project_code=code, funding_type="core_funded", lead=self.leader, campus=campus)
             budget = LineItemBudget.objects.create(project=project, version_number=1, status="certified")
-            self.items[campus] = LineItem.objects.create(budget=budget, category="mooe", description="Training Expenses", amount=5000)
+            self.items[campus] = with_year_one(LineItem.objects.create(budget=budget, category="mooe", description="Training Expenses", amount=5000))
             LineItem.objects.create(budget=budget, category="mooe", description="Office Supplies Expenses", amount=1000)
 
     def test_two_finance_accounts_get_the_same_budget_dashboard(self):

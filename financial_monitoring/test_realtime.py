@@ -3,6 +3,7 @@ only the Procurement Officer's own screen. One signal per successful write; the 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
 from financial_monitoring.models import ProcurementRequest
+from financial_monitoring.tests import with_year_one
 from realtime.consumers import campus_role_group
 from realtime.notify import to_role, to_user
 from research_projects.models import Project
@@ -17,7 +18,7 @@ class ProcurementSignalTests(RMISTestCase):
         self.leader = self.make_user("project_leader")
         self.project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader)
         budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="certified")
-        self.item = LineItem.objects.create(budget=budget, category="mooe", description="Supplies", amount=10000)
+        self.item = with_year_one(LineItem.objects.create(budget=budget, category="mooe", description="Supplies", amount=10000))
         self.officer = self.client_for(self.make_user("procurement_officer_lib"))
 
     def assert_signal(self, event_type, procurement_id, status):
@@ -34,7 +35,7 @@ class ProcurementSignalTests(RMISTestCase):
     def test_request_receive_return_resubmit_and_complete(self):
         leader = self.client_for(self.leader)
         response = leader.post(PR_URL, {"line_item": self.item.id, "description": "Reagents", "amount": "1000",
-                                        "fiscal_year": 2026, "quarter": 4})
+                                        "project_year": 1, "quarter": 4})
         self.assertEqual(response.status_code, 201, response.data)
         pk = response.data["id"]
         self.assert_signal("procurement.created", pk, "requested")
@@ -57,14 +58,14 @@ class ProcurementSignalTests(RMISTestCase):
         self.assert_signal("procurement.updated", pk, "completed")
 
     def test_rejected_writes_send_nothing(self):
-        pr = ProcurementRequest.objects.create(line_item=self.item, description="x", amount=100, fiscal_year=2026, quarter=4,
+        pr = ProcurementRequest.objects.create(line_item=self.item, description="x", amount=100, project_year=1, quarter=4,
                                                requested_by=self.leader, status="completed")
         responses = [
             self.officer.post(f"{PR_URL}{pr.id}/receive/"),  # 400: not "requested"
             self.officer.post(f"{PR_URL}{pr.id}/status/", {"status": "under_review"}),  # 400: closed
             self.client_for(self.leader).post(f"{PR_URL}{pr.id}/receive/"),  # 403
             self.client_for(self.leader).post(PR_URL, {"line_item": self.item.id, "description": "x", "amount": "999999",
-                                                       "fiscal_year": 2026, "quarter": 4}),  # 400: over balance
+                                                       "project_year": 1, "quarter": 4}),  # 400: over balance
         ]
         self.assertEqual([r.status_code for r in responses], [400, 400, 403, 400])
         self.notify.assert_not_called()

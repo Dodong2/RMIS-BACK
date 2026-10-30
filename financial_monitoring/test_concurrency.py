@@ -5,6 +5,7 @@ from django.db.models import Sum
 
 from accounts.testing import ConcurrencyTestCase
 from budget_lib.models import LineItem, LineItemBudget
+from financial_monitoring.tests import with_year_one
 from financial_monitoring.models import BudgetRealignment, Disbursement, ProcurementRequest
 from research_projects.models import Project
 
@@ -18,7 +19,7 @@ class MoneyConcurrencyTests(ConcurrencyTestCase):
         self.leader = self.make_user("project_leader")
         self.project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader)
         self.budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="certified")
-        self.item = LineItem.objects.create(budget=self.budget, category="mooe", description="Supplies", amount=10000)
+        self.item = with_year_one(LineItem.objects.create(budget=self.budget, category="mooe", description="Supplies", amount=10000))
         self.other = LineItem.objects.create(budget=self.budget, category="mooe", description="Seminar", amount=10000)
         self.officer = self.make_user("procurement_officer_lib")
         self.finance = self.make_user("finance_budget")
@@ -27,7 +28,7 @@ class MoneyConcurrencyTests(ConcurrencyTestCase):
         client = self.client_for(self.leader)
         headers = {"HTTP_IDEMPOTENCY_KEY": key} if key else {}
         return lambda: client.post(PR_URL, {
-            "line_item": self.item.id, "description": "Reagents", "amount": str(amount), "fiscal_year": 2026, "quarter": 4,
+            "line_item": self.item.id, "description": "Reagents", "amount": str(amount), "project_year": 1, "quarter": 4,
         }, **headers)
 
     def committed_on_item(self):
@@ -66,7 +67,7 @@ class MoneyConcurrencyTests(ConcurrencyTestCase):
 
     def test_two_completed_clicks_post_one_disbursement_and_no_500(self):
         pr = ProcurementRequest.objects.create(
-            line_item=self.item, description="Reagents", amount=4000, fiscal_year=2026, quarter=4,
+            line_item=self.item, description="Reagents", amount=4000, project_year=1, quarter=4,
             status="ready_for_release", requested_by=self.leader,
         )
         self.widen("financial_monitoring.views.post_procurement_disbursement", before=True)
@@ -83,3 +84,19 @@ class MoneyConcurrencyTests(ConcurrencyTestCase):
         self.assertIn(second.status_code, (201, 409))
         self.assertIn(201, (first.status_code, second.status_code))
         self.assertEqual(ProcurementRequest.objects.count(), 1)
+
+    def test_two_requests_cannot_overcommit_a_project_year(self):
+        """Task 22: 60,000 + 60,000 fits the 200,000 item but not its 100,000 Year 1; only one may pass."""
+        self.project.start_date, self.project.target_end_date = date(2026, 1, 1), date(2027, 12, 31)
+        self.project.save(update_fields=["start_date", "target_end_date"])
+        self.item.amount = 200000
+        self.item.allocations = [{"period": "Y1Q1", "amount": "100000"}, {"period": "Y2Q1", "amount": "100000"}]
+        self.item.save(update_fields=["amount", "allocations"])
+        client = self.client_for(self.leader)
+        file = lambda: client.post(PR_URL, {  # noqa: E731
+            "line_item": self.item.id, "description": "Laptop", "amount": "60000", "project_year": 1,
+        })
+        self.widen(BALANCE)
+        first, second = self.run_concurrently(file, file)
+        self.assertEqual(sorted([first.status_code, second.status_code]), [201, 400])
+        self.assertEqual(ProcurementRequest.objects.filter(project_year=1).count(), 1)

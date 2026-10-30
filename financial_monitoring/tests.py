@@ -1,9 +1,24 @@
+from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
+
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
 from financial_monitoring.models import BudgetRealignment, Disbursement, ProcurementRequest
+from financial_monitoring.serializers import uncommitted_balance
 from research_projects.models import Project
 
 URL = "/api/financial/realignments/"
+
+
+def with_year_one(item):
+    """Task 22: a one-year project (Q1-Q4 = Year 1) with the item's amount spread evenly over its four quarters."""
+    project = item.budget.project
+    project.start_date = date.today() - timedelta(days=30)
+    project.target_end_date = project.start_date + timedelta(days=330)
+    project.save(update_fields=["start_date", "target_end_date"])
+    item.allocations = [{"period": f"Q{q}", "amount": str(Decimal(item.amount) / 4)} for q in range(1, 5)]
+    item.save(update_fields=["allocations"])
+    return item
 
 
 class BulkRealignmentTests(RMISTestCase):
@@ -91,12 +106,12 @@ class ProcurementTrackingTests(RMISTestCase):
         self.leader = self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader)
         budget = LineItemBudget.objects.create(project=project, version_number=1, status="certified")
-        self.item = LineItem.objects.create(budget=budget, category="mooe", description="Supplies", amount=10000)
+        self.item = with_year_one(LineItem.objects.create(budget=budget, category="mooe", description="Supplies", amount=10000))
         self.leader_client = self.client_for(self.leader)
         self.officer = self.make_user("procurement_officer_lib", first_name="Ana", last_name="Cruz")
         self.officer_client = self.client_for(self.officer)
         response = self.leader_client.post(PR_URL, {
-            "line_item": self.item.id, "description": "Reagents", "amount": "4000", "fiscal_year": 2026, "quarter": 4,
+            "line_item": self.item.id, "description": "Reagents", "amount": "4000", "project_year": 1, "quarter": 4,
         })
         self.assertEqual(response.status_code, 201, response.data)
         self.pr = ProcurementRequest.objects.get()
@@ -168,11 +183,11 @@ class ProcurementTrackingTests(RMISTestCase):
 
         # The released money no longer counts as an open request, so a new one can use the rest.
         response = self.leader_client.post(PR_URL, {
-            "line_item": self.item.id, "description": "More", "amount": "6000", "fiscal_year": 2026, "quarter": 4,
+            "line_item": self.item.id, "description": "More", "amount": "6000", "project_year": 1, "quarter": 4,
         })
         self.assertEqual(response.status_code, 201, response.data)
         response = self.leader_client.post(PR_URL, {
-            "line_item": self.item.id, "description": "Too much", "amount": "1", "fiscal_year": 2026, "quarter": 4,
+            "line_item": self.item.id, "description": "Too much", "amount": "1", "project_year": 1, "quarter": 4,
         })
         self.assertEqual(response.status_code, 400)
 
@@ -188,3 +203,148 @@ class ProcurementTrackingTests(RMISTestCase):
             "from_line_item": self.item.id, "to_line_item": other.id, "amount": "6001", "justification": "x",
         }], format="json")
         self.assertEqual(response.status_code, 400)
+
+
+BALANCE_URL = "/api/financial/procurement-balance/"
+TWO_YEARS = {  # irregular on purpose: Year 1 = 100,000 (no Q3), Year 2 = 100,000 (Q1-Q2 only)
+    "Y1Q1": 30000, "Y1Q2": 40000, "Y1Q3": 0, "Y1Q4": 30000, "Y2Q1": 60000, "Y2Q2": 40000, "Y2Q3": 0, "Y2Q4": 0,
+}
+
+
+class YearBudgetTests(RMISTestCase):
+    """Task 22 (2026-10-30): procurement is charged against a project year of the LIB item; the year's available
+    amount (approved - non-cancelled requests) is the hard cap, the quarter is optional and informational."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader")
+        self.project = Project.objects.create(
+            title="P", project_code="P-2Y", funding_type="core_funded", lead=self.leader,
+            start_date=date(2026, 1, 1), target_end_date=date(2027, 12, 31),
+        )
+        self.budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="certified")
+        self.item = LineItem.objects.create(
+            budget=self.budget, category="mooe", description="Internet Subscription Expenses", amount=200000,
+            allocations=[{"period": p, "amount": str(a)} for p, a in TWO_YEARS.items()],
+        )
+        self.leader_client = self.client_for(self.leader)
+
+    def file(self, amount, year=1, quarter=None):
+        payload = {"line_item": self.item.id, "description": "Internet", "amount": str(amount), "project_year": year}
+        if quarter is not None:
+            payload["quarter"] = quarter
+        return self.leader_client.post(PR_URL, payload)
+
+    def year(self, number):
+        response = self.leader_client.get(BALANCE_URL, {"line_item": self.item.id})
+        self.assertEqual(response.status_code, 200, response.data)
+        return next(y for y in response.data["years"] if y["year"] == number)
+
+    def figures(self, number):
+        y = self.year(number)
+        return {key: y[key] for key in ("approved", "committed", "paid", "unpaid", "available")}
+
+    def test_balance_lists_each_year_with_its_own_allocation_and_quarters(self):
+        response = self.leader_client.get(BALANCE_URL, {"line_item": self.item.id})
+        self.assertEqual([y["year"] for y in response.data["years"]], [1, 2])
+        self.assertEqual(self.figures(1), {"approved": 100000, "committed": 0, "paid": 0, "unpaid": 0, "available": 100000})
+        self.assertEqual([(q["quarter"], q["allocation"]) for q in self.year(1)["quarters"]], [(1, 30000), (2, 40000), (4, 30000)])
+        self.assertEqual([q["quarter"] for q in self.year(2)["quarters"]], [1, 2])
+
+    def test_unpaid_request_reserves_the_year_and_blocks_an_over_budget_one(self):
+        """The client's example: 100,000 approved, 30,000 filed -> 70,000 available, 0 paid; 80,000 is refused."""
+        self.assertEqual(self.file(30000).status_code, 201)
+        self.assertEqual(self.figures(1), {"approved": 100000, "committed": 30000, "paid": 0, "unpaid": 30000, "available": 70000})
+
+        response = self.file(80000)
+        self.assertEqual(response.status_code, 400)
+        budget = response.data["budget"]
+        self.assertEqual((budget["code"], budget["available"], budget["unpaid"]), ("insufficient_budget", "70000.00", "30000.00"))
+        self.assertIn("Insufficient available budget", budget["detail"])
+        self.assertEqual(ProcurementRequest.objects.count(), 1)
+        # Year 2 is its own allocation.
+        self.assertEqual(self.file(80000, year=2).status_code, 201)
+        self.assertEqual(self.figures(1)["available"], 70000)
+
+    def test_payment_moves_unpaid_to_paid_without_changing_available(self):
+        pr = ProcurementRequest.objects.get(pk=self.file(30000).data["id"])
+        Disbursement.objects.create(line_item=self.item, amount=30000, disbursed_on=date(2026, 6, 1),
+                                    recorded_by=self.leader, procurement_request=pr)
+        self.assertEqual(self.figures(1), {"approved": 100000, "committed": 30000, "paid": 30000, "unpaid": 0, "available": 70000})
+
+    def test_completed_but_unpaid_still_reserves_and_cancelled_releases(self):
+        pr = ProcurementRequest.objects.get(pk=self.file(30000).data["id"])
+        ProcurementRequest.objects.filter(pk=pr.pk).update(status="completed")
+        self.assertEqual(self.figures(1)["unpaid"], 30000)
+        self.assertEqual(uncommitted_balance(self.item), 170000)
+        ProcurementRequest.objects.filter(pk=pr.pk).update(status="cancelled")
+        self.assertEqual(self.figures(1)["available"], 100000)
+        self.assertEqual(uncommitted_balance(self.item), 200000)
+
+    def test_quarter_is_optional_and_only_informational(self):
+        response = self.file(20000)
+        self.assertEqual((response.status_code, response.data["quarter"], response.data["project_year"]), (201, None, 1))
+        self.assertEqual(self.file(50000, quarter=1).status_code, 201)  # above Q1's 30,000: the year is the cap
+        q1 = self.year(1)["quarters"][0]
+        self.assertEqual((q1["allocation"], q1["committed"], q1["remaining"]), (30000, 50000, -20000))
+        self.assertEqual(self.figures(1)["available"], 30000)
+
+    def test_invalid_year_quarter_or_amount_is_rejected(self):
+        self.assertIn("project_year", self.file(1000, year=3).data)
+        self.assertIn("quarter", self.file(1000, year=1, quarter=3).data)  # Q3 of Year 1 has no allocation
+        self.assertIn("quarter", self.file(1000, year=2, quarter=4).data)
+        self.assertIn("amount", self.file(0).data)
+        missing = self.leader_client.post(PR_URL, {"line_item": self.item.id, "description": "x", "amount": "1"})
+        self.assertIn("project_year", missing.data)
+        self.assertFalse(ProcurementRequest.objects.exists())
+
+    def test_realignments_count_in_the_year_they_were_approved(self):
+        other = LineItem.objects.create(budget=self.budget, category="mooe", description="Travel", amount=50000)
+        for source, target, day in ((other, self.item, date(2027, 3, 1)), (self.item, other, date(2026, 5, 1))):
+            BudgetRealignment.objects.create(
+                from_line_item=source, to_line_item=target, amount=10000, tier="minor", status="approved",
+                justification="x", requested_by=self.leader, reviewed_at=datetime.combine(day, time(9), tzinfo=UTC),
+            )
+        self.assertEqual((self.figures(1)["approved"], self.figures(2)["approved"]), (90000, 110000))
+
+    def test_manual_disbursement_counts_in_the_year_of_its_date(self):
+        Disbursement.objects.create(line_item=self.item, amount=5000, disbursed_on=date(2027, 2, 1), recorded_by=self.leader)
+        self.assertEqual(self.figures(2), {"approved": 100000, "committed": 5000, "paid": 5000, "unpaid": 0, "available": 95000})
+        self.assertEqual(self.figures(1)["committed"], 0)
+
+    def test_returned_request_keeps_its_reservation_and_resubmit_does_not_reserve_twice(self):
+        pr = ProcurementRequest.objects.get(pk=self.file(60000).data["id"])
+        officer = self.client_for(self.make_user("procurement_officer_lib"))
+        officer.post(f"{PR_URL}{pr.id}/receive/")
+        officer.post(f"{PR_URL}{pr.id}/status/", {"status": "returned_for_revision", "remarks": "Use a 42-inch unit"})
+        self.assertEqual(self.figures(1)["committed"], 60000)
+
+        self.assertEqual(self.leader_client.post(f"{PR_URL}{pr.id}/resubmit/", {"amount": "100001"}).status_code, 400)
+        response = self.leader_client.post(f"{PR_URL}{pr.id}/resubmit/", {"amount": "100000", "quarter": 2})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual((self.figures(1)["committed"], self.figures(1)["available"]), (100000, 0))
+
+    def test_other_leader_cannot_see_or_spend_the_budget(self):
+        stranger = self.client_for(self.make_user("project_leader"))
+        self.assertEqual(stranger.get(BALANCE_URL, {"line_item": self.item.id}).status_code, 404)
+        response = stranger.post(PR_URL, {"line_item": self.item.id, "description": "x", "amount": "1", "project_year": 1})
+        self.assertIn(response.status_code, (400, 403, 404))
+        self.assertFalse(ProcurementRequest.objects.exists())
+
+    def test_only_the_current_certified_lib_of_an_active_project(self):
+        self.project.status = "completed"
+        self.project.save(update_fields=["status"])
+        self.assertEqual(self.file(1000).status_code, 400)
+        self.project.status = "active"
+        self.project.save(update_fields=["status"])
+        self.budget.is_current = False
+        self.budget.save(update_fields=["is_current"])
+        self.assertEqual(self.file(1000).status_code, 400)
+        self.assertFalse(ProcurementRequest.objects.exists())
+
+    def test_a_failed_create_leaves_no_reservation(self):
+        self._patch("financial_monitoring.views.record_procurement_event", side_effect=RuntimeError("boom"))
+        self.leader_client.raise_request_exception = False
+        self.assertEqual(self.file(30000).status_code, 500)
+        self.assertFalse(ProcurementRequest.objects.exists())
+        self.assertEqual(self.figures(1)["available"], 100000)

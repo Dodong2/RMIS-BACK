@@ -125,8 +125,11 @@ class ProcurementRequest(models.Model):
     line_item = models.ForeignKey(LineItem, on_delete=models.PROTECT, related_name="procurement_requests")
     description = models.CharField(max_length=300)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
-    fiscal_year = models.PositiveIntegerField()
-    quarter = models.PositiveSmallIntegerField(choices=QUARTER_CHOICES)
+    # Task 22 (2026-10-30): charged against a project year of the LIB (Y1, Y2, ...); the quarter is optional and
+    # informational. fiscal_year (calendar year) is only on requests filed before that.
+    project_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    fiscal_year = models.PositiveIntegerField(null=True, blank=True)
+    quarter = models.PositiveSmallIntegerField(choices=QUARTER_CHOICES, null=True, blank=True)
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="requested")
     remarks = models.TextField(blank=True)
     requested_by = models.ForeignKey(

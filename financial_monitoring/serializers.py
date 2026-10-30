@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Sum
@@ -7,7 +8,7 @@ from rest_framework import serializers
 
 from budget_lib.models import LineItem
 from accounts.permissions import ensure_in_scope
-from budget_lib.models import LineItemBudget
+from budget_lib.models import LineItemBudget, allocation_periods
 from budget_lib.serializers import catalog_item_name
 from config.concurrency import lock_line_items
 from .models import APPLIED_STATUSES, PROCUREMENT_CLOSED_STATUSES, BudgetRealignment, Disbursement, ProcurementRequest
@@ -54,11 +55,96 @@ def uncommitted_balance(line_item, exclude_procurement_pk=None):
     Every write that uses a line item's money checks this one figure (under the item's row lock), so
     Actual + open requests never exceeds Adjusted.
     """
-    open_requests = line_item.procurement_requests.exclude(status__in=PROCUREMENT_CLOSED_STATUSES)
+    # Task 22 (2026-10-30): a request reserves until it is paid (its Disbursement is then in Actual) or cancelled;
+    # Completed alone is no longer paid.
+    open_requests = line_item.procurement_requests.exclude(status="cancelled").filter(disbursement__isnull=True)
     if exclude_procurement_pk:
         open_requests = open_requests.exclude(pk=exclude_procurement_pk)
     reserved = open_requests.aggregate(total=Sum("amount"))["total"] or 0
     return line_item_balance(line_item)["available"] - reserved
+
+
+def period_year_quarter(period):
+    """'Y2Q3' -> (2, 3); 'Q3' (a project of 12 months or less) -> (1, 3)."""
+    if period.startswith("Y"):
+        year, quarter = period[1:].split("Q")
+        return int(year), int(quarter)
+    return 1, int(period[1:])
+
+
+def project_years(project):
+    """The project years its LIB periods cover, e.g. [1, 2] for Y1Q1..Y2Q2; [] without start/end dates."""
+    return sorted({period_year_quarter(p)[0] for p in allocation_periods(project) or []})
+
+
+def project_year_of(project, day):
+    """The project year a date falls in, counted from the start date, clamped to the project's years
+    (Task 22 Q3/Q10: realignments and manual disbursements count in the year they happened)."""
+    years = project_years(project)
+    if not years or not project.start_date:
+        return 1
+    start = project.start_date
+    months = (day.year - start.year) * 12 + day.month - start.month - (1 if day.day < start.day else 0)
+    return min(max(months // 12 + 1, 1), years[-1])
+
+
+def year_balance(line_item, year, exclude_procurement_pk=None):
+    """
+    Task 22 (2026-10-30), the one procurement budget calculation for a line item's project year:
+    approved = the year's saved LIB allocations + realignments approved in that year (in minus out);
+    committed = that year's procurement requests that aren't cancelled (paid ones included) + manual disbursements
+    dated in that year; paid = the Disbursements behind those; unpaid = committed - paid; available = approved -
+    committed. Quarters (only those with an allocation) are informational: allocation and what is left of it.
+    """
+    project = line_item.budget.project
+    valid = set(allocation_periods(project) or [])
+    quarters = {}
+    for row in line_item.allocations or []:
+        if row.get("period") in valid:
+            row_year, quarter = period_year_quarter(row["period"])
+            if row_year == year and Decimal(str(row["amount"])) > 0:
+                quarters[quarter] = Decimal(str(row["amount"]))
+    approved = sum(quarters.values(), Decimal("0"))
+    for realignment, sign in (
+        *((r, 1) for r in line_item.realignments_to.filter(status__in=APPLIED_STATUSES)),
+        *((r, -1) for r in line_item.realignments_from.filter(status__in=APPLIED_STATUSES)),
+    ):
+        moment = realignment.reviewed_at or realignment.created_at
+        if project_year_of(project, timezone.localdate(moment)) == year:
+            approved += sign * realignment.amount
+
+    requests = line_item.procurement_requests.filter(project_year=year).exclude(status="cancelled")
+    if exclude_procurement_pk:
+        requests = requests.exclude(pk=exclude_procurement_pk)
+    requests = list(requests.select_related("disbursement"))
+    manual = [d for d in line_item.disbursements.filter(procurement_request__isnull=True)
+              if project_year_of(project, d.disbursed_on) == year]
+    manual_total = sum((d.amount for d in manual), Decimal("0"))
+    committed = sum((r.amount for r in requests), Decimal("0")) + manual_total
+    paid = manual_total + sum((r.disbursement.amount for r in requests if hasattr(r, "disbursement")), Decimal("0"))
+    return {
+        "year": year,
+        "approved": approved,
+        "committed": committed,
+        "paid": paid,
+        "unpaid": committed - paid,
+        "available": approved - committed,
+        "quarters": [
+            {
+                "quarter": quarter,
+                "allocation": allocation,
+                "committed": (used := sum((r.amount for r in requests if r.quarter == quarter), Decimal("0"))),
+                "remaining": allocation - used,
+            }
+            for quarter, allocation in sorted(quarters.items())
+        ],
+    }
+
+
+INSUFFICIENT_BUDGET_MESSAGE = (
+    "Insufficient available budget. Some of the approved allocation is already committed to procurement requests "
+    "that have not yet been paid. Please review the remaining available amount before submitting another request."
+)
 
 
 class DisbursementSerializer(serializers.ModelSerializer):
@@ -239,24 +325,44 @@ class ProcurementRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProcurementRequest
         fields = [
-            "id", "project", "line_item", "description", "amount", "fiscal_year", "quarter", "routed_to",
-            "status", "remarks", "requested_by", "requested_by_name", "requested_at",
+            "id", "project", "line_item", "description", "amount", "project_year", "fiscal_year", "quarter",
+            "routed_to", "status", "remarks", "requested_by", "requested_by_name", "requested_at",
             "received_by", "received_by_name", "received_by_role", "received_at", "completed_at", "updated_by",
         ]
-        read_only_fields = ["status", "requested_by", "requested_at", "received_by", "received_at", "completed_at", "updated_by"]
+        read_only_fields = [
+            "fiscal_year", "status", "requested_by", "requested_at", "received_by", "received_at", "completed_at",
+            "updated_by",
+        ]
+        extra_kwargs = {"project_year": {"required": True, "allow_null": False}}
 
     def validate(self, attrs):
         line_item = attrs.get("line_item", getattr(self.instance, "line_item", None))
         amount = attrs.get("amount", getattr(self.instance, "amount", None))
-        ensure_in_scope(self, line_item.budget.project)
-        if line_item.budget.status != "certified":
-            raise serializers.ValidationError("Procurement can only be requested against a certified budget.")
+        year = attrs.get("project_year", getattr(self.instance, "project_year", None))
+        quarter = attrs.get("quarter", getattr(self.instance, "quarter", None))
+        project = line_item.budget.project
+        ensure_in_scope(self, project)
+        if line_item.budget.status != "certified" or not line_item.budget.is_current:
+            raise serializers.ValidationError("Procurement can only be requested against the project's certified LIB.")
+        if project.status != "active":
+            raise serializers.ValidationError("Procurement can only be requested for an active project.")
+        if amount is None or amount <= 0:
+            raise serializers.ValidationError({"amount": "Enter an amount greater than zero."})
         lock_line_items(line_item)  # held until commit: no other spend on this item can pass the check meanwhile
-        available = uncommitted_balance(line_item, exclude_procurement_pk=self.instance.pk if self.instance else None)
+        exclude = self.instance.pk if self.instance else None
+        balance = year_balance(line_item, year, exclude_procurement_pk=exclude)
+        if year not in project_years(project) or not (balance["quarters"] or balance["approved"]):
+            raise serializers.ValidationError({"project_year": f"Year {year} has no budget for this LIB item."})
+        if quarter is not None and quarter not in [q["quarter"] for q in balance["quarters"]]:
+            raise serializers.ValidationError({"quarter": f"Q{quarter} of Year {year} has no budget for this LIB item."})
+        # The item-level check stays as a net: Actual + open requests never exceed the item's adjusted amount.
+        available = min(balance["available"], uncommitted_balance(line_item, exclude_procurement_pk=exclude))
         if amount > available:
-            raise serializers.ValidationError(
-                f"Amount {amount} exceeds what is still available on this line item ({available})."
-            )
+            raise serializers.ValidationError({"budget": {
+                "code": "insufficient_budget", "detail": INSUFFICIENT_BUDGET_MESSAGE, "requested": amount,
+                **{key: balance[key] for key in ("year", "approved", "committed", "paid", "unpaid")},
+                "available": available,
+            }})
         return attrs
 
 
