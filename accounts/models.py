@@ -174,3 +174,30 @@ class IdempotencyKey(models.Model):
 
     def __str__(self):
         return f"{self.key} ({self.state})"
+
+
+class ReminderLog(models.Model):
+    """Task 24 (2026-10-30): one scheduled reminder e-mail (send_scheduled_reminders), at most one per kind, run,
+    recipient and record, so a repeated or overlapping run can't send it twice. A failed send stays "failed" and is
+    retried by the next run. This is also the execution and delivery log."""
+
+    KIND_CHOICES = (("payment", "Payment reminder"), ("task", "Task reminder"))
+    STATUS_CHOICES = (("sent", "Sent"), ("failed", "Failed"))
+
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    run_key = models.CharField(max_length=20, help_text="The scheduled run, e.g. 2026-11-07")
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reminder_logs")
+    object_ref = models.CharField(max_length=50, help_text="What the reminder is about, e.g. project:12 or task:5")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    last_error = models.TextField(blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["kind", "run_key", "recipient", "object_ref"], name="unique_reminder_per_run"),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} {self.run_key} -> {self.recipient_id} ({self.object_ref}): {self.status}"
