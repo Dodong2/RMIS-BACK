@@ -4,13 +4,18 @@ from datetime import date
 from decimal import Decimal
 
 from accounts.testing import RMISTestCase
+from realtime.consumers import campus_role_group
 from realtime.notify import to_role, to_user
 from research_projects.models import Project
 
 from .models import LineItem, LineItemBudget
 from .tests import add_registration_rows, attach_approval_documents
 
-BUDGET_ROLES = {"system_admin", "crc_chair", "finance_budget"}
+# Task 21 (2026-10-30): CRC/CRD and Finance are reached on the project's campus (and their campus-less accounts) only,
+# and Finance only once the LIB is forwarded
+def budget_groups(campus, forwarded):
+    roles = ["crc_chair", "finance_budget"] if forwarded else ["crc_chair"]
+    return {to_role("system_admin"), *(campus_role_group(code, c) for code in roles for c in (campus, ""))}
 
 
 class LibSignalTests(RMISTestCase):
@@ -32,13 +37,17 @@ class LibSignalTests(RMISTestCase):
     def act(self, user, step, **data):
         return self.client_for(user).post(f"/api/budget/budgets/{self.budget.id}/{step}/", data, format="json")
 
-    def assert_signal(self, budget_id=None):
+    def assert_signal(self, budget_id=None, forwarded=None):
         self.assertEqual(self.notify.call_count, 1)
         (groups, event_type), data = self.notify.call_args
         self.notify.reset_mock()
         self.assertEqual(event_type, "budget.lib.updated")
         self.assertEqual(data, {"id": budget_id or self.budget.id, "project": self.project.id})
-        self.assertEqual(set(groups), {*map(to_role, BUDGET_ROLES), to_user(self.leader.pk)})
+        if forwarded is None:
+            self.budget.refresh_from_db()
+            forwarded = self.budget.status not in ("draft", "submitted", "crc_processing", "for_checking")
+        self.assertEqual(set(groups), {*budget_groups("San Pablo", forwarded), to_user(self.leader.pk)})
+        self.assertNotIn(campus_role_group("crc_chair", "Sta. Cruz"), groups)
 
     def test_every_step_signals_once(self):
         steps = [(self.leader, "submit"), (self.crc, "hold"), (self.leader, "resubmit"), (self.crc, "for-checking"),
@@ -60,4 +69,4 @@ class LibSignalTests(RMISTestCase):
     def test_new_lib_signals(self):
         response = self.client_for(self.leader).post("/api/budget/budgets/", {"project": self.project.id}, format="json")
         self.assertEqual(response.status_code, 201, response.data)
-        self.assert_signal(response.data["id"])
+        self.assert_signal(response.data["id"], forwarded=False)

@@ -3,6 +3,7 @@ only the Procurement Officer's own screen. One signal per successful write; the 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
 from financial_monitoring.models import ProcurementRequest
+from realtime.consumers import campus_role_group
 from realtime.notify import to_role, to_user
 from research_projects.models import Project
 
@@ -25,7 +26,9 @@ class ProcurementSignalTests(RMISTestCase):
         self.notify.reset_mock()
         self.assertEqual(sent_type, event_type)
         self.assertEqual(data, {"id": procurement_id, "project": self.project.id, "status": status})
-        self.assertLessEqual({to_user(self.leader.pk), to_role("procurement_officer_lib"), to_role("system_admin")}, set(groups))
+        # Task 21: campus roles through their campus group (this project has no campus: the campus-less accounts)
+        self.assertLessEqual({to_user(self.leader.pk), campus_role_group("procurement_officer_lib", ""), to_role("system_admin")}, set(groups))
+        self.assertNotIn(to_role("procurement_officer_lib"), groups)
         self.assertNotIn(to_role("project_leader"), groups)  # other leaders' projects aren't theirs
 
     def test_request_receive_return_resubmit_and_complete(self):
@@ -93,7 +96,8 @@ class RealignmentSignalTests(RMISTestCase):
         self.notify.reset_mock()
         self.assertEqual(sent_type, event_type)
         self.assertEqual(data, {"id": realignment_id, "project": self.project.id})
-        self.assertLessEqual({to_user(self.leader.pk), to_role("finance_budget"), to_role("system_admin")}, set(groups))
+        self.assertLessEqual({to_user(self.leader.pk), campus_role_group("finance_budget", self.project.campus), to_role("system_admin")}, set(groups))
+        self.assertNotIn(to_role("finance_budget"), groups)
         self.assertNotIn(to_role("project_leader"), groups)
 
     def test_bulk_request_signals_once_and_review_signals(self):

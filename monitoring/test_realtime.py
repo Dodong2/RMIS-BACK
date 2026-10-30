@@ -5,10 +5,13 @@ import datetime
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItemBudget
 from monitoring.models import ExtensionRequest, ProjectEvaluation, RenewalApplication, TerminalReport
+from realtime.consumers import campus_role_group
 from realtime.notify import to_role, to_user
 from research_projects.models import Project
 
-MONITORING_ROLES = {"system_admin", "riuh", "vprei", "crc_chair", "university_admin"}
+MONITORING_ROLES = {"system_admin", "vprei", "university_admin"}
+# Task 21 (2026-10-30): RIUH and CRC/CRD are reached through the project's campus group (and their campus-less accounts)
+CAMPUS_ROLES = ("riuh", "crc_chair")
 
 
 def certify(project):
@@ -38,7 +41,8 @@ class MonitoringSignalTests(RMISTestCase):
         groups, sent_type, sent_data = self.sent()
         self.assertEqual(sent_type, event_type)
         self.assertEqual(sent_data, {"project": self.project.id, **data})
-        expected = {*map(to_role, MONITORING_ROLES), to_user(self.leader.pk), *(to_user(u.pk) for u in users)}
+        expected = {*map(to_role, MONITORING_ROLES), *(campus_role_group(code, c) for code in CAMPUS_ROLES for c in (self.project.campus, "")),
+                    to_user(self.leader.pk), *(to_user(u.pk) for u in users)}
         self.assertEqual(set(groups), expected)
 
     def test_progress_reports(self):

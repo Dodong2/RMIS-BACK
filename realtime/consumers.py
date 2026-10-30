@@ -9,12 +9,20 @@ import re
 
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
+from accounts.permissions import CAMPUS_SCOPED_ROLES
+
 _UNSAFE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
 def group_name(prefix, value):
     """Channel-layer group names allow only ASCII letters, digits, _ . - (under 100 chars)."""
     return f"{prefix}_{_UNSAFE.sub('_', str(value))}"[:99]
+
+
+def campus_role_group(role_code, campus):
+    """Task 21 (2026-10-30): a campus-scoped role (CRC/CRD, Finance, RIUH, Procurement) on one campus; "" = an account
+    without a campus, which sees every campus (accounts.permissions.scoped_projects)."""
+    return group_name("campusrole", f"{role_code}.{(campus or '').strip().lower() or '*'}")
 
 
 class UpdatesConsumer(AsyncJsonWebsocketConsumer):
@@ -29,6 +37,8 @@ class UpdatesConsumer(AsyncJsonWebsocketConsumer):
         self.groups_joined = [group_name("user", user.pk), "all_users"]
         if user.role:  # loaded by realtime.auth
             self.groups_joined.append(group_name("role", user.role.code))
+            if user.role.code in CAMPUS_SCOPED_ROLES:
+                self.groups_joined.append(campus_role_group(user.role.code, user.campus))
         for group in self.groups_joined:
             await self.channel_layer.group_add(group, self.channel_name)
 

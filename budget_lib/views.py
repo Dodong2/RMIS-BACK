@@ -8,6 +8,7 @@ from rest_framework.response import Response
 
 from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_can
 from config.concurrency import lock, lock_line_items
+from realtime.consumers import campus_role_group
 from realtime.notify import notify, project_audience
 from research_projects.workflow import missing_approval_documents, missing_registration_rows
 from .models import BudgetReview, LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
@@ -39,11 +40,20 @@ class ReadyForBudgetOfficerMixin:
         return qs
 
 
+# Task 21 (2026-10-30): the Budget Officer isn't pinged about a LIB the CRC/CRD hasn't forwarded yet
+NOT_FORWARDED_STATUSES = ("draft", *LineItemBudget.CRC_STATUSES)
+
+
 def lib_signal(budget):
     """Real-time "this LIB changed" (realtime/notify.py), sent after commit to the roles holding a budget.* permission
-    (CRC Chair, Budget Officer, system_admin) and the project lead, so their Budget page and bell refetch. No status in
-    the payload: the Budget Officer must not learn about a LIB before Ready for Certification (client Q10)."""
-    notify(project_audience(budget.project, "budget."), "budget.lib.updated", id=budget.id, project=budget.project_id)
+    (CRC Chair, Budget Officer, system_admin; campus roles only on the project's campus) and the project lead, so their
+    Budget page, Project Management status and bell refetch. No status in the payload, and no signal to the Budget
+    Officer before the LIB is forwarded (client Q10)."""
+    groups = project_audience(budget.project, "budget.")
+    if budget.status in NOT_FORWARDED_STATUSES:
+        finance = {campus_role_group("finance_budget", budget.project.campus), campus_role_group("finance_budget", "")}
+        groups = [g for g in groups if g not in finance]
+    notify(groups, "budget.lib.updated", id=budget.id, project=budget.project_id)
 
 
 class BudgetListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.ListCreateAPIView):

@@ -15,7 +15,7 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
 
-from .consumers import group_name
+from .consumers import campus_role_group, group_name
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +33,20 @@ def to_role(role_code):
 def project_audience(project, permission_prefix, *user_ids):
     """Groups for a change to one project's records: every role holding a `<permission_prefix>...` permission in the
     DB, except leaders and project_staff (they see only their own projects, so they're reached per user), plus the
-    project lead and the given users (e.g. the submitter)."""
+    project lead and the given users (e.g. the submitter). Task 21 (2026-10-30): a campus-scoped role is reached only
+    on the project's campus (and its accounts without a campus), never on another campus."""
     from accounts.models import Role
-    from accounts.permissions import LEADER_ROLES
+    from accounts.permissions import CAMPUS_SCOPED_ROLES, LEADER_ROLES
 
     codes = (Role.objects.filter(role_permissions__permission__code__startswith=permission_prefix)
              .exclude(code__in=[*LEADER_ROLES, "project_staff"]).values_list("code", flat=True).distinct())
-    return [*map(to_role, codes), to_user(project.lead_id), *map(to_user, user_ids)]
+    roles = []
+    for code in codes:
+        if code in CAMPUS_SCOPED_ROLES:
+            roles += [campus_role_group(code, project.campus), campus_role_group(code, "")]
+        else:
+            roles.append(to_role(code))
+    return [*roles, to_user(project.lead_id), *map(to_user, user_ids)]
 
 
 def notify(groups, event_type, **data):

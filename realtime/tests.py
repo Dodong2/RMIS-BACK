@@ -10,7 +10,8 @@ from django.test import TestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
 from accounts.testing import RMISTestCase
-from realtime.notify import ALL_USERS, notify, to_role, to_user
+from realtime.consumers import campus_role_group
+from realtime.notify import ALL_USERS, notify, project_audience, to_role, to_user
 from realtime.routing import websocket_application
 
 ORIGIN = "https://rmis.test"
@@ -115,6 +116,36 @@ class SocketTests(RMISTestCase):
         self.assertTrue(await ws.receive_nothing())
         await ws.disconnect()
 
+    async def test_a_campus_role_hears_its_own_campus_only(self):
+        """Task 21 (2026-10-30): RIUH (like CRC/CRD, Finance, Procurement) joins its campus group; another campus's
+        project signals never reach it."""
+        await database_sync_to_async(type(self.user).objects.filter(pk=self.user.pk).update)(campus="Siniloan")
+        ws = await self.connected()
+        await database_sync_to_async(self.notify_and_commit)(campus_role_group("riuh", "siniloan"))
+        self.assertEqual(await ws.receive_json_from(), {"type": "thing.created", "id": 7})
+        for group in (campus_role_group("riuh", "Sta. Cruz"), campus_role_group("riuh", "")):
+            await database_sync_to_async(self.notify_and_commit)(group)
+            self.assertTrue(await ws.receive_nothing(), group)
+        await ws.disconnect()
+
     def notify_and_commit(self, group):
         with self.captureOnCommitCallbacks(execute=True):  # TestCase never really commits
             notify([group], "thing.created", id=7)
+
+
+class ProjectAudienceTests(RMISTestCase):
+    """Task 21 (2026-10-30): campus-scoped roles are reached on the project's campus (and their campus-less accounts)
+    only; other roles keep their role group, the lead their user group."""
+
+    def test_campus_roles_get_the_projects_campus_group(self):
+        from research_projects.models import Project
+
+        lead = self.make_user("project_leader")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=lead, campus="Siniloan")
+
+        groups = project_audience(project, "budget.")
+
+        self.assertLessEqual({to_role("system_admin"), campus_role_group("crc_chair", "Siniloan"), campus_role_group("crc_chair", ""),
+                              campus_role_group("finance_budget", "Siniloan"), to_user(lead.pk)}, set(groups))
+        for unscoped in (to_role("crc_chair"), to_role("finance_budget"), campus_role_group("crc_chair", "Sta. Cruz")):
+            self.assertNotIn(unscoped, groups)

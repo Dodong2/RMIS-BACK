@@ -5,12 +5,14 @@ import datetime
 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItemBudget
+from realtime.consumers import campus_role_group
 from realtime.notify import to_role, to_user
 from research_projects.models import Program, Project
 
 from .models import PersonnelChange, ProjectAssignment, PropertyClearance, Task
 
-ASSIGNER_ROLES = {"system_admin", "crc_chair", "riuh"}  # leaders are reached per user
+# Leaders are reached per user; CRC/CRD and RIUH through their campus group (Task 21; this project has no campus)
+ASSIGNER_GROUPS = {to_role("system_admin"), campus_role_group("crc_chair", ""), campus_role_group("riuh", "")}
 
 
 def certify(project):
@@ -36,7 +38,7 @@ class TaskSignalTests(RMISTestCase):
         for (groups, event_type), data in self.notify.call_args_list:
             self.assertEqual(event_type, "personnel.task.changed")
             self.assertEqual(data, {"id": task_id, "project": self.project.id})
-            expected = {*map(to_role, ASSIGNER_ROLES), *(to_user(u.pk) for u in (self.leader, self.program_leader, *users))}
+            expected = {*ASSIGNER_GROUPS, *(to_user(u.pk) for u in (self.leader, self.program_leader, *users))}
             self.assertEqual(set(groups), expected)
         self.notify.reset_mock()
 
