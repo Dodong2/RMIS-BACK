@@ -4,6 +4,7 @@ from .views import (
     DisbursementDetailView,
     DisbursementListCreateView,
     ProcurementBalanceView,
+    ProcurementPayView,
     ProcurementRequestListCreateView,
     ProcurementReceiveView,
     ProcurementResubmitView,
@@ -23,6 +24,7 @@ urlpatterns = [
     path("procurement-balance/", ProcurementBalanceView.as_view()),
     path("procurement-requests/<int:pk>/receive/", ProcurementReceiveView.as_view()),
     path("procurement-requests/<int:pk>/status/", ProcurementStatusView.as_view()),
+    path("procurement-requests/<int:pk>/pay/", ProcurementPayView.as_view()),
     path("procurement-requests/<int:pk>/resubmit/", ProcurementResubmitView.as_view()),
     path("budgets/<int:pk>/summary/", BudgetSummaryView.as_view()),
 ]

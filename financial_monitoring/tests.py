@@ -164,33 +164,67 @@ class ProcurementTrackingTests(RMISTestCase):
         self.status("returned_for_revision", "Too high")
         self.assertEqual(self.leader_client.post(f"{PR_URL}{self.pr.id}/resubmit/", {"amount": "10001"}).status_code, 400)
 
-    def test_completed_request_is_posted_as_a_disbursement(self):
-        """Client 2026-10-12: completing a request moves the project's Actual and Available."""
+    def test_completed_request_stays_reserved_until_finance_confirms_the_payment(self):
+        """Task 23 (2026-10-30, replaces client 2026-10-12): Completed is not paid; Finance's payment moves Actual."""
         self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
-        self.status("ready_for_release")
-        self.assertFalse(Disbursement.objects.exists())
-
         self.assertEqual(self.status("completed").status_code, 200)
-        disbursement = Disbursement.objects.get()
-        self.assertEqual((disbursement.line_item, disbursement.amount), (self.item, 4000))
-        self.assertEqual(disbursement.procurement_request, self.pr)
-        self.assertEqual(disbursement.reference_number, f"PR-{self.pr.id:04d}")
-        self.assertEqual(disbursement.recorded_by, self.officer)
+        self.assertFalse(Disbursement.objects.exists())
+        summary = self.leader_client.get(f"/api/financial/budgets/{self.item.budget_id}/summary/").data
+        self.assertEqual((summary["totals"]["actual"], summary["totals"]["available"]), (0, 10000))
+        self.assertEqual(self.leader_client.get(PR_URL).data[0]["payment_status"], "awaiting_payment")
+        # Still reserved: 6,000 fits, one peso more doesn't.
+        self.assertEqual(self.leader_client.post(PR_URL, {
+            "line_item": self.item.id, "description": "Too much", "amount": "6001", "project_year": 1,
+        }).status_code, 400)
 
+        finance_user = self.make_user("finance_budget")
+        finance = self.client_for(finance_user)
+        response = finance.post(f"{PR_URL}{self.pr.id}/pay/", {"paid_on": str(date.today()), "reference_number": "DV-2026-031"})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual((response.data["payment_status"], response.data["payment_reference"]), ("paid", "DV-2026-031"))
+        disbursement = Disbursement.objects.get()
+        self.assertEqual((disbursement.line_item, disbursement.amount, disbursement.procurement_request), (self.item, 4000, self.pr))
+        self.assertEqual(disbursement.recorded_by, finance_user)
         summary = self.leader_client.get(f"/api/financial/budgets/{self.item.budget_id}/summary/").data
         self.assertEqual((summary["totals"]["actual"], summary["totals"]["available"]), (4000, 6000))
-        ledger = self.leader_client.get("/api/financial/disbursements/", {"budget": self.item.budget_id}).data
-        self.assertEqual(ledger[0]["procurement_request"], self.pr.id)
+        self.assertEqual(self.leader_client.post(PR_URL, {
+            "line_item": self.item.id, "description": "More", "amount": "6000", "project_year": 1,
+        }).status_code, 201)
 
-        # The released money no longer counts as an open request, so a new one can use the rest.
-        response = self.leader_client.post(PR_URL, {
-            "line_item": self.item.id, "description": "More", "amount": "6000", "project_year": 1, "quarter": 4,
-        })
-        self.assertEqual(response.status_code, 201, response.data)
-        response = self.leader_client.post(PR_URL, {
-            "line_item": self.item.id, "description": "Too much", "amount": "1", "project_year": 1, "quarter": 4,
-        })
-        self.assertEqual(response.status_code, 400)
+    def test_payment_needs_a_completed_request_finance_and_one_payment_only(self):
+        finance = self.client_for(self.make_user("finance_budget"))
+        pay = {"paid_on": str(date.today()), "reference_number": "DV-1"}
+        self.assertEqual(finance.post(f"{PR_URL}{self.pr.id}/pay/", pay).status_code, 400)  # not completed yet
+        self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
+        self.status("completed")
+        self.assertEqual(self.officer_client.post(f"{PR_URL}{self.pr.id}/pay/", pay).status_code, 403)
+        self.assertEqual(self.leader_client.post(f"{PR_URL}{self.pr.id}/pay/", pay).status_code, 403)
+        future = {"paid_on": str(date.today() + timedelta(days=1)), "reference_number": "DV-1"}
+        self.assertIn("paid_on", finance.post(f"{PR_URL}{self.pr.id}/pay/", future).data)
+        self.assertIn("reference_number", finance.post(f"{PR_URL}{self.pr.id}/pay/", {"paid_on": str(date.today())}).data)
+        self.assertEqual(finance.post(f"{PR_URL}{self.pr.id}/pay/", pay).status_code, 200)
+        self.assertEqual(finance.post(f"{PR_URL}{self.pr.id}/pay/", pay).status_code, 400)
+        self.assertEqual(Disbursement.objects.count(), 1)
+
+    def test_payment_filter_lists_awaiting_and_paid(self):
+        finance = self.client_for(self.make_user("finance_budget"))
+        self.assertEqual(finance.get(PR_URL, {"payment": "awaiting"}).data, [])
+        self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
+        self.status("completed")
+        self.assertEqual([r["id"] for r in finance.get(PR_URL, {"payment": "awaiting"}).data], [self.pr.id])
+        finance.post(f"{PR_URL}{self.pr.id}/pay/", {"paid_on": str(date.today()), "reference_number": "DV-1"})
+        self.assertEqual(finance.get(PR_URL, {"payment": "awaiting"}).data, [])
+        self.assertEqual([r["id"] for r in finance.get(PR_URL, {"payment": "paid"}).data], [self.pr.id])
+
+    def test_other_campus_finance_cannot_pay(self):
+        self.item.budget.project.campus = "Siniloan"
+        self.item.budget.project.save(update_fields=["campus"])
+        self.officer_client.post(f"{PR_URL}{self.pr.id}/receive/")
+        self.status("completed")
+        other = self.client_for(self.make_user("finance_budget", campus="Sta. Cruz"))
+        response = other.post(f"{PR_URL}{self.pr.id}/pay/", {"paid_on": str(date.today()), "reference_number": "DV-1"})
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(Disbursement.objects.exists())
 
     def test_open_request_reserves_its_amount_from_manual_disbursements_and_realignments(self):
         """2026-10-12 concurrency audit: Actual + open requests may never exceed Adjusted, whatever the order."""

@@ -65,14 +65,15 @@ class MoneyConcurrencyTests(ConcurrencyTestCase):
         self.assertEqual(sorted([first.status_code, second.status_code]), [200, 400])
         self.assertEqual(LineItem.objects.filter(description="Rents - Equipment").count(), 1)
 
-    def test_two_completed_clicks_post_one_disbursement_and_no_500(self):
+    def test_two_pay_clicks_post_one_disbursement_and_no_500(self):
         pr = ProcurementRequest.objects.create(
             line_item=self.item, description="Reagents", amount=4000, project_year=1, quarter=4,
-            status="ready_for_release", requested_by=self.leader,
+            status="completed", requested_by=self.leader,
         )
         self.widen("financial_monitoring.views.post_procurement_disbursement", before=True)
-        complete = lambda: self.client_for(self.officer).post(f"{PR_URL}{pr.id}/status/", {"status": "completed"})  # noqa: E731
-        first, second = self.run_concurrently(complete, complete)
+        pay = lambda: self.client_for(self.finance).post(  # noqa: E731
+            f"{PR_URL}{pr.id}/pay/", {"paid_on": str(date.today()), "reference_number": "DV-1"})
+        first, second = self.run_concurrently(pay, pay)
         self.assertEqual(sorted([first.status_code, second.status_code]), [200, 400])
         self.assertEqual(Disbursement.objects.filter(procurement_request=pr).count(), 1)
 

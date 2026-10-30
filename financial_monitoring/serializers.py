@@ -176,20 +176,37 @@ class DisbursementSerializer(serializers.ModelSerializer):
         return attrs
 
 
-def post_procurement_disbursement(procurement):
+def post_procurement_disbursement(procurement, paid_on, reference_number, user):
     """
-    Client 2026-10-12: a Completed procurement request is the fund release (LSPU has no separate
-    Disbursement office), so it is posted as the project's Actual for the full request amount.
+    Task 23 (2026-10-30, replaces client 2026-10-12's "Completed = released"): Finance/Accounting/Budget confirms the
+    full payment of a Completed request, and that payment is posted as the project's Actual. One per request
+    (OneToOne); the caller holds the request's row lock.
     """
     return Disbursement.objects.create(
         line_item=procurement.line_item,
         amount=procurement.amount,
-        reference_number=f"PR-{procurement.pk:04d}",
+        reference_number=reference_number,
         description=procurement.description[:300],
-        disbursed_on=timezone.localdate(procurement.completed_at),
-        recorded_by=procurement.updated_by,
+        disbursed_on=paid_on,
+        recorded_by=user,
         procurement_request=procurement,
     )
+
+
+class ProcurementPaySerializer(serializers.Serializer):
+    paid_on = serializers.DateField()
+    reference_number = serializers.CharField(max_length=100)
+
+    def validate_paid_on(self, value):
+        if value > timezone.localdate():
+            raise serializers.ValidationError("The payment date can't be in the future.")
+        return value
+
+
+def payment_status(procurement):
+    if hasattr(procurement, "disbursement"):
+        return "paid"
+    return "awaiting_payment" if procurement.status == "completed" else "not_payable"
 
 
 class RealignmentReviewSerializer(serializers.Serializer):
@@ -321,6 +338,10 @@ class ProcurementRequestSerializer(serializers.ModelSerializer):
     requested_by_name = serializers.CharField(source="requested_by.display_name", read_only=True)
     received_by_name = serializers.CharField(source="received_by.display_name", read_only=True, default=None)
     received_by_role = serializers.CharField(source="received_by.role.name", read_only=True, default=None)
+    payment_status = serializers.SerializerMethodField()
+    paid_on = serializers.DateField(source="disbursement.disbursed_on", read_only=True, default=None)
+    paid_by_name = serializers.CharField(source="disbursement.recorded_by.display_name", read_only=True, default=None)
+    payment_reference = serializers.CharField(source="disbursement.reference_number", read_only=True, default=None)
 
     class Meta:
         model = ProcurementRequest
@@ -328,12 +349,16 @@ class ProcurementRequestSerializer(serializers.ModelSerializer):
             "id", "project", "line_item", "description", "amount", "project_year", "fiscal_year", "quarter",
             "routed_to", "status", "remarks", "requested_by", "requested_by_name", "requested_at",
             "received_by", "received_by_name", "received_by_role", "received_at", "completed_at", "updated_by",
+            "payment_status", "paid_on", "paid_by_name", "payment_reference",
         ]
         read_only_fields = [
             "fiscal_year", "status", "requested_by", "requested_at", "received_by", "received_at", "completed_at",
             "updated_by",
         ]
         extra_kwargs = {"project_year": {"required": True, "allow_null": False}}
+
+    def get_payment_status(self, procurement):
+        return payment_status(procurement)
 
     def validate(self, attrs):
         line_item = attrs.get("line_item", getattr(self.instance, "line_item", None))

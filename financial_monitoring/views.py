@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from accounts.permissions import BudgetScopedMixin, HasRole, role_can, scoped_projects
 from budget_lib.models import LineItem, LineItemBudget
-from config.concurrency import idempotent, lock
+from config.concurrency import idempotent, lock, lock_line_items
 from realtime.notify import notify, project_audience
 from . import notifications
 from .models import (
@@ -22,6 +22,7 @@ from .models import (
 from .serializers import (
     BudgetRealignmentSerializer,
     DisbursementSerializer,
+    ProcurementPaySerializer,
     ProcurementRequestSerializer,
     ProcurementStatusSerializer,
     RealignmentReviewSerializer,
@@ -198,7 +199,7 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
     serializer_class = ProcurementRequestSerializer
 
     def get_queryset(self):
-        qs = ProcurementRequest.objects.select_related("line_item__budget").order_by("-requested_at")
+        qs = ProcurementRequest.objects.select_related("line_item__budget", "disbursement__recorded_by").order_by("-requested_at")
         params = self.request.query_params
         if params.get("project"):
             qs = qs.filter(line_item__budget__project_id=params["project"])
@@ -210,6 +211,10 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
             qs = qs.exclude(status__in=PROCUREMENT_CLOSED_STATUSES).filter(requested_at__lt=cutoff)
         if params.get("active") == "true":
             qs = qs.exclude(status__in=PROCUREMENT_CLOSED_STATUSES)
+        if params.get("payment") == "awaiting":
+            qs = qs.filter(status="completed", disbursement__isnull=True)
+        elif params.get("payment") == "paid":
+            qs = qs.filter(disbursement__isnull=False)
         return qs
 
     def get_permissions(self):
@@ -264,8 +269,7 @@ class ProcurementStatusView(APIView):
         procurement.remarks = serializer.validated_data.get("remarks", procurement.remarks)
         procurement.updated_by = request.user
         if procurement.status == "completed":
-            procurement.completed_at = timezone.now()
-            post_procurement_disbursement(procurement)
+            procurement.completed_at = timezone.now()  # not paid yet: Finance confirms the payment (ProcurementPayView)
         procurement.save()
         record_procurement_event(procurement, previous, request.user, serializer.validated_data.get("remarks", ""))
         procurement_signal("procurement.updated", procurement)
@@ -274,6 +278,28 @@ class ProcurementStatusView(APIView):
         elif procurement.status == "completed":
             transaction.on_commit(lambda: notifications.request_completed(procurement))
         return Response(ProcurementRequestSerializer(procurement).data)
+
+
+class ProcurementPayView(APIView):
+    """Task 23 (2026-10-30): Finance/Accounting/Budget confirms the full payment of a Completed request (Q5/Q6); only
+    then is it paid/utilized. Paying twice is refused."""
+
+    permission_classes = [HasRole("financial.record_disbursement")]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        procurement = lock(in_scope(ProcurementRequest.objects.all(), request.user, PR_PROJECT), pk=pk)
+        if Disbursement.objects.filter(procurement_request=procurement).exists():
+            return Response({"detail": "This request has already been paid."}, status=status.HTTP_400_BAD_REQUEST)
+        if procurement.status != "completed":
+            return Response({"detail": "Only a request the Procurement Office has completed can be paid."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        serializer = ProcurementPaySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lock_line_items(procurement.line_item)
+        post_procurement_disbursement(procurement, user=request.user, **serializer.validated_data)
+        procurement_signal("procurement.updated", procurement)
+        return Response(ProcurementRequestSerializer(ProcurementRequest.objects.get(pk=procurement.pk)).data)
 
 
 class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):

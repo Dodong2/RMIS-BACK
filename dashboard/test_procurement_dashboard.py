@@ -64,6 +64,9 @@ class ProcurementDashboardTests(RMISTestCase):
         open_pr = self.file(self.item, 4000)
         self.ana_client.post(f"{PR_URL}{done.id}/receive/")
         self.move(self.ana_client, done, "completed")
+        paid = self.client_for(self.make_user("finance_budget")).post(  # Task 23: released = paid by Finance
+            f"{PR_URL}{done.id}/pay/", {"paid_on": str(timezone.localdate()), "reference_number": "DV-1"})
+        self.assertEqual(paid.status_code, 200, paid.data)
         ProcurementRequest.objects.filter(pk=done.pk).update(requested_at=timezone.now() - timedelta(days=5, hours=1))
         ProcurementRequest.objects.filter(pk=open_pr.pk).update(requested_at=timezone.now() - timedelta(days=2, hours=1))
 
