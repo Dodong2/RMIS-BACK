@@ -1,5 +1,5 @@
-"""Task 25 (2026-10-30): Project Staff task reminders from send_scheduled_reminders, every 3 days from the start date
-(08:00 Manila) until Done (Carl Q8)."""
+"""Task 25 (2026-10-30): Project Staff task reminders from send_scheduled_reminders, Monday, Tuesday and Wednesday (08:00 Manila;
+Task 26, Carl 2026-10-30) from the start date until Done."""
 import datetime
 from io import StringIO
 from zoneinfo import ZoneInfo
@@ -23,21 +23,37 @@ def manila(*args):
 
 
 class TaskReminderDayTests(RMISTestCase):
-    def test_every_three_days_from_the_start_date_at_8am_manila(self):
+    # November 2, 2026 is a Monday.
+    def test_monday_tuesday_wednesday_at_8am_manila(self):
         task = Task(start_date=datetime.date(2026, 11, 2))
         self.assertIsNone(task_reminder_day(task, manila(2026, 11, 1, 12)))
         self.assertIsNone(task_reminder_day(task, manila(2026, 11, 2, 7, 59)))
-        expected = {2: 2, 3: 2, 4: 2, 5: 5, 6: 5, 7: 5, 8: 8, 30: 29}
-        for day, reminder in expected.items():
-            self.assertEqual(task_reminder_day(task, manila(2026, 11, day, 8)), datetime.date(2026, 11, reminder), day)
-        # 23:30 UTC on Nov 4 is 07:30 Nov 5 in Manila: the Nov 5 reminder isn't due yet.
-        self.assertEqual(task_reminder_day(task, datetime.datetime(2026, 11, 4, 23, 30, tzinfo=datetime.UTC)), datetime.date(2026, 11, 2))
-        self.assertIsNone(task_reminder_day(Task(start_date=None), manila(2026, 11, 5, 9)))
+        for day in (2, 3, 4):
+            self.assertEqual(task_reminder_day(task, manila(2026, 11, day, 8)), datetime.date(2026, 11, day))
+        self.assertEqual(task_reminder_day(task, manila(2026, 11, 9, 7, 59)), datetime.date(2026, 11, 4))
+        self.assertEqual(task_reminder_day(task, manila(2026, 11, 9, 8)), datetime.date(2026, 11, 9))
+        # 23:30 UTC on Nov 2 is 07:30 Nov 3 in Manila: Tuesday's reminder isn't due yet; 00:30 UTC is 08:30, it is.
+        self.assertEqual(task_reminder_day(task, datetime.datetime(2026, 11, 2, 23, 30, tzinfo=datetime.UTC)), datetime.date(2026, 11, 2))
+        self.assertEqual(task_reminder_day(task, datetime.datetime(2026, 11, 3, 0, 30, tzinfo=datetime.UTC)), datetime.date(2026, 11, 3))
+        self.assertIsNone(task_reminder_day(Task(start_date=None), manila(2026, 11, 3, 9)))
 
-    def test_one_reminder_day_per_three_days(self):
+    def test_a_missed_wednesday_is_caught_up_on_a_weekday_never_on_a_weekend(self):
         task = Task(start_date=datetime.date(2026, 11, 2))
-        days = {task_reminder_day(task, manila(2026, 11, 2, 8) + datetime.timedelta(hours=h)) for h in range(9 * 24)}
-        self.assertEqual(days, {datetime.date(2026, 11, d) for d in (2, 5, 8)})
+        for day in (5, 6):
+            self.assertEqual(task_reminder_day(task, manila(2026, 11, day, 9)), datetime.date(2026, 11, 4))
+        for day in (7, 8):
+            self.assertIsNone(task_reminder_day(task, manila(2026, 11, day, 9)))
+
+    def test_a_task_starting_on_thursday_waits_for_monday(self):
+        task = Task(start_date=datetime.date(2026, 11, 5))
+        self.assertIsNone(task_reminder_day(task, manila(2026, 11, 5, 9)))
+        self.assertIsNone(task_reminder_day(task, manila(2026, 11, 6, 9)))
+        self.assertEqual(task_reminder_day(task, manila(2026, 11, 9, 8)), datetime.date(2026, 11, 9))
+
+    def test_exactly_three_reminder_days_a_week(self):
+        task = Task(start_date=datetime.date(2026, 11, 2))
+        days = {task_reminder_day(task, manila(2026, 11, 2, 8) + datetime.timedelta(hours=h)) for h in range(14 * 24)} - {None}
+        self.assertEqual(days, {datetime.date(2026, 11, d) for d in (2, 3, 4, 9, 10, 11)})
 
 
 class TaskReminderTests(RMISTestCase):
@@ -50,7 +66,7 @@ class TaskReminderTests(RMISTestCase):
                                               lead=self.leader)
         certify(self.project)
         self.task = self.make_task("Data collection", start=datetime.date(2026, 11, 2), due=datetime.date(2026, 11, 6))
-        self.now = self._patch("django.utils.timezone.now", return_value=manila(2026, 11, 5, 8, 10))
+        self.now = self._patch("django.utils.timezone.now", return_value=manila(2026, 11, 4, 8, 10))
 
     def make_task(self, title, start, due, assignee=None, status="pending"):
         return Task.objects.create(project=self.project, title=title, description="Survey the barangays", start_date=start,
@@ -73,24 +89,33 @@ class TaskReminderTests(RMISTestCase):
                      "November 02, 2026", "November 06, 2026", "completed within the scheduled period"):
             self.assertIn(text, html)
         self.assertNotIn("Payment Reminder", subject)
-        self.assertTrue(ReminderLog.objects.filter(kind="task", run_key="2026-11-05", object_ref=f"task:{self.task.pk}").exists())
+        self.assertTrue(ReminderLog.objects.filter(kind="task", run_key="2026-11-04", object_ref=f"task:{self.task.pk}").exists())
 
-    def test_once_per_reminder_day_and_again_three_days_later(self):
+    def test_once_per_reminder_day_and_again_on_the_next_one(self):
         self.run_command()
         self.brevo_post.reset_mock()
         self.assertIn("Task reminders: 0 sent, 0 failed, 1 already done", self.run_command())
-        self.now.return_value = manila(2026, 11, 7, 9)
-        self.assertIn("0 sent", self.run_command())
-        self.now.return_value = manila(2026, 11, 8, 8)
+        self.now.return_value = manila(2026, 11, 5, 9)  # Thursday: only Wednesday's, already sent
+        self.assertIn("Task reminders: 0 sent, 0 failed, 1 already done", self.run_command())
+        self.now.return_value = manila(2026, 11, 7, 9)  # Saturday
+        self.assertIn("Task reminders: 0 sent, 0 failed, 0 already done", self.run_command())
+        self.now.return_value = manila(2026, 11, 9, 8)  # Monday
         self.assertIn("Task reminders: 1 sent", self.run_command())
         self.assertEqual(len(self.sent()), 1)
 
     def test_overdue_tasks_keep_reminding_and_done_ones_stop(self):
-        self.now.return_value = manila(2026, 11, 20, 8)  # past the Nov 6 end date; Nov 20 = start + 18 days
+        self.now.return_value = manila(2026, 11, 23, 8)  # a Monday past the Nov 6 end date
         self.assertIn("1 sent", self.run_command())
         Task.objects.filter(pk=self.task.pk).update(status="done")
-        self.now.return_value = manila(2026, 11, 23, 8)
+        self.now.return_value = manila(2026, 11, 24, 8)
         self.assertIn("Task reminders: 0 sent, 0 failed, 0 already done", self.run_command())
+
+    def test_only_project_staff_get_task_reminders(self):
+        self.make_task("Leader's own task", start=datetime.date(2026, 11, 2), due=datetime.date(2026, 11, 6), assignee=self.leader)
+        self.make_task("Finance's task", start=datetime.date(2026, 11, 2), due=datetime.date(2026, 11, 6),
+                       assignee=self.make_user("finance_budget"))
+        self.run_command()
+        self.assertEqual([to for to, _, _ in self.sent()], ["staff@lspu.test"])
 
     def test_reassigning_moves_the_reminders_to_the_new_assignee(self):
         Task.objects.filter(pk=self.task.pk).update(assignee=self.other)

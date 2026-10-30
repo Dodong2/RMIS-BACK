@@ -2,13 +2,15 @@
 
     0 * * * *  cd /path/to/rmis-backend && venv/bin/python manage.py send_scheduled_reminders
 
-Payment reminders (Carl Q7): three runs a month, the 7th, 14th and 21st at 08:00 Asia/Manila. Each hourly call works
-out the latest run that is due, so a run the server missed is sent by the next call, and ReminderLog makes every
-e-mail go out once per run (failed ones are retried). For that run, every project with Completed but unpaid
-procurement requests gets one e-mail per active Finance/Accounting/Budget of its campus with the outstanding total.
-Task reminders (Task 25, Carl Q8): every 3 days from a task's start date (day 0, 3, 6, ...), from 08:00 Asia/Manila,
-until it is Done, overdue ones included, to its current assignee only (so reassigning or deleting a task stops them
-for the previous assignee). One e-mail per task per reminder day, the same way.
+Payment reminders (Task 26, Carl 2026-10-30, replaces 7th/14th/21st): once a month, the 7th at 08:00 Asia/Manila. Each
+hourly call works out the latest run that is due, so a run the server missed is sent by the next call, and ReminderLog
+makes every e-mail go out once per run (failed ones are retried). For that run, every project with requests Completed
+before the run but still unpaid gets one e-mail per active Finance/Accounting/Budget of its campus with the outstanding
+total; a request Completed after the run waits for the next 7th.
+Task reminders (Task 26, Carl 2026-10-30, replaces every 3 days): Monday, Tuesday and Wednesday from 08:00 Asia/Manila,
+never on a weekend (a missed Wednesday is sent on Thursday or Friday), from the task's start date until it is Done,
+overdue ones included, to its current assignee only if that account is Project Staff (so reassigning or deleting a task
+stops them for the previous assignee). One e-mail per task per reminder day, the same way.
 Nothing but ReminderLog is written. `--dry-run` lists what would be sent.
 """
 import datetime
@@ -25,40 +27,43 @@ from financial_monitoring.models import ProcurementRequest
 from personnel.models import Task
 from personnel.notifications import button, table, task_reminder
 
-PAYMENT_DAYS = (7, 14, 21)
+PAYMENT_DAY = 7
 SEND_HOUR = 8
-TASK_EVERY_DAYS = 3
+TASK_WEEKDAYS = (0, 1, 2)  # Monday, Tuesday, Wednesday
 
 
 def payment_run(now):
     """The latest payment run (a date) due at `now`, in the configured timezone (Asia/Manila)."""
     local = timezone.localtime(now)
-    due = [day for day in PAYMENT_DAYS if day < local.day or (day == local.day and local.hour >= SEND_HOUR)]
-    if due:
-        return datetime.date(local.year, local.month, due[-1])
+    if local.day > PAYMENT_DAY or (local.day == PAYMENT_DAY and local.hour >= SEND_HOUR):
+        return local.date().replace(day=PAYMENT_DAY)
     last_month = local.date().replace(day=1) - datetime.timedelta(days=1)
-    return last_month.replace(day=PAYMENT_DAYS[-1])
+    return last_month.replace(day=PAYMENT_DAY)
 
 
 def task_reminder_day(task, now):
-    """The latest reminder day of the task due at `now` (start date + a multiple of 3 days, from 08:00), or None
-    before the first one."""
+    """The latest reminder day (Mon/Tue/Wed from 08:00) of the task due at `now`, or None on a weekend or before the
+    task's first reminder day."""
     local = timezone.localtime(now)
-    today = local.date() if local.hour >= SEND_HOUR else local.date() - datetime.timedelta(days=1)
-    if not task.start_date or today < task.start_date:
+    if not task.start_date or local.weekday() >= 5:
         return None
-    return today - datetime.timedelta(days=(today - task.start_date).days % TASK_EVERY_DAYS)
+    day = local.date() if local.hour >= SEND_HOUR else local.date() - datetime.timedelta(days=1)
+    while day.weekday() not in TASK_WEEKDAYS:
+        day -= datetime.timedelta(days=1)
+    return day if day >= task.start_date else None
 
 
 def tasks_to_remind():
     return Task.objects.exclude(status="done").filter(
-        start_date__isnull=False, project__status="active", assignee__is_active=True,
+        start_date__isnull=False, project__status="active", assignee__is_active=True, assignee__role__code="project_staff",
     ).select_related("project", "assignee", "assigned_by").order_by("id")
 
 
-def outstanding_by_project():
-    """{project: [requests]} for every Completed request without a payment (Task 23: awaiting payment)."""
-    requests = ProcurementRequest.objects.filter(status="completed", disbursement__isnull=True).select_related(
+def outstanding_by_project(before):
+    """{project: [requests]} for every request Completed before `before` without a payment (Task 23: awaiting payment)."""
+    requests = ProcurementRequest.objects.filter(
+        status="completed", disbursement__isnull=True, completed_at__lt=before,
+    ).select_related(
         "line_item__budget__project",
     ).order_by("completed_at", "id")
     grouped = defaultdict(list)
@@ -88,15 +93,17 @@ def payment_email(project, requests):
 
 
 class Command(BaseCommand):
-    help = "Send the due scheduled reminder e-mails (payment: 7th/14th/21st; tasks: every 3 days; 08:00 Manila)."
+    help = "Send the due scheduled reminder e-mails (payment: the 7th; tasks: Mon/Tue/Wed; 08:00 Manila)."
 
     def add_arguments(self, parser):
         parser.add_argument("--dry-run", action="store_true", help="List the e-mails without sending or logging them.")
 
     def handle(self, *args, **options):
-        run_key = payment_run(timezone.now()).isoformat()
+        run = payment_run(timezone.now())
+        run_key = run.isoformat()
+        run_at = timezone.make_aware(datetime.datetime.combine(run, datetime.time(SEND_HOUR)))
         counts = defaultdict(int)
-        for project, requests in outstanding_by_project().items():
+        for project, requests in outstanding_by_project(run_at).items():
             subject, html = payment_email(project, requests)
             for user in campus_reviewers(project, "finance_budget"):
                 if options["dry_run"]:

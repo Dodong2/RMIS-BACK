@@ -1,4 +1,4 @@
-"""Task 24 (2026-10-30): Finance payment reminders from send_scheduled_reminders (7th/14th/21st, 08:00 Manila)."""
+"""Task 24 (2026-10-30): Finance payment reminders from send_scheduled_reminders (the 7th, 08:00 Manila; Task 26)."""
 import datetime
 from io import StringIO
 from zoneinfo import ZoneInfo
@@ -22,19 +22,17 @@ def manila(*args):
 
 
 class PaymentRunTests(RMISTestCase):
-    def test_exactly_three_runs_a_month_on_the_7th_14th_and_21st(self):
+    def test_exactly_one_run_a_month_on_the_7th(self):
         start, hours = manila(2026, 11, 1), 30 * 24
         keys = {payment_run(start + datetime.timedelta(hours=h)) for h in range(hours)}
-        self.assertEqual(keys, {datetime.date(2026, 10, 21), datetime.date(2026, 11, 7), datetime.date(2026, 11, 14),
-                                datetime.date(2026, 11, 21)})  # 10-21 = the run still current on Nov 1-6
-        self.assertEqual(len([k for k in keys if k.month == 11]), 3)
+        self.assertEqual(keys, {datetime.date(2026, 10, 7), datetime.date(2026, 11, 7)})  # 10-07 = still current on Nov 1-6
 
     def test_runs_start_at_8am_manila_not_utc(self):
-        self.assertEqual(payment_run(manila(2026, 11, 7, 7, 59)), datetime.date(2026, 10, 21))
+        self.assertEqual(payment_run(manila(2026, 11, 7, 7, 59)), datetime.date(2026, 10, 7))
         self.assertEqual(payment_run(manila(2026, 11, 7, 8, 0)), datetime.date(2026, 11, 7))
         # 00:30 UTC on Nov 7 is 08:30 in Manila: already due.
         self.assertEqual(payment_run(datetime.datetime(2026, 11, 7, 0, 30, tzinfo=datetime.UTC)), datetime.date(2026, 11, 7))
-        self.assertEqual(payment_run(manila(2027, 1, 3, 12)), datetime.date(2026, 12, 21))
+        self.assertEqual(payment_run(manila(2027, 1, 3, 12)), datetime.date(2026, 12, 7))
 
 
 class PaymentReminderTests(RMISTestCase):
@@ -59,7 +57,7 @@ class PaymentReminderTests(RMISTestCase):
     def request(self, amount, status, quarter=None):
         return ProcurementRequest.objects.create(line_item=self.item, description=f"Item {amount}", amount=amount, project_year=1,
                                                  quarter=quarter, status=status, requested_by=self.leader,
-                                                 completed_at=timezone.now() if status == "completed" else None)
+                                                 completed_at=manila(2026, 11, 1) if status == "completed" else None)
 
     def run_command(self, *args):
         out = StringIO()
@@ -101,9 +99,26 @@ class PaymentReminderTests(RMISTestCase):
 
     def test_the_next_scheduled_run_reminds_again(self):
         self.run_command()
-        self._patch("django.utils.timezone.now", return_value=manila(2026, 11, 14, 9))
+        self._patch("django.utils.timezone.now", return_value=manila(2026, 12, 7, 9))
         self.brevo_post.reset_mock()
-        self.assertIn("Payment run 2026-11-14: 2 sent", self.run_command())
+        self.assertIn("Payment run 2026-12-07: 2 sent", self.run_command())
+
+    def test_a_missed_run_is_caught_up_once_by_a_later_call(self):
+        self._patch("django.utils.timezone.now", return_value=manila(2026, 11, 20, 15))
+        self.assertIn("Payment run 2026-11-07: 2 sent", self.run_command())
+        self.assertIn("0 sent, 0 failed, 2 already done", self.run_command())
+
+    def test_a_request_completed_after_the_run_waits_for_the_next_7th(self):
+        ProcurementRequest.objects.filter(status="completed").update(completed_at=manila(2026, 11, 7, 8, 1))
+        self.assertIn("0 sent, 0 failed, 0 already done", self.run_command())
+        self._patch("django.utils.timezone.now", return_value=manila(2026, 12, 7, 8))
+        self.assertIn("Payment run 2026-12-07: 2 sent", self.run_command())
+
+    def test_other_roles_get_no_payment_reminder(self):
+        for code in ("system_admin", "vprei", "crc_chair", "riuh", "procurement_officer_lib", "project_staff"):
+            self.make_user(code, campus="Siniloan")
+        self.run_command()
+        self.assertEqual(sorted(m["to"][0]["email"] for m in self.sent()), sorted(u.email for u in self.finance))
 
     def test_nothing_outstanding_sends_nothing(self):
         ProcurementRequest.objects.filter(status="completed").update(status="cancelled")
