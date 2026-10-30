@@ -82,3 +82,37 @@ def ready_for_budget_review(budget, crc_user):
     )
     for email in recipients:
         send_brevo_email(email, subject, html)
+
+
+EDIT_LABELS = {"description": "Item", "specification": "Specification", "unit": "Unit", "quantity": "Qty",
+               "unit_cost": "Unit Cost", "amount": "Total", "allocations": "Budget periods"}
+
+
+def _edit_value(field, value):
+    if field == "allocations":
+        return ", ".join(f"{a['period']} {peso(Decimal(str(a['amount'])))}" for a in value if Decimal(str(a["amount"]))) or "—"
+    if field in ("unit_cost", "amount") and value:
+        return peso(Decimal(value))
+    return value or "—"
+
+
+def lib_updated(budget, editor, edits):
+    """Task 20 (2026-10-30): Finance/Accounting/Budget changed line items of the LIB (FinanceEditView). The Project
+    Leader and every active CRC/CRD of the campus get the committed changes; sent after commit, a failure only logs."""
+    project, lead = budget.project, budget.project.lead
+    recipients = [lead.email, *campus_reviewers(project).values_list("email", flat=True)]
+    rows = [  # table() escapes the cells
+        (edit.line_item.description, EDIT_LABELS.get(field, field), f"{_edit_value(field, old)} → {_edit_value(field, new)}", edit.reason)
+        for edit in edits for field, (old, new) in edit.changes.items()
+    ]
+    subject = f"LIB Updated by Finance/Accounting/Budget — {project.title}"
+    html = (
+        "<p>Finance/Accounting/Budget has updated the Line-Item Budget (LIB) of a project proposal.</p>"
+        f"<p><b>Project Proposal:</b> {escape(project.title)}<br><b>Project Leader:</b> {escape(lead.display_name)}<br>"
+        f"<b>Updated by:</b> {escape(editor.display_name)}</p>"
+        f"<p><b>Changes:</b></p>{table(['Line Item', 'Field', 'Change', 'Reason'], rows)}"
+        "<p>Please open your RMIS account to see the updated LIB.</p>"
+        f"<p>{button(f'{settings.FRONTEND_URL}/projects', 'Open Project Management')}</p><p>Thank you.</p>"
+    )
+    for email in dict.fromkeys(recipients):
+        send_brevo_email(email, subject, html)

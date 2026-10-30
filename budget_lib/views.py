@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from django.db import transaction
 from django.http import HttpResponse
 from rest_framework import generics, permissions, status
@@ -5,12 +7,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_can
-from config.concurrency import lock
+from config.concurrency import lock, lock_line_items
 from realtime.notify import notify, project_audience
 from research_projects.workflow import missing_approval_documents, missing_registration_rows
-from .models import LibItem, LineItem, LineItemBudget, allocation_periods
-from .notifications import proposal_submitted, ready_for_budget_review
-from .serializers import LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, review_budget, total_cost_problem
+from .models import LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
+from .notifications import lib_updated, proposal_submitted, ready_for_budget_review
+from .serializers import (LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, catalog_item_name, clean_allocations,
+                          line_total, review_budget, total_cost_problem)
 
 # Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
 # ensure_in_scope. Certification stays with the Budget Officer (budget.certify).
@@ -224,6 +227,121 @@ class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.G
 
     def refuse(self, detail, code=status.HTTP_400_BAD_REQUEST):
         return Response({"detail": detail}, status=code)
+
+
+# Task 20 (2026-10-30): what Finance/Accounting/Budget may change on an existing line item (Carl's Q3: not the class)
+FINANCE_EDIT_FIELDS = ("description", "specification", "unit", "quantity", "unit_cost", "allocations")
+
+
+def _text(value):
+    return "" if value is None else str(value)
+
+
+class FinanceEditView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.GenericAPIView):
+    """POST budgets/<id>/finance-edit/ {"items": [{"id", "reason", <FINANCE_EDIT_FIELDS>...}]}: Update This LIB
+    (Task 20, 2026-10-30). The Budget Officer changes existing line items of a LIB forwarded to them and not yet
+    certified; no item can be added, removed or moved to another class. Each changed item needs a reason and gets an
+    append-only LineItemEdit; the Grand Total must still equal the Total Project/Study Cost. Unchanged items are
+    skipped; nothing changed is a 400 and sends nothing. After commit the Project Leader and the campus CRC/CRD get an
+    e-mail."""
+
+    queryset = LineItemBudget.objects.select_related("project")
+    permission_classes = [permissions.IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not role_can(request.user, "budget.certify"):
+            return self.refuse("Only Finance/Accounting/Budget can update this LIB.", status.HTTP_403_FORBIDDEN)
+        budget = lock(LineItemBudget.objects.select_related("project"), pk=self.get_object().pk)
+        if budget.status not in LineItemBudget.BUDGET_STATUSES:
+            return self.refuse(f"A LIB that is {budget.get_status_display().lower()} can't be updated.")
+        rows = request.data.get("items")
+        if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) for r in rows):
+            return self.refuse("Send the line items to update.")
+        ids = [r.get("id") for r in rows]
+        items = {item.pk: item for item in lock_line_items(*LineItem.objects.filter(budget=budget, pk__in=[i for i in ids if isinstance(i, int)]))}
+        if len(set(ids)) != len(ids) or set(ids) != set(items):
+            return self.refuse("Only this LIB's existing line items can be updated; items can't be added or removed here.")
+        periods = allocation_periods(budget.project)
+        edits = []
+        for row in rows:
+            item = items[row["id"]]
+            extra = set(row) - {"id", "reason", *FINANCE_EDIT_FIELDS}
+            if extra:
+                return self.refuse(f"{item.description}: {', '.join(sorted(extra))} can't be changed here.")
+            try:
+                changes = self.apply(item, row, periods)
+            except ValidationError as exc:
+                detail = exc.detail
+                while isinstance(detail, (dict, list)):
+                    detail = next(iter(detail.values())) if isinstance(detail, dict) else detail[0]
+                return self.refuse(f"{item.description}: {detail}")
+            if not changes:
+                continue
+            reason = str(row.get("reason") or "").strip()
+            if not reason:
+                return self.refuse(f"{item.description}: give the reason for the change.")
+            item.save()
+            edits.append(LineItemEdit(line_item=item, budget=budget, changes=changes, reason=reason, edited_by=request.user))
+        if not edits:
+            return self.refuse("Nothing was changed.")
+        problem = total_cost_problem(budget)
+        if problem:
+            return self.refuse(problem)
+        edits = LineItemEdit.objects.bulk_create(edits)
+        lib_signal(budget)
+        transaction.on_commit(lambda: lib_updated(budget, request.user, edits))
+        return Response(LineItemBudgetSerializer(budget).data)
+
+    @staticmethod
+    def apply(item, row, periods):
+        """Set the row's new values on the item (not saved) and return {field: [old, new]} of what really changed."""
+        before = {f: _text(getattr(item, f)) for f in ("description", "specification", "unit", "quantity", "unit_cost", "amount")}
+        before_allocations = item.allocations or []
+        if "description" in row and str(row["description"] or "").strip().lower() != item.description.lower():
+            item.description = catalog_item_name(item.category, row["description"])
+        if "specification" in row:
+            item.specification = str(row["specification"] or "").strip()
+            if len(item.specification) > 300:
+                raise ValidationError({"specification": "Keep the specification to 300 characters."})
+        if "unit" in row:
+            if row["unit"] not in dict(LineItem.UNIT_CHOICES):
+                raise ValidationError({"unit": "Pick a unit from the list."})
+            item.unit = row["unit"]
+        for field, label in (("quantity", "Qty"), ("unit_cost", "Unit Cost")):
+            if field in row:
+                try:
+                    value = Decimal(str(row[field]).replace(",", ""))
+                except InvalidOperation:
+                    raise ValidationError({field: f"{label} is not a number."})
+                if value < 0:
+                    raise ValidationError({field: f"{label} can't be negative."})
+                setattr(item, field, value.quantize(Decimal("0.01")))
+        if item.quantity is None or item.unit_cost is None:
+            raise ValidationError({"quantity": "Qty and Unit Cost are both needed."})
+        item.amount = line_total(item.quantity, item.unit_cost)
+        if item.amount <= 0:
+            raise ValidationError({"amount": "Qty x Unit Cost must be more than 0."})
+        item.allocations = clean_allocations(row.get("allocations", before_allocations), periods, item.amount)
+        after = {f: _text(getattr(item, f)) for f in before}
+        changes = {f: [before[f], after[f]] for f in before if _comparable(before[f]) != _comparable(after[f])}
+        old_split = {a["period"]: Decimal(str(a["amount"])) for a in before_allocations}
+        new_split = {a["period"]: Decimal(str(a["amount"])) for a in item.allocations}
+        if any(old_split.get(p, Decimal(0)) != new_split.get(p, Decimal(0)) for p in periods or []):
+            changes["allocations"] = [before_allocations, item.allocations]
+        return changes
+
+    def refuse(self, detail, code=status.HTTP_400_BAD_REQUEST):
+        transaction.set_rollback(True)  # items saved before a later row failed are undone: all or nothing
+        return Response({"detail": detail}, status=code)
+
+
+def _comparable(value):
+    """'20' and '20.00' are the same Qty; text compares as text."""
+    try:
+        return Decimal(value)
+    except (InvalidOperation, TypeError):
+        return value
 
 
 class LibItemListCreateView(generics.ListCreateAPIView):

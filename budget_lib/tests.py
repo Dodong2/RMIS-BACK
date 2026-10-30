@@ -11,7 +11,7 @@ import requests
 from accounts.testing import RMISTestCase
 from research_projects.models import Project
 
-from .models import LineItem, LineItemBudget
+from .models import LineItem, LineItemBudget, LineItemEdit
 
 
 def attach_approval_documents(project, user):
@@ -523,3 +523,137 @@ class LibDownloadTests(RMISTestCase):
         self.assertEqual(sheet.cell(row=header + 1, column=7).value, f'=IF(AND(E{header + 1}<>"",F{header + 1}<>""),E{header + 1}*F{header + 1},"")')
         self.assertIsNone(sheet.cell(row=header + 1, column=1).value)
         self.assertEqual(sheet.cell(row=header + 30 + 2, column=1).value, "LEGEND")
+
+
+class FinanceEditTests(RMISTestCase):
+    """Task 20 (2026-10-30): Update This LIB. Finance/Accounting/Budget changes existing line items of a LIB forwarded to
+    them (For Budget Review or Ongoing Review - Budget), each change with a reason kept in an append-only history;
+    no item is added, removed or reclassed, and the Grand Total must still equal the Total Project/Study Cost. The
+    Project Leader and the campus CRC/CRD get an e-mail of the committed changes."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader", campus="Siniloan", first_name="Ana", last_name="Reyes")
+        self.officer = self.make_user("finance_budget", campus="Siniloan", first_name="Fe", last_name="Cruz")
+        self.crc = self.make_user("crc_chair", campus="Siniloan")
+        self.make_user("crc_chair", campus="Sta. Cruz")
+        self.project = Project.objects.create(
+            title="P", project_code="NTP-9", funding_type="core_funded", lead=self.leader, campus="Siniloan",
+            total_cost="15500", start_date=date(2027, 1, 1), target_end_date=date(2028, 3, 31),
+        )
+        self.budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="endorsed")
+        self.a = LineItem.objects.create(budget=self.budget, category="mooe", description="Training Expenses", unit="pax",
+                                         quantity=Decimal("20"), unit_cost=Decimal("500.50"), amount=Decimal("10010"),
+                                         allocations=[{"period": "Y1Q1", "amount": "4010.00"}, {"period": "Y1Q4", "amount": "6000.00"}])
+        self.b = LineItem.objects.create(budget=self.budget, category="co", description="Office Equipment", unit="unit",
+                                         quantity=Decimal("1"), unit_cost=Decimal("5490"), amount=Decimal("5490"),
+                                         allocations=[{"period": "Y2Q1", "amount": "5490.00"}])
+        self.brevo_post.reset_mock()
+
+    def update(self, items, user=None):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client_for(user or self.officer).post(f"/api/budget/budgets/{self.budget.id}/finance-edit/", {"items": items}, format="json")
+
+    def move_cost(self):
+        """Training Expenses down by 1,000 and Office Equipment up by 1,000: the Grand Total stays 15,500."""
+        return [
+            {"id": self.a.id, "unit_cost": "450.50", "allocations": [{"period": "Y1Q1", "amount": "3010"}, {"period": "Y1Q4", "amount": "6000"}],
+             "reason": "Venue rate per COA ceiling"},
+            {"id": self.b.id, "unit_cost": "6490", "allocations": [{"period": "Y2Q1", "amount": "6490"}], "reason": "Updated quotation"},
+        ]
+
+    def sent(self):
+        return [call.kwargs["json"] for call in self.brevo_post.call_args_list]
+
+    def test_finance_updates_existing_items_with_reasons_and_the_history_is_kept(self):
+        response = self.update(self.move_cost())
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.a.refresh_from_db()
+        self.b.refresh_from_db()
+        self.assertEqual((self.a.amount, self.b.amount), (Decimal("9010.00"), Decimal("6490.00")))
+        edit = LineItemEdit.objects.get(line_item=self.a)
+        self.assertEqual((edit.edited_by, edit.reason, edit.budget), (self.officer, "Venue rate per COA ceiling", self.budget))
+        self.assertEqual(edit.changes["unit_cost"], ["500.50", "450.50"])
+        self.assertEqual(edit.changes["amount"], ["10010.00", "9010.00"])
+        self.assertIn("allocations", edit.changes)
+        self.assertNotIn("quantity", edit.changes)
+        item = next(i for i in response.data["line_items"] if i["id"] == self.a.id)
+        self.assertEqual([(e["reason"], e["edited_by_name"]) for e in item["edits"]], [("Venue rate per COA ceiling", "Fe Cruz")])
+        self.assertEqual(LineItem.objects.filter(budget=self.budget).count(), 2)
+
+    def test_a_later_edit_adds_to_the_history(self):
+        self.update(self.move_cost())
+        self.update([{"id": self.a.id, "specification": "Venue, 2 days", "reason": "Clarified"}])
+
+        self.assertEqual([e.reason for e in LineItemEdit.objects.filter(line_item=self.a)], ["Venue rate per COA ceiling", "Clarified"])
+        self.assertEqual(LineItemEdit.objects.filter(line_item=self.a).last().changes, {"specification": ["", "Venue, 2 days"]})
+
+    def test_the_leader_and_the_campus_crc_crd_get_the_committed_changes_by_e_mail(self):
+        self.update(self.move_cost())
+
+        mails = self.sent()
+        self.assertEqual(sorted(m["to"][0]["email"] for m in mails), sorted([self.leader.email, self.crc.email]))
+        self.assertEqual(mails[0]["subject"], "LIB Updated by Finance/Accounting/Budget — P")
+        for text in ("Fe Cruz", "Training Expenses", "Unit Cost", "₱500.50 → ₱450.50", "Venue rate per COA ceiling", "Office Equipment"):
+            self.assertIn(text, mails[0]["htmlContent"])
+
+    def test_every_changed_item_needs_a_reason_and_nothing_is_saved_without(self):
+        items = self.move_cost()
+        items[1]["reason"] = "  "
+
+        response = self.update(items)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("reason", response.data["detail"])
+        self.a.refresh_from_db()
+        self.assertEqual(self.a.unit_cost, Decimal("500.50"))  # the first item's save was rolled back
+        self.assertFalse(LineItemEdit.objects.exists())
+        self.assertEqual(self.sent(), [])
+
+    def test_the_grand_total_must_still_equal_the_total_cost(self):
+        response = self.update(self.move_cost()[:1])
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Total Project/Study Cost", response.data["detail"])
+        self.a.refresh_from_db()
+        self.assertEqual(self.a.amount, Decimal("10010.00"))
+        self.assertFalse(LineItemEdit.objects.exists())
+        self.assertEqual(self.sent(), [])
+
+    def test_no_real_change_is_refused_and_sends_nothing(self):
+        response = self.update([{"id": self.a.id, "quantity": "20.00", "unit_cost": "500.5", "reason": "x"}])
+
+        self.assertEqual((response.status_code, response.data["detail"]), (400, "Nothing was changed."))
+        self.assertFalse(LineItemEdit.objects.exists())
+        self.assertEqual(self.sent(), [])
+
+    def test_items_cant_be_added_removed_or_reclassed(self):
+        other = LineItemBudget.objects.create(project=Project.objects.create(title="Q", project_code="Q-1", funding_type="core_funded",
+                                                                             lead=self.leader, campus="Siniloan"), version_number=1)
+        foreign = LineItem.objects.create(budget=other, category="mooe", description="Training Expenses", amount=Decimal("1"))
+        for items in ([{"category": "mooe", "description": "Training Expenses", "reason": "new"}],
+                      [{"id": foreign.id, "unit_cost": "1", "reason": "x"}],
+                      [{"id": self.a.id, "category": "ps", "reason": "x"}],
+                      [{"id": self.a.id, "amount": "1", "reason": "x"}]):
+            self.assertEqual(self.update(items).status_code, 400, items)
+        self.assertEqual(LineItem.objects.filter(budget=self.budget).count(), 2)
+        client = self.client_for(self.officer)
+        self.assertEqual(client.delete(f"/api/budget/line-items/{self.a.id}/").status_code, 403)
+        self.assertEqual(client.post("/api/budget/line-items/", {"budget": self.budget.id, "category": "mooe",
+                                                                  "description": "Training Expenses", "amount": "1"}, format="json").status_code, 403)
+        self.assertFalse(LineItemEdit.objects.exists())
+
+    def test_only_finance_before_certification(self):
+        LineItemBudget.objects.filter(pk=self.budget.pk).update(status="certifying")
+        self.assertEqual(self.update(self.move_cost()).status_code, 200)
+        LineItemBudget.objects.filter(pk=self.budget.pk).update(status="certified")
+        self.assertEqual(self.update([{"id": self.a.id, "specification": "x", "reason": "x"}]).status_code, 400)
+        LineItemBudget.objects.filter(pk=self.budget.pk).update(status="endorsed")
+        for user in (self.leader, self.crc):
+            self.assertEqual(self.update([{"id": self.a.id, "specification": "x", "reason": "x"}], user).status_code, 403, user.role.code)
+        self.assertEqual(self.update([{"id": self.a.id, "specification": "x", "reason": "x"}],
+                                     self.make_user("finance_budget", campus="Sta. Cruz")).status_code, 404)
+        LineItemBudget.objects.filter(pk=self.budget.pk).update(status="submitted")
+        self.assertEqual(self.update([{"id": self.a.id, "specification": "x", "reason": "x"}]).status_code, 404)  # not forwarded yet
+        self.assertEqual(LineItemEdit.objects.count(), 2)  # only the certifying edit

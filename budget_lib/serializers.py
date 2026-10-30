@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.permissions import ensure_in_scope
-from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, BudgetReview, LibItem, LineItem, LineItemBudget, allocation_periods
+from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, BudgetReview, LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
@@ -47,12 +47,24 @@ class LibItemSerializer(serializers.ModelSerializer):
         return {**attrs, "name": name, "uacs_code": attrs.get("uacs_code", getattr(self.instance, "uacs_code", "")).strip()}
 
 
+class LineItemEditSerializer(serializers.ModelSerializer):
+    edited_by_name = serializers.CharField(source="edited_by.display_name", read_only=True)
+
+    class Meta:
+        model = LineItemEdit
+        fields = ["id", "changes", "reason", "edited_by", "edited_by_name", "edited_at"]
+
+
 class LineItemSerializer(serializers.ModelSerializer):
+    # Task 20: the Finance/Accounting/Budget changes to this item, oldest first (the Project Leader's Attention icons)
+    edits = LineItemEditSerializer(many=True, read_only=True)
+
     class Meta:
         model = LineItem
         fields = [
             "id", "budget", "category", "description", "specification", "amount", "unit", "quantity", "unit_cost",
             "fiscal_year", "funding_source", "is_counterpart", "justification", "q1_amount", "q2_amount", "q3_amount", "q4_amount", "allocations", "is_app_flagged", "created_at",
+            "edits",
         ]
         read_only_fields = ["is_app_flagged"]
 
@@ -203,5 +215,6 @@ def review_budget(budget, user, status, action, remarks=""):
         snapshot = [LineItemSerializer(item).data for item in budget.line_items.order_by("category", "id")]
         for row in snapshot:
             row.pop("budget", None)
+            row.pop("edits", None)
     BudgetReview.objects.create(budget=budget, action=action, remarks=remarks, acted_by=user, snapshot=snapshot)
     return budget

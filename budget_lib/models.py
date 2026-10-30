@@ -145,6 +145,25 @@ class LineItem(models.Model):
         return f"{self.get_category_display()} - {self.description}"
 
 
+class LineItemEdit(models.Model):
+    """Task 20 (2026-10-30): one Finance/Accounting/Budget change to one existing line item before certification, with
+    its reason. Append-only: a later edit adds a row, so the Project Leader's Attention history keeps every change.
+    changes = {field: [old, new]} for the fields that actually changed (values as text)."""
+
+    line_item = models.ForeignKey(LineItem, on_delete=models.CASCADE, related_name="edits")
+    budget = models.ForeignKey(LineItemBudget, on_delete=models.CASCADE, related_name="edits")
+    changes = models.JSONField()
+    reason = models.TextField()
+    edited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="lib_edits")
+    edited_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["edited_at", "id"]
+
+    def __str__(self):
+        return f"{self.line_item}: edited {self.edited_at:%Y-%m-%d}"
+
+
 class LibItem(models.Model):
     """An LIB Item the System Admin maintains under one fixed class (client 2026-10-20), e.g. "Honoraria" under PS.
     Line items pick from the active ones and keep the name as text, so renaming or deactivating an item never changes
