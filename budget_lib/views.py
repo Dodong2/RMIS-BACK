@@ -8,7 +8,7 @@ from config.concurrency import lock
 from realtime.notify import notify, project_audience
 from research_projects.workflow import missing_approval_documents, missing_registration_rows
 from .models import LibItem, LineItem, LineItemBudget
-from .notifications import proposal_submitted
+from .notifications import proposal_submitted, ready_for_budget_review
 from .serializers import LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, review_budget, total_cost_problem
 
 # Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
@@ -128,13 +128,12 @@ class LineItemDetailView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics
 
 # Client 2026-10-21: every step of the LIB review workflow, as step -> (from statuses, who, to status, history
 # action). "leader" = the project's own leader (or acting replacement); the others are permission codes. Anything not
-# here is refused, so no stage can be skipped (Q5: always through For Checking; Q3/Q6: review and certification
-# start with a button, not by opening the LIB).
+# here is refused, so no stage can be skipped (Q6: certification starts with a button, not by opening the LIB).
+# Task 19 (2026-10-30, Q1): the CRC/CRD's one forward step, "Mark for checking", sends it straight to the Budget
+# Officer; crc_processing/for_checking are only accepted for LIBs already there.
 TRANSITIONS = {
     "submit": (("draft",), "leader", "submitted", "submitted"),
-    "start-review": (("submitted",), "budget.endorse", "crc_processing", "review_started"),
-    "for-checking": (("crc_processing",), "budget.endorse", "for_checking", "for_checking"),
-    "ready": (("for_checking",), "budget.endorse", "endorsed", "ready"),
+    "for-checking": (LineItemBudget.CRC_STATUSES, "budget.endorse", "endorsed", "ready"),
     "start-certification": (("endorsed",), "budget.certify", "certifying", "certification_started"),
     "certify": (("certifying",), "budget.certify", "certified", "certified"),
     "resubmit": (("returned",), "leader", "submitted", "resubmitted"),
@@ -197,6 +196,9 @@ class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.G
         if self.step in ("submit", "resubmit"):
             # Task 15 (2026-10-30): the campus CRC/CRD get an e-mail once the submission is saved
             transaction.on_commit(lambda: proposal_submitted(budget, resubmitted=self.step == "resubmit"))
+        elif self.step == "for-checking":
+            # Task 19 (2026-10-30): the campus Finance/Accounting/Budget get an e-mail once the forward is saved
+            transaction.on_commit(lambda: ready_for_budget_review(budget, user))
         return Response(LineItemBudgetSerializer(budget).data)
 
     def refuse(self, detail, code=status.HTTP_400_BAD_REQUEST):

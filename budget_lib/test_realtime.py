@@ -41,8 +41,7 @@ class LibSignalTests(RMISTestCase):
         self.assertEqual(set(groups), {*map(to_role, BUDGET_ROLES), to_user(self.leader.pk)})
 
     def test_every_step_signals_once(self):
-        steps = [(self.leader, "submit"), (self.crc, "start-review"), (self.crc, "hold"), (self.leader, "resubmit"),
-                 (self.crc, "start-review"), (self.crc, "for-checking"), (self.crc, "ready"),
+        steps = [(self.leader, "submit"), (self.crc, "hold"), (self.leader, "resubmit"), (self.crc, "for-checking"),
                  (self.officer, "start-certification"), (self.officer, "certify")]
         for user, step in steps:
             with self.subTest(step=step):
@@ -51,7 +50,7 @@ class LibSignalTests(RMISTestCase):
                 self.assert_signal()
 
     def test_refused_step_sends_nothing(self):
-        self.assertEqual(self.act(self.crc, "start-review").status_code, 404)  # still Draft, hidden from the CRC Chair (D2)
+        self.assertEqual(self.act(self.crc, "for-checking").status_code, 404)  # still Draft, hidden from the CRC Chair (D2)
         self.assertEqual(self.act(self.crc, "submit").status_code, 404)  # not the leader; the Draft is hidden from them (D2)
         self.act(self.leader, "submit")
         self.notify.reset_mock()

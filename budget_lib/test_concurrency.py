@@ -8,17 +8,17 @@ from .models import BudgetReview, LineItem, LineItemBudget
 
 
 class ReviewStepHappensOnceTests(ConcurrencyTestCase):
-    def test_two_crc_chairs_marking_ready_at_once_mark_it_once(self):
+    def test_two_crc_chairs_marking_for_checking_at_once_forward_it_once(self):
         leader = self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader,
                                          total_cost=Decimal("500"))
-        budget = LineItemBudget.objects.create(project=project, version_number=1, status="for_checking")
+        budget = LineItemBudget.objects.create(project=project, version_number=1, status="submitted")
         LineItem.objects.create(budget=budget, category="mooe", description="Travel", amount=Decimal("500"))
         self.widen("budget_lib.views.review_budget")
 
         def ready(user):
             client = self.client_for(user)
-            return lambda: client.post(f"/api/budget/budgets/{budget.id}/ready/", {}, format="json")
+            return lambda: client.post(f"/api/budget/budgets/{budget.id}/for-checking/", {}, format="json")
 
         first, second = self.run_concurrently(ready(self.make_user("crc_chair")), ready(self.make_user("crc_chair")))
 

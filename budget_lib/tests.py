@@ -1,6 +1,6 @@
 """LIB review workflow (client 2026-10-21, replaces the 2026-10-18 endorse/return chain): the Project Leader submits,
-the CRC Chair reviews (Start Review -> For Checking -> Ready for Certification), the Budget Officer certifies (Start
-Certification -> Certify). Either level can put it On Hold for the Project Leader, who edits and resubmits to the CRC
+the CRC Chair forwards it with Mark for checking (Task 19, 2026-10-30: one step, straight to Ready for Certification),
+the Budget Officer certifies (Start Certification -> Certify). Either level can put it On Hold for the Project Leader, who edits and resubmits to the CRC
 Chair. Every step is kept in the review history, each submission with a snapshot of its line items."""
 from datetime import date
 from decimal import Decimal
@@ -59,8 +59,7 @@ class LibWorkflowTests(RMISTestCase):
         LineItemBudget.objects.filter(pk=self.budget.pk).update(status=status)
 
     def test_full_chain_from_draft_to_certified(self):
-        steps = [(self.leader, "submit", "submitted"), (self.crc, "start-review", "crc_processing"),
-                 (self.crc, "for-checking", "for_checking"), (self.crc, "ready", "endorsed"),
+        steps = [(self.leader, "submit", "submitted"), (self.crc, "for-checking", "endorsed"),
                  (self.officer, "start-certification", "certifying"), (self.officer, "certify", "certified")]
         for user, action, expected in steps:
             response = self.act(user, action)
@@ -68,19 +67,19 @@ class LibWorkflowTests(RMISTestCase):
             self.assertEqual(self.status(), expected, action)
         self.assertEqual((self.budget.endorsed_by, self.budget.certified_by), (self.crc, self.officer))
         self.assertEqual([r["action"] for r in response.data["reviews"]],
-                         ["submitted", "review_started", "for_checking", "ready", "certification_started", "certified"])
+                         ["submitted", "ready", "certification_started", "certified"])
 
     def test_steps_cannot_be_skipped(self):
-        self.assertEqual(self.act(self.crc, "start-review").status_code, 404)  # not submitted yet: a Draft is hidden from the CRC Chair (D2)
+        self.assertEqual(self.act(self.crc, "for-checking").status_code, 404)  # not submitted yet: a Draft is hidden from the CRC Chair (D2)
         self.act(self.leader, "submit")
-        for action in ("for-checking", "ready"):
-            self.assertEqual(self.act(self.crc, action).status_code, 400, action)
         for action in ("start-certification", "certify"):
             self.assertEqual(self.act(self.officer, action).status_code, 404, action)  # Q10: hidden from Budget until Ready
-        self.act(self.crc, "start-review")
-        self.assertEqual(self.act(self.crc, "ready").status_code, 400)  # always through For Checking (client Q5)
-        self.assertEqual(self.status(), "crc_processing")
-        self.move_to("endorsed")
+        for action in ("start-review", "ready"):  # Task 19: the old CRC steps are gone
+            self.assertEqual(self.act(self.crc, action).status_code, 404, action)
+        self.assertEqual(self.status(), "submitted")
+        self.act(self.crc, "for-checking")
+        self.assertEqual(self.act(self.crc, "for-checking").status_code, 400)  # forwarded once; can't be repeated
+        self.assertEqual(self.status(), "endorsed")
         self.assertEqual(self.act(self.officer, "certify").status_code, 400)  # Start Certification first (Q6)
         self.assertEqual(self.status(), "endorsed")
 
@@ -89,7 +88,7 @@ class LibWorkflowTests(RMISTestCase):
             self.assertIn(self.act(user, "submit").status_code, (403, 404), user.role.code)
         self.act(self.leader, "submit")
         for user in (self.officer, self.leader, self.make_user("vprei"), self.make_user("riuh")):
-            self.assertIn(self.act(user, "start-review").status_code, (403, 404), user.role.code)  # Q10: hidden from Budget
+            self.assertIn(self.act(user, "for-checking").status_code, (403, 404), user.role.code)  # Q10: hidden from Budget
         self.move_to("endorsed")
         for user in (self.crc, self.leader):
             self.assertEqual(self.act(user, "start-certification").status_code, 403, user.role.code)
@@ -97,10 +96,18 @@ class LibWorkflowTests(RMISTestCase):
         self.assertEqual(self.act(self.crc, "certify").status_code, 403)
         self.assertEqual(self.status(), "certifying")
 
+    def test_mark_for_checking_forwards_older_libs_still_under_crc_review(self):
+        for status in ("submitted", "crc_processing", "for_checking"):
+            self.move_to(status)
+            self.assertEqual(self.act(self.crc, "for-checking").status_code, 200, status)
+            self.assertEqual(self.status(), "endorsed", status)
+            self.budget.refresh_from_db()
+            self.assertEqual(self.budget.endorsed_by, self.crc)
+
     def test_crc_chair_outside_campus_gets_404(self):
         self.act(self.leader, "submit")
         other = self.make_user("crc_chair", campus="Los Baños")
-        self.assertEqual(self.act(other, "start-review").status_code, 404)
+        self.assertEqual(self.act(other, "for-checking").status_code, 404)
         self.assertEqual(self.status(), "submitted")
 
     def test_submit_refuses_grand_total_not_equal_to_total_cost(self):
@@ -377,3 +384,67 @@ class SubmissionEmailTests(RMISTestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(len(self.sent()), 2)
         self.assertEqual(self.sent()[0]["subject"], "Project Proposal Resubmitted — Bridging <Academia>")
+
+
+class ForwardEmailTests(RMISTestCase):
+    """Task 19 (2026-10-30): when the CRC/CRD marks a proposal for checking, every active Finance/Accounting/Budget of
+    the project's campus gets a Brevo e-mail with the leader, the forwarding CRC/CRD and the budget per project year."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader", campus="Siniloan", first_name="Ana", last_name="Reyes")
+        self.crc = self.make_user("crc_chair", campus="Siniloan", first_name="Ben", last_name="Cruz")
+        self.project = Project.objects.create(
+            title="Bridging <Academia>", project_code="P-1", funding_type="core_funded", lead=self.leader, campus="Siniloan",
+            total_cost="15000", start_date=date(2027, 1, 1), target_end_date=date(2028, 3, 31),
+        )
+        self.budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="submitted")
+        LineItem.objects.create(budget=self.budget, category="mooe", description="Training Expenses", amount=Decimal("10000"),
+                                allocations=[{"period": "Y1Q1", "amount": "10000.00"}])
+        LineItem.objects.create(budget=self.budget, category="co", description="Office Equipment", amount=Decimal("5000"),
+                                allocations=[{"period": "Y2Q1", "amount": "5000.00"}])
+        self.finance = [self.make_user("finance_budget", campus="Siniloan"), self.make_user("finance_budget", campus="SINILOAN")]
+        self.make_user("finance_budget", campus="Sta. Cruz")
+        self.make_user("finance_budget", campus="Siniloan", is_active=False)
+        self.make_user("finance_budget", campus="Siniloan", account_status="suspended")
+        self.brevo_post.reset_mock()
+
+    def forward(self, user=None):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client_for(user or self.crc).post(f"/api/budget/budgets/{self.budget.pk}/for-checking/")
+
+    def sent(self):
+        return [call.kwargs["json"] for call in self.brevo_post.call_args_list]
+
+    def test_forwarding_e_mails_every_active_finance_of_the_campus(self):
+        response = self.forward()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        mails = self.sent()
+        self.assertEqual(sorted(m["to"][0]["email"] for m in mails), sorted(u.email for u in self.finance))
+        mail = mails[0]
+        self.assertEqual(mail["subject"], "Project Proposal Ready for Budget Review — Bridging <Academia>")
+        for text in ("reviewed by CRC/CRD", "Ana Reyes", self.leader.email, "Bridging &lt;Academia&gt;", "Ben Cruz",
+                     "Year 1", "₱10,000.00", "Year 2", "₱5,000.00", "₱15,000.00", "budget review"):
+            self.assertIn(text, mail["htmlContent"])
+
+    def test_a_repeated_or_refused_forward_sends_nothing_more(self):
+        self.forward()
+        self.assertEqual(self.forward().status_code, 400)
+        self.assertEqual(len(self.sent()), 2)
+        self.brevo_post.reset_mock()
+        LineItemBudget.objects.filter(pk=self.budget.pk).update(status="submitted")
+        self.assertIn(self.forward(self.make_user("finance_budget", campus="Siniloan")).status_code, (403, 404))
+        self.assertEqual(self.sent(), [])
+
+    def test_a_failed_e_mail_keeps_the_forward(self):
+        self.brevo_post.side_effect = requests.ConnectionError("Brevo down")
+
+        self.assertEqual(self.forward().status_code, 200)
+        self.budget.refresh_from_db()
+        self.assertEqual(self.budget.status, "endorsed")
+
+    def test_the_crc_crd_submit_e_mail_still_goes_to_the_crc_crd_only(self):
+        from .notifications import campus_reviewers
+
+        self.assertEqual(list(campus_reviewers(self.project)), [self.crc])
