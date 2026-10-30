@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.http import HttpResponse
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -7,7 +8,7 @@ from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_ca
 from config.concurrency import lock
 from realtime.notify import notify, project_audience
 from research_projects.workflow import missing_approval_documents, missing_registration_rows
-from .models import LibItem, LineItem, LineItemBudget
+from .models import LibItem, LineItem, LineItemBudget, allocation_periods
 from .notifications import proposal_submitted, ready_for_budget_review
 from .serializers import LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, review_budget, total_cost_problem
 
@@ -70,6 +71,26 @@ class BudgetDetailView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.R
     queryset = LineItemBudget.objects.select_related("project")
     serializer_class = LineItemBudgetSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+
+class BudgetExportView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.GenericAPIView):
+    """GET budgets/<id>/export/: the LIB as saved, in Step 4's Download LIB Template layout (Task 20, 2026-10-30).
+    The uploaded workbook isn't kept, so manual entry, the LIB import and Upload via Excel all download the same way.
+    Same scope as the LIB itself (the Budget Officer from Ready for Certification on)."""
+
+    queryset = LineItemBudget.objects.select_related("project")
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        from research_projects.importer import build_lib_template
+
+        budget = self.get_object()
+        project = budget.project
+        content = build_lib_template(project.start_date, project.target_end_date, allocation_periods(project) or [],
+                                     budget.line_items.order_by("id"))
+        response = HttpResponse(content, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response["Content-Disposition"] = f'attachment; filename="LIB_{project.project_code}_v{budget.version_number}.xlsx"'
+        return response
 
 
 class LineItemListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.ListCreateAPIView):

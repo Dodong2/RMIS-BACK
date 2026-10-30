@@ -526,7 +526,9 @@ def _period_meaning(period):
     return f"Year {year}, Quarter {quarter}: months {first}-{first + 2} counted from the Start Date"
 
 
-def build_lib_template(start_date, target_end_date, periods):
+def build_lib_template(start_date, target_end_date, periods, items=()):
+    """Step 4's LIB workbook. With `items` (saved LineItems, Task 20 LIB download) the first rows hold the LIB as saved,
+    in the same layout, so read_lib reads it back unchanged; the template itself has no items."""
     wb = openpyxl.Workbook()
     sheet = wb.active
     sheet.title = LIB_SHEET
@@ -541,7 +543,13 @@ def build_lib_template(start_date, target_end_date, periods):
     header = sheet.max_row
     for cell in sheet[1] + sheet[header]:
         cell.font = Font(bold=True)
-    for row in range(header + 1, header + 1 + LIB_BLANK_ROWS):
+    short = {code: label for code, label, _ in CATEGORY_LEGEND}
+    units = dict(LineItem.UNIT_CHOICES)
+    for item in items:
+        split = {a.get("period"): a.get("amount") for a in item.allocations or []}
+        sheet.append([short.get(item.category, item.category), item.description, item.specification, units.get(item.unit, item.unit),
+                      _number(item.quantity), _number(item.unit_cost), _number(item.amount)] + [_number(split.get(p)) for p in periods])
+    for row in range(sheet.max_row + 1, header + 1 + max(LIB_BLANK_ROWS, len(items))):
         sheet.cell(row=row, column=7, value=f'=IF(AND(E{row}<>"",F{row}<>""),E{row}*F{row},"")')
     for i, width in enumerate((14, 40, 32, 10, 8, 14, 14)):
         sheet.column_dimensions[get_column_letter(i + 1)].width = width
@@ -565,6 +573,10 @@ def build_lib_template(start_date, target_end_date, periods):
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
+
+
+def _number(value):
+    return None if value in (None, "") else float(value)
 
 
 def _first_message(exc):

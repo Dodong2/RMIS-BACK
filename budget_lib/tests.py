@@ -2,6 +2,7 @@
 the CRC Chair forwards it with Mark for checking (Task 19, 2026-10-30: one step, straight to Ready for Certification),
 the Budget Officer certifies (Start Certification -> Certify). Either level can put it On Hold for the Project Leader, who edits and resubmits to the CRC
 Chair. Every step is kept in the review history, each submission with a snapshot of its line items."""
+import io
 from datetime import date
 from decimal import Decimal
 
@@ -448,3 +449,77 @@ class ForwardEmailTests(RMISTestCase):
         from .notifications import campus_reviewers
 
         self.assertEqual(list(campus_reviewers(self.project)), [self.crc])
+
+
+class LibDownloadTests(RMISTestCase):
+    """Task 20 (2026-10-30): the LIB as saved, downloaded in Step 4's Download LIB Template layout. The uploaded
+    workbook isn't kept, so manual entry, the LIB import and Upload via Excel all download from the saved items."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader", campus="Siniloan")
+        self.officer = self.make_user("finance_budget", campus="Siniloan")
+        self.project = Project.objects.create(
+            title="P", project_code="NTP-9", funding_type="core_funded", lead=self.leader, campus="Siniloan",
+            total_cost="15500", start_date=date(2027, 1, 1), target_end_date=date(2028, 3, 31),
+        )
+        self.budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="endorsed")
+        LineItem.objects.create(budget=self.budget, category="mooe", description="Training Expenses", specification="Venue, 2 days",
+                                unit="pax", quantity=Decimal("20"), unit_cost=Decimal("500.50"), amount=Decimal("10010"),
+                                allocations=[{"period": "Y1Q1", "amount": "4010.00"}, {"period": "Y1Q4", "amount": "6000.00"}])
+        LineItem.objects.create(budget=self.budget, category="co", description="Office Equipment", unit="unit",
+                                quantity=Decimal("1"), unit_cost=Decimal("5490"), amount=Decimal("5490"),
+                                allocations=[{"period": "Y2Q1", "amount": "5490.00"}])
+        self.url = f"/api/budget/budgets/{self.budget.id}/export/"
+
+    def download(self, user=None):
+        return self.client_for(user or self.officer).get(self.url)
+
+    def test_the_finance_downloads_the_saved_lib_in_the_template_layout(self):
+        import openpyxl
+
+        response = self.download()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Disposition"], 'attachment; filename="LIB_NTP-9_v1.xlsx"')
+        sheet = openpyxl.load_workbook(io.BytesIO(response.content))["LIB"]
+        header = next(r for r in range(1, 20) if sheet.cell(row=r, column=1).value == "Particulars")
+        self.assertEqual([c.value for c in sheet[header] if c.value],
+                         ["Particulars", "Item", "Specification (optional)", "Unit", "Qty", "Unit Cost (₱)", "Total (₱)",
+                          "Y1Q1", "Y1Q2", "Y1Q3", "Y1Q4", "Y2Q1"])
+        rows = [[c.value for c in sheet[header + i]][:12] for i in (1, 2)]
+        self.assertEqual(rows[0], ["MOOE", "Training Expenses", "Venue, 2 days", "pax", 20, 500.5, 10010, 4010, None, None, 6000, None])
+        self.assertEqual(rows[1], ["CO", "Office Equipment", None, "unit", 1, 5490, 5490, None, None, None, None, 5490])
+        self.assertIn("LEGEND", [sheet.cell(row=r, column=1).value for r in range(header + 1, sheet.max_row + 1)])
+
+    def test_the_download_reads_back_as_the_same_lib(self):
+        from research_projects.importer import read_lib
+
+        rows, errors = read_lib(io.BytesIO(self.download().content), ["Y1Q1", "Y1Q2", "Y1Q3", "Y1Q4", "Y2Q1"])
+
+        self.assertEqual(errors, [])
+        self.assertEqual([(r["category"], r["description"], r["specification"], r["unit"], Decimal(r["amount"])) for r in rows],
+                         [("mooe", "Training Expenses", "Venue, 2 days", "pax", Decimal("10010")),
+                          ("co", "Office Equipment", "", "unit", Decimal("5490"))])
+        self.assertEqual([(a["period"], Decimal(a["amount"])) for a in rows[0]["allocations"] if Decimal(a["amount"])],
+                         [("Y1Q1", Decimal("4010")), ("Y1Q4", Decimal("6000"))])
+
+    def test_who_may_download(self):
+        self.assertEqual(self.download(self.leader).status_code, 200)
+        self.assertEqual(self.download(self.make_user("crc_chair", campus="Siniloan")).status_code, 200)
+        self.assertEqual(self.download(self.make_user("finance_budget", campus="Sta. Cruz")).status_code, 404)
+        self.assertEqual(self.download(self.make_user("project_leader", campus="Siniloan")).status_code, 404)
+        LineItemBudget.objects.filter(pk=self.budget.pk).update(status="submitted")
+        self.assertEqual(self.download().status_code, 404)  # Finance sees it only from For Budget Review on
+        self.assertEqual(self.client.get(self.url).status_code, 401)
+
+    def test_the_empty_template_is_unchanged(self):
+        import openpyxl
+
+        from research_projects.importer import build_lib_template
+
+        sheet = openpyxl.load_workbook(io.BytesIO(build_lib_template("2027-01-01", "2027-12-31", ["Q1", "Q2", "Q3", "Q4"])))["LIB"]
+        header = next(r for r in range(1, 20) if sheet.cell(row=r, column=1).value == "Particulars")
+        self.assertEqual(sheet.cell(row=header + 1, column=7).value, f'=IF(AND(E{header + 1}<>"",F{header + 1}<>""),E{header + 1}*F{header + 1},"")')
+        self.assertIsNone(sheet.cell(row=header + 1, column=1).value)
+        self.assertEqual(sheet.cell(row=header + 30 + 2, column=1).value, "LEGEND")
