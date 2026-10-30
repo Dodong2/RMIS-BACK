@@ -1,3 +1,4 @@
+import base64
 import datetime
 import io
 from unittest import mock
@@ -44,21 +45,91 @@ class StaffNotificationTests(RMISTestCase):
         self.assertEqual(response.status_code, 201, response.data)
         [(to, subject, html)] = self.sent()
         self.assertEqual(to, "staff@lspu.test")
-        self.assertIn("Data collection", subject)
-        self.assertIn("Survey the barangays", html)
+        self.assertEqual(subject, "New Task Assigned — Data collection")
+        for text in ("Survey the barangays", "BRIDGI-1 · Bridging Academia", "October 26, 2026", "October 31, 2026",
+                     "Aimee Chavez", "Add to Google Calendar", "calendar.google.com"):
+            self.assertIn(text, html)
         self.assertIn(f"/tasks?view=calendar&amp;task={response.data['id']}", html)
-        self.assertIn("calendar.google.com", html)
-        self.assertIn("20261031%2F20261101", html)
+        self.assertIn("20261026%2F20261101", html)  # all-day, start to end (Task 25)
 
-    def test_reassigning_emails_the_new_assignee_and_other_edits_do_not(self):
+    def test_reassigning_cancels_for_the_old_assignee_and_emails_the_new_one(self):
         task_id = self.assign().data["id"]
         other = self.make_user("project_staff", email="other@lspu.test")
         client = self.client_for(self.leader)
 
-        client.patch(f"/api/personnel/tasks/{task_id}/", {"title": "Data collection, round 2"}, format="json")
+        client.patch(f"/api/personnel/tasks/{task_id}/", {"priority": "high", "status": "in_progress"}, format="json")
         client.patch(f"/api/personnel/tasks/{task_id}/", {"assignee": other.pk}, format="json")
 
-        self.assertEqual([to for to, _, _ in self.sent()], ["staff@lspu.test", "other@lspu.test"])
+        self.assertEqual([(to, subject.split(" — ")[0]) for to, subject, _ in self.sent()], [
+            ("staff@lspu.test", "New Task Assigned"), ("staff@lspu.test", "Task Removed"), ("other@lspu.test", "New Task Assigned"),
+        ])
+
+    def attachments(self):
+        return [c.kwargs["json"].get("attachment") for c in self.brevo_post.call_args_list]
+
+    def ics(self, index):
+        [attachment] = self.attachments()[index]
+        self.assertEqual(attachment["name"], "task.ics")
+        return base64.b64decode(attachment["content"]).decode().replace("\r\n ", "")  # unfolded
+
+    def test_assignment_attaches_an_all_day_ics_without_invented_times(self):
+        task_id = self.assign(description="Survey; barangays, then encode").data["id"]
+        ics = self.ics(0)
+        self.assertIn("METHOD:PUBLISH", ics)
+        self.assertIn(f"UID:rmis-task-{task_id}@", ics)
+        self.assertIn("DTSTART;VALUE=DATE:20261026", ics)
+        self.assertIn("DTEND;VALUE=DATE:20261101", ics)
+        self.assertNotIn("T0", ics.split("DTSTART")[1].split("\r\n")[0])  # a date, not a time
+        self.assertIn("SUMMARY:[RMIS] Data collection", ics)
+        self.assertIn("Survey\\; barangays\\, then encode", ics)
+        [raw] = self.attachments()[0]
+        self.assertTrue(all(len(line) <= 75 for line in base64.b64decode(raw["content"]).split(b"\r\n")))
+
+    def test_a_task_without_dates_gets_no_calendar_event(self):
+        """Only older tasks can lack dates (the form requires them since 2026-10-19)."""
+        from . import notifications
+        task = Task.objects.create(project=self.project, title="Data collection", assignee=self.staff, assigned_by=self.leader)
+        notifications.task_assigned(task)
+        [(_, _, html)] = self.sent()
+        self.assertNotIn("calendar.google.com", html)
+        self.assertIn("no calendar event", html)
+        self.assertEqual(self.attachments(), [None])
+
+    def test_changing_the_schedule_e_mails_the_update_with_the_same_event_uid(self):
+        task_id = self.assign().data["id"]
+        first = self.ics(0)
+        client = self.client_for(self.leader)
+        client.patch(f"/api/personnel/tasks/{task_id}/", {"status": "in_progress"}, format="json")  # not a calendar field
+        self.assertEqual(len(self.sent()), 1)
+
+        with mock.patch("django.utils.timezone.now", return_value=timezone.now() + datetime.timedelta(seconds=5)):
+            client.patch(f"/api/personnel/tasks/{task_id}/", {"due_date": "2026-11-06", "title": "Data collection (ext.)"}, format="json")
+
+        to, subject, html = self.sent()[1]
+        self.assertEqual((to, subject), ("staff@lspu.test", "Task Updated — Data collection (ext.)"))
+        for text in ("October 31, 2026", "November 06, 2026", "Data collection (ext.)", "delete it and add the task again"):
+            self.assertIn(text, html)
+        updated = self.ics(1)
+        uid = lambda ics: next(line for line in ics.split("\r\n") if line.startswith("UID:"))  # noqa: E731
+        seq = lambda ics: int(next(line for line in ics.split("\r\n") if line.startswith("SEQUENCE:"))[9:])  # noqa: E731
+        self.assertEqual(uid(updated), uid(first))
+        self.assertGreater(seq(updated), seq(first))
+        self.assertIn("DTEND;VALUE=DATE:20261107", updated)
+
+    def test_deleting_a_task_sends_its_assignee_a_cancellation(self):
+        task_id = self.assign().data["id"]
+        self.assertEqual(self.client_for(self.leader).delete(f"/api/personnel/tasks/{task_id}/").status_code, 204)
+        to, subject, html = self.sent()[1]
+        self.assertEqual((to, subject), ("staff@lspu.test", "Task Removed — Data collection"))
+        ics = self.ics(1)
+        self.assertIn("METHOD:CANCEL", ics)
+        self.assertIn(f"UID:rmis-task-{task_id}@", ics)
+        self.assertIn("STATUS:CANCELLED", ics)
+
+    def test_only_the_assignee_gets_the_task_e_mail(self):
+        self.make_user("project_staff", email="bystander@lspu.test")
+        self.assign()
+        self.assertEqual([to for to, _, _ in self.sent()], ["staff@lspu.test"])
 
     def test_mail_failure_does_not_undo_the_assignment(self):
         self.brevo_post.side_effect = ConnectionError("Brevo down")

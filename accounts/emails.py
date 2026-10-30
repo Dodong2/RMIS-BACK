@@ -1,3 +1,4 @@
+import base64
 import logging
 
 import requests
@@ -7,8 +8,17 @@ from .models import User
 logger = logging.getLogger(__name__)
 
 
-def send_brevo_email(to_email, subject, html_content):
-    """Returns True if Brevo accepted the e-mail. A failure is logged, never raised, so the caller's save stands."""
+def send_brevo_email(to_email, subject, html_content, attachments=None):
+    """Returns True if Brevo accepted the e-mail. A failure is logged, never raised, so the caller's save stands.
+    attachments: optional [(filename, bytes)], e.g. a task's .ics (Task 25)."""
+    payload = {
+        "sender": {"name": settings.BREVO_SENDER_NAME, "email": settings.BREVO_SENDER_EMAIL},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "htmlContent": html_content,
+    }
+    if attachments:
+        payload["attachment"] = [{"name": name, "content": base64.b64encode(data).decode()} for name, data in attachments]
     try:
         resp = requests.post(
             "https://api.brevo.com/v3/smtp/email",
@@ -17,12 +27,7 @@ def send_brevo_email(to_email, subject, html_content):
                 "api-key": settings.BREVO_API_KEY,
                 "content-type": "application/json",
             },
-            json={
-                "sender": {"name": settings.BREVO_SENDER_NAME, "email": settings.BREVO_SENDER_EMAIL},
-                "to": [{"email": to_email}],
-                "subject": subject,
-                "htmlContent": html_content,
-            },
+            json=payload,
             timeout=10,
         )
     except requests.RequestException as error:

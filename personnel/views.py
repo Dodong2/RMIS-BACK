@@ -131,10 +131,18 @@ class TaskListCreateView(generics.ListCreateAPIView):
 
 def notify_assignee(task):
     """Brevo e-mail to the assignee (client follow-up 2026-10-02). A mail failure must not undo the assignment."""
+    mail(notifications.task_assigned, task)
+
+
+def mail(send, task, *args, **kwargs):
     try:
-        notifications.task_assigned(task)
+        send(task, *args, **kwargs)
     except Exception:
-        logger.exception("Could not e-mail task %s to %s", task.pk, task.assignee.email)
+        logger.exception("Could not send %s for task %s", send.__name__, task.pk)
+
+
+# Task 25 (2026-10-30): a change to these is e-mailed to the assignee with an updated calendar event.
+CALENDAR_FIELDS = (("title", "Task"), ("description", "Description"), ("start_date", "Start Date"), ("due_date", "End Date"))
 
 
 class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -154,10 +162,23 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
         return qs
 
     def perform_update(self, serializer):
-        previous = serializer.instance.assignee_id
+        previous = serializer.instance.assignee
+        before = {field: getattr(serializer.instance, field) for field, _ in CALENDAR_FIELDS}
         task = serializer.save()
-        if task.assignee_id != previous:
+        if task.assignee_id != previous.pk:
+            mail(notifications.task_removed, task, previous, reassigned=True)
             notify_assignee(task)
+            return
+        changes = [(label, before[field], getattr(task, field))
+                   for field, label in CALENDAR_FIELDS if before[field] != getattr(task, field)]
+        if changes:
+            mail(notifications.task_updated, task, changes)
+
+    def perform_destroy(self, instance):
+        pk = instance.pk
+        instance.delete()
+        instance.pk = pk  # keeps the calendar UID for the cancellation
+        mail(notifications.task_removed, instance, instance.assignee)
 
 
 class TaskUpdateListCreateView(generics.ListCreateAPIView):
