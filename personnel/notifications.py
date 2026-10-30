@@ -173,3 +173,19 @@ def task_removed(task, recipient, reassigned=False):
         "task.ics cancels the earlier .ics event.</p>"
     )
     send_brevo_email(recipient.email, f"Task Removed — {task.title}", html, [("task.ics", ics)] if ics else None)
+
+
+def task_reminder(task):
+    """Task 25 (2026-10-30): the every-3-days reminder (send_scheduled_reminders) to the task's assignee. Returns
+    (subject, html) so the caller sends it once per reminder day through ReminderLog."""
+    html = (
+        f"<p>Hi {escape(display_name(task.assignee))},</p>"
+        "<p>This is a reminder about your assigned project task.</p>"
+        f"{table(['Item', 'Details'], _task_rows(task)[:5])}"
+        "<p>Please open your RMIS account to review your task progress and ensure that the task is completed within the "
+        "scheduled period.</p>"
+        f"<p>{button(calendar_link(task), 'Open task in RMIS')}</p>"
+        "<p style='color:#64748b;font-size:12px'>You get this reminder every 3 days from the start date until the task "
+        "is marked Done.</p>"
+    )
+    return f"Task Reminder — {task.title}", html
