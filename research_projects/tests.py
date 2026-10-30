@@ -2263,3 +2263,52 @@ class ProjectReviewWorkflowTests(RMISTestCase):
             response = self.client_for(self.leader).patch(f"/api/projects/{self.project.pk}/", {"title": f"Fixed {hold}"}, format="json")
 
             self.assertEqual(response.status_code, 200, response.data)
+
+
+class ProposalPdfTests(RMISTestCase):
+    """Task 19 (2026-10-30): View Other Information opens the proposal's saved information as a PDF, in the Validate &
+    Register Preview's layout with the current fields only (no sections removed 2026-10-29, no Annex A)."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader", campus="Siniloan")
+        self.project = Project.objects.create(
+            title="Bridging Academia", project_code="NTP-77", funding_type="core_funded", lead=self.leader, campus="Siniloan",
+            total_cost="15000", start_date=datetime.date(2027, 1, 1), target_end_date=datetime.date(2027, 12, 31), objectives="Train faculty",
+            background="Old background", methodology="Old methodology",
+        )
+        self.url = f"/api/projects/{self.project.pk}/proposal-pdf/"
+
+    def test_the_leader_and_the_system_admin_get_an_inline_pdf(self):
+        for user in (self.leader, self.make_user("system_admin")):
+            response = self.client_for(user).get(self.url)
+            self.assertEqual(response.status_code, 200, user.role.code)
+            self.assertEqual(response["Content-Type"], "application/pdf")
+            self.assertEqual(response["Content-Disposition"], 'inline; filename="Proposal_NTP-77.pdf"')
+            self.assertTrue(response.content.startswith(b"%PDF-"))
+
+    def test_outside_the_viewers_scope_is_404(self):
+        for user in (self.make_user("project_leader", campus="Siniloan"), self.make_user("crc_chair", campus="Sta. Cruz")):
+            self.assertEqual(self.client_for(user).get(self.url).status_code, 404, user.role.code)
+        self.assertEqual(self.client.get(self.url).status_code, 401)
+
+    def test_only_the_current_fields_are_in_it(self):
+        from reports.forms import proposal_form, render_form_csv
+
+        text = render_form_csv(proposal_form(self.project.pk, current=True)).decode()
+
+        for shown in ("Bridging Academia", "III. OBJECTIVES OF THE STUDY", "Train faculty", "X. BUDGET REQUIREMENTS",
+                      "VII. TARGET BENEFICIARIES", "RDE AGENDA"):
+            self.assertIn(shown, text)
+        for removed in ("RESEARCH PRIORITY AREA", "II. BACKGROUND", "Old background", "IV. PROJECT DESCRIPTIONS",
+                        "VI. SOCIO-ECONOMIC", "VIII. MONITORING", "IX. LIST OF REFERENCES", "LIB APPROVAL",
+                        "ENDORSEMENT PAGE", "CONTACT NO/S.", "IMPLEMENTING UNIT"):
+            self.assertNotIn(removed, text)
+
+    def test_the_saved_sf018_form_is_unchanged(self):
+        from reports.forms import proposal_form, render_form_csv
+
+        text = render_form_csv(proposal_form(self.project.pk)).decode()
+
+        for kept in ("II. BACKGROUND OF THE STUDY", "Old background", "ENDORSEMENT PAGE", "LIB APPROVAL", "CONTACT NO/S."):
+            self.assertIn(kept, text)

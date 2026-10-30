@@ -262,10 +262,17 @@ def _work_plan_block(data):
             "header_fill": PROPOSAL_FILL, "cell_fills": fills, "bold_first": True, "narrow_from": 3}
 
 
-def proposal_form(project_id):
+# Sections the registration no longer collects (client 2026-10-29), left out of the current-fields form (current=True)
+REMOVED_PROPOSAL_SECTIONS = ("RESEARCH PRIORITY AREA", "II. BACKGROUND OF THE STUDY", "IV. PROJECT DESCRIPTIONS/METHODOLOGY",
+                             "VI. SOCIO-ECONOMIC SIGNIFICANCE", "VIII. MONITORING/EVALUATION", "IX. LIST OF REFERENCES",
+                             "LIB APPROVAL")
+
+
+def proposal_form(project_id, current=False):
     """The Research Proposal Form (LSPU-RDO-SF-018) of a registered project, laid out like the wizard's Research
     Proposal Form Preview (client request 2026-10-09). Built from importer.proposal_preview, the same data the
-    preview shows."""
+    preview shows. current=True (Task 19, View Other Information) keeps only what the Preview shows today (Task 14):
+    no removed sections, no Annex A, optional Section I lines only when filled."""
     from research_projects.importer import proposal_preview
     from research_projects.models import Project
 
@@ -325,6 +332,11 @@ def proposal_form(project_id):
     )]
     submitted = f" · {_form_date(data['proposal_submitted_on'])}" if data["proposal_submitted_on"] else ""
 
+    def optional(label, value):
+        if current and not value:
+            return []
+        return [[label, value if label == "COOPERATING AGENCY/IES" else value or "—"]]
+
     blocks = [
         {"kind": "header", "lines": UNIVERSITY, "title": "RESEARCH PROPOSAL FORM (LSPU-FUNDED RESEARCH)"},
         {
@@ -336,17 +348,17 @@ def proposal_form(project_id):
             "rows": [
                 ["TITLE", data["title"] or "—"],
                 ["PROJECT LEADER/GENDER", _with_gender({"name": data["lead_name"], "gender": data["lead_gender"]}) or "—"],
-                ["CO-PROJECT LEADER/GENDER", "; ".join(map(_with_gender, data["co_leaders"])) or "—"],
-                *team,
+                *([] if current and not data["co_leaders"] else [["CO-PROJECT LEADER/GENDER", "; ".join(map(_with_gender, data["co_leaders"])) or "—"]]),
+                *([] if current and not data["team"] else team),
                 ["DURATION", duration or "—"],
                 ["START DATE", _form_date(data["start_date"]) or "—"],
                 ["END DATE", _form_date(data["target_end_date"]) or "—"],
                 ["TOTAL PROJECT/STUDY COST", total_cost],
-                ["IMPLEMENTING UNIT", data["implementing_unit"] or "—"],
+                *optional("IMPLEMENTING UNIT", data["implementing_unit"]),
                 ["CAMPUS", f"{data['campus']} Campus" if data["campus"] else "—"],
-                ["CONTACT NO/S.", data["contact_number"] or "—"],
-                ["E-MAIL ADDRESS", data["lead_email"] or "—"],
-                ["COOPERATING AGENCY/IES", data["cooperating_agencies"]],
+                *optional("CONTACT NO/S.", data["contact_number"]),
+                *optional("E-MAIL ADDRESS", data["lead_email"]),
+                *optional("COOPERATING AGENCY/IES", data["cooperating_agencies"]),
             ],
             "widths": [30, 70],
         },
@@ -429,6 +441,10 @@ def proposal_form(project_id):
             "bold_first": False,
         },
     ]
+    if current:
+        annex = next(i for i, b in enumerate(blocks) if b["kind"] == "page_break")
+        blocks = [b for b in blocks[:annex] if (b.get("header") or [[None]])[0][0] not in REMOVED_PROPOSAL_SECTIONS]
+        return {"title": "Submitted Approved Proposal Information", "landscape": False, "blocks": blocks}
     if data["college"]:
         blocks.append({"kind": "line", "text": f"College Unit: {data['college']}", "italic": True})
     return {"title": "Research Proposal Form", "landscape": False, "blocks": blocks}

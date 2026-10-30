@@ -423,6 +423,24 @@ class ProjectStatusHistoryView(ProjectVisibleMixin, generics.ListAPIView):
         return ProjectStatusHistory.objects.filter(project_id=self.kwargs["pk"]).select_related("changed_by").order_by("-changed_at", "-id")
 
 
+class ProposalPdfView(ProjectVisibleMixin, generics.GenericAPIView):
+    """GET projects/<id>/proposal-pdf/: the proposal's saved information as a PDF in the Validate & Register Preview's
+    layout, current fields only (Task 19, 2026-10-30: View Other Information). Shown inline so it opens in a tab;
+    404 outside visible_projects."""
+
+    queryset = Project.objects.all()
+    project_lookup = ""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        from reports.forms import proposal_form, render_form_pdf
+
+        project = self.get_object()
+        response = HttpResponse(render_form_pdf(proposal_form(project.pk, current=True)), content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="Proposal_{project.project_code}.pdf"'
+        return response
+
+
 class StudyListCreateView(AtomicMutationMixin, ProjectVisibleMixin, generics.ListCreateAPIView):
     serializer_class = StudySerializer
 

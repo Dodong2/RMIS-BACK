@@ -111,6 +111,9 @@ class DocumentUploadTests(RMISTestCase):
         self.assertEqual(Document.objects.count(), 1)
 
 
+PDF = b"%PDF-1.4 approved"
+
+
 class StagedUploadTests(RMISTestCase):
     """Register Approved Project uploads documents before the project exists, then trades the staged_token for a
     real Document once the project is created."""
@@ -122,9 +125,9 @@ class StagedUploadTests(RMISTestCase):
             title="P", project_code="P-1", funding_type="core_funded", lead=self.make_user("project_leader"),
         )
 
-    def stage(self, user, name="NOA.pdf"):
+    def stage(self, user, name="NOA.pdf", content=b"data", **extra):
         return self.client_for(user).post("/api/documents/documents/staged/", {
-            "file": SimpleUploadedFile(name, b"data", content_type="application/pdf"),
+            "file": SimpleUploadedFile(name, content, content_type="application/pdf"), **extra,
         }, format="multipart")
 
     def register(self, user, token, document_type="other"):
@@ -135,7 +138,7 @@ class StagedUploadTests(RMISTestCase):
     def test_step_7_saves_the_notice_of_approval_ntp_and_moa_as_their_own_types(self):
         """Client 2026-10-24: Notice of Approval, Notice to Proceed and MOA are separate required attachments."""
         for document_type, name in (("notice_of_approval", "NOA.pdf"), ("ntp", "NTP.pdf"), ("moa", "MOA.pdf")):
-            response = self.register(self.admin, self.stage(self.admin, name).data["staged_token"], document_type)
+            response = self.register(self.admin, self.stage(self.admin, name, PDF).data["staged_token"], document_type)
 
             self.assertEqual(response.status_code, 201, response.data)
             self.assertEqual((response.data["document_type"], response.data["version_number"]), (document_type, 1))
@@ -215,3 +218,56 @@ class StorageDeleteTests(RMISTestCase):
         self.assertTrue(url.endswith(f"/storage/v1/object/{settings.SUPABASE_STORAGE_BUCKET}"))
         self.assertEqual(delete.call_args.kwargs["json"], {"prefixes": ["P-1/ntp/v1_NTP.pdf", "P-1/moa/v1_MOA.pdf"]})
         delete.return_value.raise_for_status.assert_called_once()
+
+
+class SupportingDocumentsPdfOnlyTests(RMISTestCase):
+    """Task 19 (2026-10-30): Approve Proposal, NTP and MOA (Register Approved Project > Supporting Documents) must be
+    real PDFs, checked by extension and content, both at the staged upload and when attached to the project."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader")
+        self.project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader)
+
+    def stage(self, name, content, **extra):
+        return self.client_for(self.leader).post("/api/documents/documents/staged/", {
+            "file": SimpleUploadedFile(name, content, content_type="application/pdf"), **extra,
+        }, format="multipart")
+
+    def attach(self, document_type, **payload):
+        return self.client_for(self.leader).post("/api/documents/documents/", {
+            "project": self.project.id, "document_type": document_type, "stage": "inception", **payload,
+        }, format="multipart")
+
+    def test_a_real_pdf_is_accepted_for_every_supporting_document(self):
+        for document_type in ("notice_of_approval", "ntp", "moa"):
+            staged = self.stage("NTP.pdf", PDF, document_type=document_type)
+            self.assertEqual(staged.status_code, 201, staged.data)
+            self.assertEqual(self.attach(document_type, staged_token=staged.data["staged_token"]).status_code, 201, document_type)
+            direct = self.attach(document_type, file=SimpleUploadedFile("again.pdf", PDF))
+            self.assertEqual(direct.status_code, 201, direct.data)
+
+    def test_a_word_file_or_a_renamed_file_is_refused_at_the_staged_upload(self):
+        for name, content in (("NTP.docx", b"PK\x03\x04 word"), ("NTP.pdf", b"PK\x03\x04 renamed docx")):
+            response = self.stage(name, content, document_type="ntp")
+            self.assertEqual(response.status_code, 400, name)
+            self.assertEqual(str(response.data["file"][0]), "Supporting Documents must be PDF files.")
+        self.upload_document.assert_not_called()
+
+    def test_a_non_pdf_staged_without_its_type_is_refused_when_attached(self):
+        token = self.stage("NTP.pdf", b"not a pdf").data["staged_token"]  # older clients don't send document_type
+
+        response = self.attach("notice_of_approval", staged_token=token)
+
+        self.assertEqual(response.status_code, 400)
+        self.move_document.assert_not_called()
+        self.assertFalse(Document.objects.exists())
+
+    def test_a_direct_non_pdf_upload_is_refused(self):
+        for name, content in (("MOA.docx", b"PK word"), ("MOA.pdf", b"PK renamed")):
+            self.assertEqual(self.attach("moa", file=SimpleUploadedFile(name, content)).status_code, 400, name)
+        self.assertFalse(Document.objects.exists())
+
+    def test_other_document_types_keep_word_and_excel(self):
+        self.assertEqual(self.attach("other", file=SimpleUploadedFile("LIB.xlsx", b"PK sheet")).status_code, 201)
+        self.assertEqual(self.stage("Notes.docx", b"PK word").status_code, 201)

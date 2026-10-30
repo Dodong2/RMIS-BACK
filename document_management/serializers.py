@@ -31,6 +31,11 @@ ALLOWED_FILE_TYPES = {
 }
 
 
+# Task 19 (2026-10-30): Register Approved Project's Supporting Documents (Approve Proposal, NTP, MOA) must be real
+# PDFs, checked by extension and by the file's first bytes (a renamed .docx is refused).
+PDF_ONLY_TYPES = ("notice_of_approval", "ntp", "moa")
+PDF_MAGIC = b"%PDF-"
+
 STAGED_SALT = "document_management.staged"
 STAGED_MAX_AGE = 24 * 60 * 60  # a staged upload must be registered within a day
 
@@ -46,6 +51,18 @@ def _validate_file(file_obj):
         raise serializers.ValidationError(
             {"file": f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_FILE_TYPES))}."}
         )
+
+
+def _is_pdf(file_obj):
+    file_obj.seek(0)
+    head = file_obj.read(len(PDF_MAGIC))
+    file_obj.seek(0)
+    return file_obj.name.lower().endswith(".pdf") and head == PDF_MAGIC
+
+
+def _require_pdf(is_pdf):
+    if not is_pdf:
+        raise serializers.ValidationError({"file": "Supporting Documents must be PDF files."})
 
 
 def _storage_error(exc, path):
@@ -81,10 +98,16 @@ class StagedUploadSerializer(serializers.Serializer):
     gets a signed token that DocumentSerializer later trades for a real Document by moving the file into place."""
 
     file = serializers.FileField()
+    document_type = serializers.CharField(required=False)
 
     def validate_file(self, file_obj):
         _validate_file(file_obj)
         return file_obj
+
+    def validate(self, attrs):
+        if attrs.get("document_type") in PDF_ONLY_TYPES:
+            _require_pdf(_is_pdf(attrs["file"]))
+        return attrs
 
     def create(self, validated_data):
         file_obj = validated_data["file"]
@@ -96,7 +119,8 @@ class StagedUploadSerializer(serializers.Serializer):
         except requests.RequestException as exc:
             raise _storage_error(exc, path)
         token = signing.dumps(
-            {"path": path, "name": file_obj.name, "size": file_obj.size, "user": user.id}, salt=STAGED_SALT,
+            {"path": path, "name": file_obj.name, "size": file_obj.size, "user": user.id, "pdf": _is_pdf(file_obj)},
+            salt=STAGED_SALT,
         )
         return {"staged_token": token, "file_name": file_obj.name, "file_size": file_obj.size}
 
@@ -155,6 +179,8 @@ class DocumentSerializer(serializers.ModelSerializer):
             _validate_file(file_obj)
         else:
             attrs["staged"] = load_staged(token, self.context["request"].user)
+        if attrs.get("document_type") in PDF_ONLY_TYPES:
+            _require_pdf(_is_pdf(file_obj) if file_obj else attrs["staged"].get("pdf", False))
         return attrs
 
     def create(self, validated_data):
