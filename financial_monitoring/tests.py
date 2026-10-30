@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
+import requests
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItem, LineItemBudget
 from financial_monitoring.models import BudgetRealignment, Disbursement, ProcurementRequest
@@ -348,3 +349,85 @@ class YearBudgetTests(RMISTestCase):
         self.assertEqual(self.file(30000).status_code, 500)
         self.assertFalse(ProcurementRequest.objects.exists())
         self.assertEqual(self.figures(1)["available"], 100000)
+
+
+class ProcurementEmailTests(RMISTestCase):
+    """Task 23 (2026-10-30): Brevo e-mails when a request is filed, received, returned and completed; campus-scoped,
+    once per step, after commit."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader", first_name="Lea", last_name="Lim", campus="Siniloan")
+        project = Project.objects.create(
+            title="Smart <Farm>", project_code="NTP-2026-007", funding_type="core_funded", lead=self.leader, campus="Siniloan",
+        )
+        budget = LineItemBudget.objects.create(project=project, version_number=1, status="certified")
+        self.item = with_year_one(LineItem.objects.create(
+            budget=budget, category="mooe", description="Internet Subscription Expenses", amount=10000,
+        ))
+        self.officers = [self.make_user("procurement_officer_lib", campus="Siniloan"),
+                         self.make_user("procurement_officer_lib", campus="siniloan")]
+        self.make_user("procurement_officer_lib", campus="Sta. Cruz")
+        self.make_user("procurement_officer_lib", campus="Siniloan", is_active=False)
+        self.finance = self.make_user("finance_budget", campus="Siniloan")
+        self.make_user("finance_budget", campus="Sta. Cruz")
+        self.officer_client = self.client_for(self.officers[0])
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client_for(self.leader).post(PR_URL, {
+                "line_item": self.item.id, "description": "Fiber plan", "amount": "4000", "project_year": 1, "quarter": 2,
+            })
+        self.assertEqual(response.status_code, 201, response.data)
+        self.pr = ProcurementRequest.objects.get()
+
+    def sent(self):
+        return [call.kwargs["json"] for call in self.brevo_post.call_args_list]
+
+    def post(self, path, data=None):
+        self.brevo_post.reset_mock()
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.officer_client.post(f"{PR_URL}{self.pr.id}/{path}/", data or {})
+
+    def test_filing_e_mails_every_active_procurement_officer_of_the_campus(self):
+        mails = self.sent()
+        self.assertEqual(sorted(m["to"][0]["email"] for m in mails), sorted(u.email for u in self.officers))
+        self.assertEqual(mails[0]["subject"], "New Procurement Request — Smart <Farm>")
+        for text in ("NTP-2026-007", "Smart &lt;Farm&gt;", "Lea Lim", self.leader.email, "Maintenance and Other Operating Expenses",
+                     "Internet Subscription Expenses", "Year 1", "Q2", "₱4,000.00", "Pending Procurement Requests"):
+            self.assertIn(text, mails[0]["htmlContent"])
+
+    def test_received_e_mails_the_requester_once(self):
+        self.assertEqual(self.post("receive").status_code, 200)
+        mails = self.sent()
+        self.assertEqual([m["to"][0]["email"] for m in mails], [self.leader.email])
+        self.assertEqual(mails[0]["subject"], "Procurement Request Received — Smart <Farm>")
+        self.assertIn("received by the Procurement Office", mails[0]["htmlContent"])
+        self.assertEqual(self.post("receive").status_code, 400)
+        self.assertEqual(self.sent(), [])
+
+    def test_returned_for_revision_e_mails_the_requester_with_the_remarks(self):
+        self.post("receive")
+        self.assertEqual(self.post("status", {"status": "returned_for_revision"}).status_code, 400)
+        self.assertEqual(self.sent(), [])
+        self.assertEqual(self.post("status", {"status": "returned_for_revision", "remarks": "A 42-inch unit is enough"}).status_code, 200)
+        mails = self.sent()
+        self.assertEqual([m["to"][0]["email"] for m in mails], [self.leader.email])
+        self.assertIn("Returned for Revision", mails[0]["subject"])
+        self.assertIn("A 42-inch unit is enough", mails[0]["htmlContent"])
+
+    def test_completed_e_mails_the_requester_and_campus_finance_once(self):
+        self.post("receive")
+        self.assertEqual(self.post("status", {"status": "for_procurement"}).status_code, 200)
+        self.assertEqual(self.sent(), [])  # in-between statuses don't e-mail
+        self.assertEqual(self.post("status", {"status": "completed"}).status_code, 200)
+        mails = {m["to"][0]["email"]: m for m in self.sent()}
+        self.assertEqual(sorted(mails), sorted([self.leader.email, self.finance.email]))
+        self.assertIn("Awaiting Payment", mails[self.finance.email]["subject"])
+        self.assertIn("Payment is confirmed separately", mails[self.leader.email]["htmlContent"])
+        self.assertEqual(self.post("status", {"status": "completed"}).status_code, 400)
+        self.assertEqual(self.sent(), [])
+
+    def test_a_failed_send_keeps_the_saved_step(self):
+        self.brevo_post.side_effect = requests.ConnectionError("Brevo down")
+        self.assertEqual(self.post("receive").status_code, 200)
+        self.pr.refresh_from_db()
+        self.assertEqual(self.pr.status, "under_review")

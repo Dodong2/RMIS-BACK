@@ -14,6 +14,7 @@ from accounts.permissions import BudgetScopedMixin, HasRole, role_can, scoped_pr
 from budget_lib.models import LineItem, LineItemBudget
 from config.concurrency import idempotent, lock
 from realtime.notify import notify, project_audience
+from . import notifications
 from .models import (
     PROCUREMENT_CLOSED_STATUSES, PROCUREMENT_DELAY_DAYS, BudgetRealignment, Disbursement, ProcurementRequest,
     ProcurementStatusEvent,
@@ -224,6 +225,7 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
         procurement = serializer.save(requested_by=self.request.user)
         record_procurement_event(procurement, "", self.request.user)
         procurement_signal("procurement.created", procurement)
+        transaction.on_commit(lambda: notifications.request_filed(procurement))
 
 
 class ProcurementReceiveView(APIView):
@@ -242,6 +244,7 @@ class ProcurementReceiveView(APIView):
         procurement.save()
         record_procurement_event(procurement, "requested", request.user)
         procurement_signal("procurement.updated", procurement)
+        transaction.on_commit(lambda: notifications.request_received(procurement))
         return Response(ProcurementRequestSerializer(procurement).data)
 
 
@@ -266,6 +269,10 @@ class ProcurementStatusView(APIView):
         procurement.save()
         record_procurement_event(procurement, previous, request.user, serializer.validated_data.get("remarks", ""))
         procurement_signal("procurement.updated", procurement)
+        if procurement.status == "returned_for_revision":
+            transaction.on_commit(lambda: notifications.request_returned(procurement))
+        elif procurement.status == "completed":
+            transaction.on_commit(lambda: notifications.request_completed(procurement))
         return Response(ProcurementRequestSerializer(procurement).data)
 
 
