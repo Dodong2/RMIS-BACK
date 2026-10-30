@@ -4,7 +4,7 @@ from django.db.models import Sum
 from django.db.models.functions import TruncMonth
 
 from budget_lib.models import LineItem
-from financial_monitoring.models import Disbursement
+from financial_monitoring.models import Disbursement, ProcurementRequest
 
 MIN_HISTORY_MONTHS = 6
 MIN_HISTORY_FOR_HOLDOUT = 9
@@ -75,6 +75,18 @@ def _budget_snapshot(project):
     return approved, actual
 
 
+def unpaid_commitments(project):
+    """Procurement requests of the current LIB that still reserve money: not cancelled and not paid (a paid request's
+    Disbursement is already in the actual, so it is never counted twice). Same rule as uncommitted_balance."""
+    return (
+        ProcurementRequest.objects.filter(line_item__budget__project=project, line_item__budget__is_current=True)
+        .exclude(status="cancelled")
+        .filter(disbursement__isnull=True)
+        .aggregate(total=Sum("amount"))["total"]
+        or 0
+    )
+
+
 def run_forecast(project, run_by):
     from .models import ForecastRun, MonthlyForecast
 
@@ -107,7 +119,8 @@ def run_forecast(project, run_by):
 
     approved, actual = _budget_snapshot(project)
     projected_total = float(actual or 0) + sum(mean)
-    is_overrun_risk = approved is not None and projected_total > float(approved)
+    # Task 27 (2026-10-30, Carl Q5): the flag also counts unpaid commitments; projected_total stays actual + forecast.
+    is_overrun_risk = approved is not None and projected_total + float(unpaid_commitments(project)) > float(approved)
 
     run = ForecastRun.objects.create(
         project=project,

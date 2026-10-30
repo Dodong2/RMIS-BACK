@@ -3,12 +3,17 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import role_can
+from accounts.permissions import role_can, scoped_projects
 from research_projects.models import Project
 
 from . import services
 from .models import FORECASTABLE_FUNDING_TYPES, ForecastRun
 from .serializers import ForecastRunSerializer
+
+
+def in_scope(queryset, user):
+    allowed = scoped_projects(user)
+    return queryset if allowed is None else queryset.filter(project__in=allowed)
 
 
 class ForecastRunTriggerView(APIView):
@@ -18,10 +23,11 @@ class ForecastRunTriggerView(APIView):
     def post(self, request):
         if not role_can(request.user, "forecasting.run"):
             return Response(
-                {"detail": "Only DRD/VPREI/Budget Officer/system_admin may run a forecast."},
+                {"detail": "Only VPREI/Budget Officer/Project Leader/system_admin may run a forecast."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        project = get_object_or_404(Project, pk=request.data.get("project"))
+        allowed = scoped_projects(request.user)
+        project = get_object_or_404(Project if allowed is None else allowed, pk=request.data.get("project"))
         if project.funding_type not in FORECASTABLE_FUNDING_TYPES:
             return Response(
                 {"detail": f"Forecasting only supports {FORECASTABLE_FUNDING_TYPES} projects."},
@@ -36,7 +42,7 @@ class ForecastRunListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = ForecastRun.objects.all()
+        qs = in_scope(ForecastRun.objects.all(), self.request.user)
         project_id = self.request.query_params.get("project")
         if project_id:
             qs = qs.filter(project_id=project_id)
@@ -44,6 +50,8 @@ class ForecastRunListView(generics.ListAPIView):
 
 
 class ForecastRunDetailView(generics.RetrieveAPIView):
-    queryset = ForecastRun.objects.all()
     serializer_class = ForecastRunSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return in_scope(ForecastRun.objects.all(), self.request.user)
