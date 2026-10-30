@@ -657,3 +657,65 @@ class FinanceEditTests(RMISTestCase):
         LineItemBudget.objects.filter(pk=self.budget.pk).update(status="submitted")
         self.assertEqual(self.update([{"id": self.a.id, "specification": "x", "reason": "x"}]).status_code, 404)  # not forwarded yet
         self.assertEqual(LineItemEdit.objects.count(), 2)  # only the certifying edit
+
+
+class CertifyAndCommentTests(RMISTestCase):
+    """Task 20 (2026-10-30): certifying activates the project and e-mails its leader once; Finance/Accounting/Budget can
+    leave review comments before certification without changing the status."""
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader", campus="Siniloan")
+        self.officer = self.make_user("finance_budget", campus="Siniloan", first_name="Fe", last_name="Cruz")
+        self.project = Project.objects.create(
+            title="P", project_code="NTP-9", funding_type="core_funded", lead=self.leader, campus="Siniloan",
+            total_cost="1000", start_date=date(2027, 1, 1), target_end_date=date(2027, 12, 31),
+        )
+        self.budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="certifying")
+        LineItem.objects.create(budget=self.budget, category="mooe", description="Training Expenses", amount=Decimal("1000"),
+                                allocations=[{"period": "Q1", "amount": "1000.00"}])
+        self.brevo_post.reset_mock()
+
+    def act(self, step, user=None, **data):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client_for(user or self.officer).post(f"/api/budget/budgets/{self.budget.id}/{step}/", data, format="json")
+
+    def sent(self):
+        return [call.kwargs["json"] for call in self.brevo_post.call_args_list]
+
+    def test_certifying_activates_the_project_and_e_mails_its_leader_once(self):
+        response = self.act("certify")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        project = self.client_for(self.leader).get(f"/api/projects/{self.project.pk}/").data
+        self.assertEqual(project["review_status_label"], "Active")
+        self.assertEqual(self.act("certify").status_code, 400)  # no second certification
+        mails = self.sent()
+        self.assertEqual([m["to"][0]["email"] for m in mails], [self.leader.email])
+        self.assertEqual(mails[0]["subject"], "Project Proposal Certified — P is now Active")
+        for text in ("now <b>Active</b>", "NTP-9", "Fe Cruz", "₱1,000.00", "assign tasks"):
+            self.assertIn(text, mails[0]["htmlContent"])
+
+    def test_a_failed_e_mail_keeps_the_certification(self):
+        self.brevo_post.side_effect = requests.ConnectionError("Brevo down")
+        self.assertEqual(self.act("certify").status_code, 200)
+        self.budget.refresh_from_db()
+        self.assertEqual(self.budget.status, "certified")
+
+    def test_after_certification_the_lib_is_read_only(self):
+        self.act("certify")
+        self.assertEqual(self.act("finance-edit", items=[{"id": self.budget.line_items.get().id, "specification": "x", "reason": "x"}]).status_code, 400)
+        self.assertEqual(self.act("comment", remarks="Late note").status_code, 400)
+        self.assertEqual(self.act("hold", remarks="x").status_code, 400)
+
+    def test_finance_comments_before_certification_without_changing_the_status(self):
+        for status in ("endorsed", "certifying"):
+            LineItemBudget.objects.filter(pk=self.budget.pk).update(status=status)
+            response = self.act("comment", remarks=f"Check the unit cost ({status})")
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(response.data["status"], status)
+            self.assertEqual((response.data["reviews"][-1]["action"], response.data["reviews"][-1]["acted_by_name"]), ("commented", "Fe Cruz"))
+        self.assertEqual(self.act("comment", remarks="  ").status_code, 400)
+        for user in (self.leader, self.make_user("crc_chair", campus="Siniloan")):
+            self.assertEqual(self.act("comment", user, remarks="x").status_code, 403, user.role.code)
+        self.assertEqual(self.sent(), [])

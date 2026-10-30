@@ -10,8 +10,8 @@ from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_ca
 from config.concurrency import lock, lock_line_items
 from realtime.notify import notify, project_audience
 from research_projects.workflow import missing_approval_documents, missing_registration_rows
-from .models import LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
-from .notifications import lib_updated, proposal_submitted, ready_for_budget_review
+from .models import BudgetReview, LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
+from .notifications import lib_updated, project_activated, proposal_submitted, ready_for_budget_review
 from .serializers import (LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, catalog_item_name, clean_allocations,
                           line_total, review_budget, total_cost_problem)
 
@@ -183,6 +183,18 @@ class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.G
         remarks = (request.data.get("remarks") or "").strip()
         user = request.user
 
+        if self.step == "comment":
+            # Task 20 (2026-10-30, Q6): a Budget Officer review comment, kept in the history; the status doesn't change
+            if not role_can(user, "budget.certify"):
+                return self.refuse("Only Finance/Accounting/Budget can comment here.", status.HTTP_403_FORBIDDEN)
+            if budget.status not in LineItemBudget.BUDGET_STATUSES:
+                return self.refuse(f"A LIB that is {budget.get_status_display().lower()} can't take review comments.")
+            if not remarks:
+                return Response({"remarks": "Write the comment."}, status=status.HTTP_400_BAD_REQUEST)
+            BudgetReview.objects.create(budget=budget, action="commented", remarks=remarks, acted_by=user)
+            lib_signal(budget)
+            return Response(LineItemBudgetSerializer(budget).data)
+
         if self.step == "hold":
             if budget.status not in HOLDS:
                 return self.refuse(f"A LIB that is {budget.get_status_display().lower()} can't be put on hold.")
@@ -220,6 +232,9 @@ class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.G
         if self.step in ("submit", "resubmit"):
             # Task 15 (2026-10-30): the campus CRC/CRD get an e-mail once the submission is saved
             transaction.on_commit(lambda: proposal_submitted(budget, resubmitted=self.step == "resubmit"))
+        elif self.step == "certify":
+            # Task 20 (2026-10-30): certified = the project is Active; its leader gets an e-mail once it is saved
+            transaction.on_commit(lambda: project_activated(budget, user))
         elif self.step == "for-checking":
             # Task 19 (2026-10-30): the campus Finance/Accounting/Budget get an e-mail once the forward is saved
             transaction.on_commit(lambda: ready_for_budget_review(budget, user))

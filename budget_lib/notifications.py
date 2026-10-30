@@ -116,3 +116,19 @@ def lib_updated(budget, editor, edits):
     )
     for email in dict.fromkeys(recipients):
         send_brevo_email(email, subject, html)
+
+
+def project_activated(budget, certifier):
+    """Task 20 (2026-10-30): the Budget Officer certified the LIB, so the project is Active. Its leader gets an e-mail
+    after commit; certifying twice is refused by the LIB workflow, so it can't send twice."""
+    project, lead = budget.project, budget.project.lead
+    subject = f"Project Proposal Certified — {project.title} is now Active"
+    html = (
+        "<p>Your project proposal has been certified by Finance/Accounting/Budget. The project is now <b>Active</b>.</p>"
+        f"<p><b>Project Proposal:</b> {escape(project.title)}<br><b>NTP Number:</b> {escape(project.project_code)}<br>"
+        f"<b>Certified by:</b> {escape(certifier.display_name)}</p>"
+        f"<p><b>Budget by Project Year:</b></p>{budget_table(budget)}"
+        "<p>The proposal can no longer be edited or deleted. You can now assign tasks to your Project Staff in RMIS.</p>"
+        f"<p>{button(f'{settings.FRONTEND_URL}/projects', 'Open Project Management')}</p><p>Thank you.</p>"
+    )
+    send_brevo_email(lead.email, subject, html)

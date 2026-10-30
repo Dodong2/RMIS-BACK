@@ -82,6 +82,8 @@ class BudgetReview(models.Model):
         ("certified", "Certified"),
         ("endorsed", "Endorsed"),
         ("returned", "Put on Hold"),
+        # Task 20 (2026-10-30): a Finance/Accounting/Budget review comment before certification; the status stays
+        ("commented", "Review Comment"),
     )
 
     budget = models.ForeignKey(LineItemBudget, on_delete=models.CASCADE, related_name="reviews")
