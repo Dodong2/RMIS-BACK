@@ -36,7 +36,7 @@ CLEAR = [
     "research_projects.Study", "research_projects.WorkPlanMilestone",
     "personnel.StaffProfile", "personnel.ProjectAssignment", "personnel.Task", "personnel.TaskDeliverable",
     "personnel.TaskUpdate", "personnel.PersonnelChange", "personnel.PropertyClearance",
-    "budget_lib.LineItemBudget", "budget_lib.BudgetReview", "budget_lib.LineItem",
+    "budget_lib.LineItemBudget", "budget_lib.BudgetReview", "budget_lib.LineItem", "budget_lib.LineItemEdit",
     "financial_monitoring.Disbursement", "financial_monitoring.BudgetRealignment",
     "financial_monitoring.ProcurementRequest", "financial_monitoring.ProcurementStatusEvent",
     "compliance.EthicsReviewReference", "compliance.SimilarityCheckRecord", "compliance.AIUseDeclaration",
