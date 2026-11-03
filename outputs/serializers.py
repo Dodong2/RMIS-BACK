@@ -136,6 +136,8 @@ class ExpectedOutputSerializer(serializers.ModelSerializer):
             "id", "project", "category", "description", "target_count", "manual_actual_count",
             "actual_count", "created_at",
         ]
+        # Client Task 29-B: Particulars is optional (the model column stays NOT NULL; blank saves "").
+        extra_kwargs = {"description": {"required": False, "allow_blank": True}}
 
     def get_actual_count(self, obj):
         related = COMPUTED_6P.get(obj.category)

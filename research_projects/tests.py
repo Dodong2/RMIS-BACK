@@ -189,6 +189,23 @@ class NestedRegistrationTests(RMISTestCase):
         self.assertEqual((budget.version_number, budget.status), (1, "draft"))
         self.assertEqual(float(budget.line_items.get().amount), 100000)
 
+    def test_particulars_and_beneficiary_description_are_optional(self):
+        """Client Task 29-B: a 6P without Particulars and a beneficiary group without Description still register."""
+        response = self.register(self.payload(
+            outputs=[{"category": "publications", "description": "", "target_count": 2}, {"category": "patents", "target_count": 1}],
+            beneficiaries=[{"group": "Faculty", "description": "", "total": 10}, {"group": "Students", "total": 5}],
+        ))
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(sorted(ExpectedOutput.objects.values_list("category", "description")), [("patents", ""), ("publications", "")])
+        self.assertEqual(sorted(TargetBeneficiary.objects.values_list("group", "description")), [("Faculty", ""), ("Students", "")])
+
+    def test_a_6p_still_needs_its_item_and_a_beneficiary_its_group(self):
+        response = self.register(self.payload(outputs=[{"category": "", "description": "Journal article", "target_count": 1}]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.saved_rows(), (0,) * 8)
+
     def test_one_bad_row_saves_nothing(self):
         response = self.register(self.payload(beneficiaries=[{"group": "", "description": "x", "total": 1}]))
 
@@ -701,6 +718,21 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(LineItem.objects.get(budget__project=project).amount, 10000)
         self.assertEqual(project.milestones.count(), 1)
 
+
+    def test_template_rows_without_particulars_or_description_import(self):
+        """Client Task 29-B: blank Particulars (6Ps) and Description (Target Beneficiaries) cells are fine."""
+        self.fill_project()
+        self.workbook["Expected Outputs (6Ps)"].append(["Patent", None, 1])
+        self.workbook["Target Beneficiaries"].append(["Community beneficiaries", None, 2000])
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", None, "pax", 4, 2500, None])
+        self.workbook["Work Plan"].append(["Logistic preparations", datetime.datetime(2026, 1, 1), datetime.datetime(2026, 3, 31)])
+
+        response = self.upload()
+
+        self.assertEqual(response.status_code, 201, response.data)
+        project = Project.objects.get(project_code="LSPU-X1")
+        self.assertEqual(project.expected_outputs.get().description, "")
+        self.assertEqual(project.target_beneficiaries.get().description, "")
     def test_excel_registration_takes_the_leaders_campus(self):
         User.objects.filter(pk=self.leader.pk).update(campus="Siniloan")
         self.fill_project(Campus="Sta. Cruz")
