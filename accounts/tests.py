@@ -143,6 +143,26 @@ class RegistrationTests(RMISTestCase):
                 self.assertIn(field, response.data)
         self.assertFalse(User.objects.filter(email="new.researcher@lspu.test").exists())
 
+    def test_college_unit_is_not_asked_of_vprei_university_admin_and_crc(self):
+        """Client Task 39: these roles register without a College Unit; one sent anyway is not kept."""
+        for i, code in enumerate(("vprei", "university_admin", "crc_chair")):
+            with self.subTest(role=code):
+                email = f"{code}@lspu.test"
+                response = self.register(email=email, staff_id=f"20000{i}", college_unit="" if i else "CCS - College of Computer Studies",
+                                         requested_role=Role.objects.get(code=code).id)
+
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(User.objects.get(email=email).college_unit, "")
+
+    def test_college_unit_is_still_required_for_the_other_roles(self):
+        for code in ("riuh", "finance_budget", "procurement_officer_lib", "project_leader", "project_staff"):
+            with self.subTest(role=code):
+                response = self.register(college_unit="", requested_role=Role.objects.get(code=code).id)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("college_unit", response.data)
+        self.assertFalse(User.objects.filter(email="new.researcher@lspu.test").exists())
+
     def test_register_rejects_values_outside_the_lists_and_formats(self):
         cases = [
             ("gender", "other"), ("campus", "Manila"), ("college_unit", "College of Nowhere"),
@@ -652,6 +672,15 @@ class GoogleAuthTests(RMISTestCase):
         self.assertEqual(recipients, ["admin@lspu.test"])
         pending = self.client_for(admin).get("/api/admin/pending-users/").data
         self.assertEqual([row["email"] for row in pending], ["g.user@lspu.test"])
+
+    def test_google_request_for_crc_needs_no_college_unit(self):
+        """Client Task 39, Google sign-up: same rule as Request Access."""
+        self.supabase_says(200, email="G.User@lspu.test")
+
+        crc = self.google_request(college_unit="", requested_role=Role.objects.get(code="crc_chair").id)
+
+        self.assertEqual(crc.status_code, 201, crc.data)
+        self.assertEqual(User.objects.get(email="g.user@lspu.test").college_unit, "")
 
     def test_request_needs_every_registration_field_but_no_password(self):
         CollegeUnit.objects.create(code="CCS", title="College of Computer Studies")

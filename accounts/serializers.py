@@ -74,6 +74,7 @@ class RefreshSerializer(CookieTokenRefreshSerializer):
 
 
 PROFILE_FIELDS = ["staff_id", "gender", "campus", "college_unit", "mobile_number"]
+NO_COLLEGE_UNIT_ROLES = ("system_admin", "vprei", "university_admin", "crc_chair")
 
 
 def validate_college_unit(value):
@@ -96,9 +97,20 @@ class RegistrationProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [*PROFILE_FIELDS, "requested_role"]
-        extra_kwargs = {field: {"required": True, "allow_blank": False} for field in PROFILE_FIELDS}
+        extra_kwargs = {
+            **{field: {"required": True, "allow_blank": False} for field in PROFILE_FIELDS},
+            "college_unit": {"required": False, "allow_blank": True},  # required per role in validate()
+        }
 
     validate_college_unit = staticmethod(validate_college_unit)
+
+    def validate(self, attrs):
+        # Client Task 39: VP for REI, University Administration and CRC/CRD give no College Unit; every other role must.
+        if attrs["requested_role"].code in NO_COLLEGE_UNIT_ROLES:
+            attrs["college_unit"] = ""
+        elif not attrs.get("college_unit"):
+            raise serializers.ValidationError({"college_unit": ["This field is required."]})
+        return attrs
 
 
 class PendingUserSerializer(serializers.ModelSerializer):
