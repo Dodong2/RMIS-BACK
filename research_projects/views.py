@@ -37,9 +37,10 @@ XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 REGISTRATION_ROLES = ["system_admin", "riuh", "project_leader"]
 # Leaders are limited to records they are part of, and can't change the CRC-owned fields
 # (serializers.ensure_registrant_in_scope / ensure_leader_keeps).
-EDIT_ROLES = REGISTRATION_ROLES + ["crc_chair"]
+# Client Task 41 (2026-11-03): CRC/CRD only views projects and the work plan (accounts 0031).
+EDIT_ROLES = REGISTRATION_ROLES
 # Leaders capture their own work plan (Module Structure M2); ensure_in_scope limits them to their projects.
-MILESTONE_ROLES = ["system_admin", "crc_chair", "project_leader"]
+MILESTONE_ROLES = ["system_admin", "project_leader"]
 
 # Client 2026-10-29 (Task 4): Manual Entry may send the form's tables with the project. They are saved in the same
 # transaction through the serializers of their own endpoints, so one bad row leaves nothing behind. A table that

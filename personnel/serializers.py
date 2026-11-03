@@ -17,7 +17,8 @@ from .models import (
 )
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-MANAGE_ROLES = ["system_admin", "crc_chair", "riuh"]
+# Client Task 41 (2026-11-03): CRC/CRD views personnel and tasks only (accounts 0031).
+MANAGE_ROLES = ["system_admin", "riuh"]
 TASK_ASSIGNER_ROLES = MANAGE_ROLES + ["project_leader"]
 CLEARANCE_ROLES = MANAGE_ROLES + ["procurement_officer_lib"]
 

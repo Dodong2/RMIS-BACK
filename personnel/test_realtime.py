@@ -12,7 +12,8 @@ from research_projects.models import Program, Project
 from .models import PersonnelChange, ProjectAssignment, PropertyClearance, Task
 
 # Leaders are reached per user; CRC/CRD and RIUH through their campus group (Task 21; this project has no campus)
-ASSIGNER_GROUPS = {to_role("system_admin"), campus_role_group("crc_chair", ""), campus_role_group("riuh", "")}
+# Client Task 41 (accounts 0031): CRC/CRD no longer assigns tasks, so it is not in the task audience (view on refresh)
+ASSIGNER_GROUPS = {to_role("system_admin"), campus_role_group("riuh", "")}
 
 
 def certify(project):

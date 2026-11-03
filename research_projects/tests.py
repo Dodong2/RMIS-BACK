@@ -1792,9 +1792,10 @@ class EditRegisteredProjectTests(RMISTestCase):
             self.assertEqual(c.patch(f"/api/project-endorsers/{self.endorser.pk}/", {"name": "Z"}, format="json").status_code, 403, code)
             self.assertEqual(c.patch(f"/api/studies/{self.study.pk}/", {"title": "Z"}, format="json").status_code, 403, code)
             self.assertEqual(c.delete(f"/api/target-beneficiaries/{self.beneficiary.pk}/").status_code, 403, code)
+        # Client Task 41 (accounts 0031): CRC/CRD only views projects, so it no longer changes the status either
         crc = self.client_for(self.make_user("crc_chair"))
         closed = crc.patch(f"/api/projects/{self.project.pk}/", {"status": "completed", "status_remarks": "Done"}, format="json")
-        self.assertEqual(closed.status_code, 200, closed.data)
+        self.assertEqual(closed.status_code, 403, closed.data)
         admin = self.client_for(self.make_user("system_admin"))
         recoded = admin.patch(f"/api/projects/{self.project.pk}/", {"title": "Fixed", "project_code": "LSPU-10"}, format="json")
         self.assertEqual(recoded.status_code, 200, recoded.data)
