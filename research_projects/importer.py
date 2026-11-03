@@ -321,6 +321,11 @@ def build_work_plan_template():
     _add_table_sheet(sheet, "Work Plan")
     for cell in sheet[1]:
         cell.font = Font(bold=True)
+    # Client Task 29-C: dates typed into Start/End Date show as YYYY-MM-DD and stay date cells (read_work_plan takes both).
+    for i, (header, _, kind, _) in enumerate(TABLE_SHEETS["Work Plan"]):
+        if kind == "date":
+            sheet.column_dimensions[get_column_letter(i + 1)].number_format = "yyyy-mm-dd"
+            sheet.cell(row=1, column=i + 1).comment = Comment("Format: YYYY-MM-DD, e.g. 2026-11-02", "RMIS")
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()

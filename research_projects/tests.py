@@ -1355,12 +1355,23 @@ class WorkPlanExcelTests(RMISTestCase):
         self.assertIn("rmis_work_plan_template.xlsx", response["Content-Disposition"])
         self.assertEqual(template.sheetnames, ["Work Plan"])
         self.assertEqual([c.value for c in template["Work Plan"][1]], ["Activity", "Start Date", "End Date"])
+        # Client Task 29-C: Start/End Date columns show dates as YYYY-MM-DD
+        sheet = template["Work Plan"]
+        self.assertEqual([sheet.column_dimensions[col].number_format for col in "BC"], ["yyyy-mm-dd", "yyyy-mm-dd"])
+        self.assertIn("YYYY-MM-DD", sheet["B1"].comment.text)
+        self.assertEqual(sheet.max_row, 1)
 
-        template["Work Plan"].append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+        sheet.append(["Logistic preparations", "2026-01-01", "2026-03-31"])
+        sheet.append(["Survey", datetime.date(2026, 11, 2), datetime.datetime(2026, 12, 15)])
+        for cell in sheet[3][1:]:
+            cell.number_format = "yyyy-mm-dd"
         imported = self.post(workbook=template)
 
         self.assertEqual(imported.status_code, 200, imported.data)
-        self.assertEqual(imported.data["rows"], [{"title": "Logistic preparations", "start_date": "2026-01-01", "target_date": "2026-03-31"}])
+        self.assertEqual(imported.data["rows"], [
+            {"title": "Logistic preparations", "start_date": "2026-01-01", "target_date": "2026-03-31"},
+            {"title": "Survey", "start_date": "2026-11-02", "target_date": "2026-12-15"},
+        ])
         self.assertFalse(WorkPlanMilestone.objects.exists())
 
     def test_the_work_plan_template_is_for_registrants_only(self):
