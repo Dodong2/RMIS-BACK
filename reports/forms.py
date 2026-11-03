@@ -27,6 +27,7 @@ from xml.sax.saxutils import escape, unescape
 
 from monitoring.models import MidtermReport, TerminalReport
 from outputs.serializers import COMPUTED_6P
+from research_projects.serializers import objective_items
 
 from .richtext import rich_text_lines, rich_text_marks
 
@@ -49,9 +50,8 @@ def _pct(value):
 
 
 def _objectives(project):
-    """Project objectives as a list; manual registration saves them as "1. ...\\n2. ..."."""
-    lines = [re.sub(r"^\d+[.)]\s*", "", line).strip() for line in (project.objectives or "").splitlines()]
-    return [line for line in lines if line]
+    """Project objectives as a list (plain "1. ...\\n2. ..." or the rich-text numbered list, Task 29-A)."""
+    return objective_items(project.objectives)
 
 
 def _dean(project):

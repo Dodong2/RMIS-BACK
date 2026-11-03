@@ -7,6 +7,7 @@ from django.utils import timezone
 from budget_lib.models import LineItem
 from financial_monitoring.models import Disbursement
 from financial_monitoring.serializers import line_item_balance
+from research_projects.serializers import HTML_TAG, objective_items
 
 OVERDUE_GRACE_DAYS = 15  # prototype rule: due 15 days after the quarter ends (not in the Manual; client to confirm)
 
@@ -39,7 +40,10 @@ def funding_agency(project):
 
 
 def objective_list(project):
-    return [line.strip() for line in project.objectives.splitlines() if line.strip()]
+    # Plain text keeps its "1. ..." lines exactly (names in saved reports); rich text (Task 29-A) is numbered the same way.
+    if not HTML_TAG.search(project.objectives or ""):
+        return [line.strip() for line in project.objectives.splitlines() if line.strip()]
+    return [f"{i}. {text}" for i, text in enumerate(objective_items(project.objectives), start=1)]
 
 
 def financial_snapshot(project, year, quarter):

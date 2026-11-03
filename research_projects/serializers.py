@@ -1,4 +1,5 @@
 import re
+from html.parser import HTMLParser
 
 import nh3
 from django.utils.text import slugify
@@ -13,7 +14,10 @@ from .models import (
 
 # Client 2026-10-23: proposal Sections II, IV, VI, VIII and IX are rich text from the TipTap editor (HTML). Only these
 # tags and attributes are kept, so pasted or posted markup can't carry scripts, event handlers or styles.
-RICH_TEXT_FIELDS = ("background", "methodology", "socio_economic_significance", "monitoring_evaluation", "references")
+# Client Task 29-A: III. Objectives is rich text too (a numbered list, one <li> per objective); see objective_items().
+RICH_TEXT_FIELDS = (
+    "background", "methodology", "socio_economic_significance", "monitoring_evaluation", "references", "objectives",
+)
 RICH_TEXT_TAGS = {
     "p", "br", "strong", "b", "em", "i", "u", "s", "h2", "h3", "h4", "ul", "ol", "li", "blockquote",
     "table", "thead", "tbody", "tr", "th", "td", "a",
@@ -39,6 +43,55 @@ def is_blank(value):
     if isinstance(value, str):
         return not HTML_TAG.sub("", value).replace("&nbsp;", " ").strip()
     return value is None or value == []
+
+
+class _ObjectiveItems(HTMLParser):
+    """Text of each top-level <li>; a nested list stays part of its parent objective. Without any <li>, each
+    paragraph or line break is one objective."""
+
+    BLOCKS = {"p", "br", "h2", "h3", "h4", "blockquote", "tr"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.items, self.depth, self.saw_li = [""], 0, False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "li":
+            if self.depth == 0:
+                self.items.append("")
+            self.depth += 1
+            self.saw_li = True
+        elif tag in self.BLOCKS and self.depth == 0 and not self.saw_li:
+            self.items.append("")
+        else:
+            self.items[-1] += " "
+
+    def handle_endtag(self, tag):
+        if tag == "li":
+            self.depth = max(self.depth - 1, 0)
+        elif tag in self.BLOCKS and self.depth == 0 and not self.saw_li:
+            self.items.append("")
+        else:
+            self.items[-1] += " "
+
+    def handle_data(self, data):
+        if self.depth or not self.saw_li:
+            self.items[-1] += data
+
+
+def objective_items(value):
+    """III. Objectives as a list of plain texts, for the SF-017, Quarterly Reports, the SF-018 PDF and Edit Registration.
+    Rich text (client Task 29-A) gives one item per numbered-list entry; older plain text ("1. ...\n2. ...", and
+    Excel cells) one item per line, its "1." numbering dropped."""
+    value = value or ""
+    if HTML_TAG.search(value):
+        parser = _ObjectiveItems()
+        parser.feed(value)
+        parser.close()
+        texts = [re.sub(r"\s+", " ", item.replace("\xa0", " ")).strip() for item in parser.items]
+    else:
+        texts = [re.sub(r"^\d+[.)]\s*", "", line).strip() for line in value.splitlines()]
+    return [text for text in texts if text]
 
 
 def clean_rich_text(value):

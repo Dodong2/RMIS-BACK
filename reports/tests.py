@@ -99,6 +99,18 @@ class FormExportTests(RMISTestCase):
         self.assertIn("Evaluate the status", text)
         self.assertIn("Prepare a report", text)
 
+    def test_appendix_e_lists_rich_text_objectives_as_plain_text(self):
+        """Client Task 29-A: objectives saved by the rich-text editor still fill the SF-017 rows, without tags."""
+        self.project.objectives = "<ol><li><p>Evaluate the <strong>status</strong></p></li><li><p>Prepare a report</p></li></ol>"
+        self.project.save()
+        MidtermReport.objects.create(project=self.project, project_year=1, submitted_by=self.leader)
+
+        text = text_of("csv", self.export("e", "csv").content)
+
+        self.assertIn("Evaluate the status", text)
+        self.assertIn("Prepare a report", text)
+        self.assertNotIn("<", text)
+
     def test_appendix_f_is_the_sf16_outline_in_every_format(self):
         TerminalReport.objects.create(project=self.project, narrative="We evaluated 12 projects.", submitted_by=self.leader)
 

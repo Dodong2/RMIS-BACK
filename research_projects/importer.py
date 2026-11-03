@@ -24,6 +24,7 @@ from outputs.serializers import ExpectedOutputSerializer
 from .models import CollegeUnit, CooperatingAgency, FundingType, Program, Project, RdeThrust, ProjectEndorser, ProjectTeamMember
 from .serializers import (
     ProjectEndorserSerializer, ProjectSerializer, ProjectTeamMemberSerializer, StudySerializer, TargetBeneficiarySerializer,
+    objective_items,
     WorkPlanMilestoneSerializer, leader_owns,
 )
 
@@ -839,7 +840,7 @@ def proposal_preview(project):
         "sdgs": project.sdgs,
         "background": project.background,
         # Manual entry saves "1. ...\n2. ..."; the preview numbers them itself
-        "objectives": [re.sub(r"^\d+[.)]\s*", "", line).strip() for line in project.objectives.splitlines() if line.strip()],
+        "objectives": objective_items(project.objectives),
         "methodology": project.methodology,
         "outputs": [
             {"category": o.category, "description": o.description, "target_count": o.target_count}
