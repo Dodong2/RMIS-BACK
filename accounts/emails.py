@@ -35,7 +35,14 @@ def send_brevo_email(to_email, subject, html_content, attachments=None):
         return False
     if not resp.ok:
         logger.error("Brevo e-mail to %s failed: %s %s", to_email, resp.status_code, resp.text[:300])
-    return resp.ok
+        return False
+    # Task 34: accepted by Brevo is not delivered; the messageId finds the e-mail in Brevo's Transactional logs.
+    try:
+        message_id = resp.json().get("messageId")
+    except ValueError:
+        message_id = None
+    logger.info("Brevo accepted e-mail to %s (%s), messageId=%s", to_email, subject, message_id)
+    return True
 
 
 def notify_admins_new_registration(user):

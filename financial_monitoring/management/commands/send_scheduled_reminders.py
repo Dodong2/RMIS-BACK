@@ -99,6 +99,9 @@ class Command(BaseCommand):
         parser.add_argument("--dry-run", action="store_true", help="List the e-mails without sending or logging them.")
 
     def handle(self, *args, **options):
+        started = timezone.localtime()
+        self.stdout.write(f"send_scheduled_reminders started {started:%Y-%m-%d %H:%M} ({settings.TIME_ZONE})"
+                          + (" (dry run)" if options["dry_run"] else ""))
         run = payment_run(timezone.now())
         run_key = run.isoformat()
         run_at = timezone.make_aware(datetime.datetime.combine(run, datetime.time(SEND_HOUR)))

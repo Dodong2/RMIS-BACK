@@ -181,6 +181,8 @@ LOGGING = {
     "root": {"handlers": ["console"], "level": "WARNING"},
     "loggers": {
         "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+        # Task 34: one line per e-mail Brevo accepts, so the container logs show what was sent.
+        "accounts.emails": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }
 
