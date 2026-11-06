@@ -1,5 +1,7 @@
 from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
+from django.utils import timezone
 
 from research_projects.models import Project
 
@@ -183,3 +185,52 @@ class LibItem(models.Model):
 
     def __str__(self):
         return f"{self.get_category_display()} - {self.name}"
+
+
+class BudgetEventLog(models.Model):
+    """Event Logs Budget (client Task 46, 2026-11-06): a confidential, database-only record of who did which budget or
+    procurement action on which project. Written only by trusted backend code (budget_lib/events.py), inside the
+    action's own transaction, so a refused or rolled-back action leaves no row. No API, serializer, admin page or UI.
+    Actor and project details are copied as they were at the time, so a row stays true after a profile change, a
+    deactivated account or a deleted Draft project (the FKs then become null; nothing cascades)."""
+
+    project = models.ForeignKey(Project, on_delete=models.SET_NULL, null=True, blank=True, related_name="budget_event_logs")
+    project_ref = models.PositiveIntegerField(help_text="The project's id at the time; kept if the project is deleted")
+    project_code = models.CharField(max_length=50, blank=True, help_text="NTP / official project code at the time")
+    project_title = models.CharField(max_length=300, blank=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name="budget_event_logs")
+    actor_name = models.CharField(max_length=300)
+    actor_email = models.EmailField()
+    actor_staff_id = models.CharField(max_length=20, blank=True)
+    actor_role = models.CharField(max_length=50)
+    event = models.CharField(max_length=60)
+    description = models.TextField()
+    target_type = models.CharField(max_length=60)
+    target_id = models.PositiveIntegerField(null=True, blank=True)
+    previous = models.JSONField(null=True, blank=True, encoder=DjangoJSONEncoder)
+    new = models.JSONField(null=True, blank=True, encoder=DjangoJSONEncoder)
+    remarks = models.TextField(blank=True)
+    amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    details = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "budget_event_logs"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["project_ref", "created_at"]),
+            models.Index(fields=["actor", "created_at"]),
+            models.Index(fields=["event"]),
+            models.Index(fields=["target_type", "target_id"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.display_time} {self.event} by {self.actor_email} on {self.project_code or self.project_ref}"
+
+    @property
+    def display_time(self):
+        """Client format: "Jul 10, 2026 · 1:34 PM", in Asia/Manila (settings.TIME_ZONE)."""
+        at = timezone.localtime(self.created_at)
+        return f"{at:%b} {at.day}, {at.year} · {at.hour % 12 or 12}:{at:%M %p}"

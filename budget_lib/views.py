@@ -11,6 +11,7 @@ from config.concurrency import lock, lock_line_items
 from realtime.consumers import campus_role_group
 from realtime.notify import notify, project_audience
 from research_projects.workflow import missing_approval_documents, missing_registration_rows
+from .events import changed_values, line_item_values, log_budget_event
 from .models import BudgetReview, LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
 from .notifications import lib_updated, project_activated, proposal_submitted, ready_for_budget_review
 from .serializers import (LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, catalog_item_name, clean_allocations,
@@ -65,7 +66,10 @@ class BudgetListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generi
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
-        lib_signal(serializer.instance)
+        budget = serializer.instance
+        log_budget_event(self.request.user, budget.project, "LIB_CREATED", f"Created LIB version {budget.version_number}.",
+                         budget, new={"status": budget.status}, version=budget.version_number)
+        lib_signal(budget)
 
     def get_queryset(self):
         qs = LineItemBudget.objects.select_related("project").order_by("-created_at")
@@ -133,6 +137,17 @@ class LineItemListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, gene
             return [HasRole("budget.manage")]
         return [permissions.IsAuthenticated()]
 
+    def perform_create(self, serializer):
+        item = serializer.save()
+        _log_line_item(self.request.user, item, "LIB_LINE_ITEM_ADDED", "Added", new=line_item_values(item))
+
+
+def _log_line_item(user, item, event, verb, target_id=None, **values):
+    budget = item.budget
+    log_budget_event(user, budget.project, event, f"{verb} LIB line item {item.description} (LIB version {budget.version_number}).",
+                     item, target_id=target_id, amount=item.amount, budget=budget.pk, version=budget.version_number,
+                     line_item=item.description, category=item.category, **values)
+
 
 class LineItemDetailView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.RetrieveUpdateDestroyAPIView):
     project_lookup = "budget__project"
@@ -153,11 +168,20 @@ class LineItemDetailView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics
     def destroy(self, request, *args, **kwargs):
         return super().destroy(request, *args, **kwargs)
 
+    def perform_update(self, serializer):
+        before = line_item_values(serializer.instance)
+        item = serializer.save()
+        previous, new = changed_values(before, line_item_values(item))
+        if new:
+            _log_line_item(self.request.user, item, "LIB_LINE_ITEM_EDITED", "Edited", previous=previous, new=new)
+
     def perform_destroy(self, instance):
         budget = lock(LineItemBudget.objects.all(), pk=instance.budget_id)
         if budget.status not in LineItemBudget.EDITABLE_STATUSES:
             raise ValidationError(f"This LIB is {budget.get_status_display().lower()} and can no longer be edited.")
+        item_id, previous = instance.pk, line_item_values(instance)
         instance.delete()
+        _log_line_item(self.request.user, instance, "LIB_LINE_ITEM_REMOVED", "Removed", target_id=item_id, previous=previous)
 
 
 # Client 2026-10-21: every step of the LIB review workflow, as step -> (from statuses, who, to status, history
@@ -172,6 +196,9 @@ TRANSITIONS = {
     "certify": (("certifying",), "budget.certify", "certified", "certified"),
     "resubmit": (("returned",), "leader", "submitted", "resubmitted"),
 }
+# Event Logs Budget (Task 46): the event name of each step
+STEP_EVENTS = {"submit": "LIB_SUBMITTED", "for-checking": "LIB_MARKED_FOR_CHECKING", "start-certification":
+               "LIB_CERTIFICATION_STARTED", "certify": "LIB_CERTIFIED", "resubmit": "LIB_RESUBMITTED", "hold": "LIB_PUT_ON_HOLD"}
 # Put on Hold (Q1, Q2): the level holding the LIB sends it back to the Project Leader with remarks.
 HOLDS = {
     **{status: ("budget.endorse", "held_crc", "CRC Chair") for status in LineItemBudget.CRC_STATUSES},
@@ -202,6 +229,8 @@ class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.G
             if not remarks:
                 return Response({"remarks": "Write the comment."}, status=status.HTTP_400_BAD_REQUEST)
             BudgetReview.objects.create(budget=budget, action="commented", remarks=remarks, acted_by=user)
+            log_budget_event(user, budget.project, "LIB_REVIEW_COMMENT", "Added a review comment to the LIB.", budget,
+                             remarks=remarks, version=budget.version_number)
             lib_signal(budget)
             return Response(LineItemBudgetSerializer(budget).data)
 
@@ -237,7 +266,12 @@ class BudgetReviewView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.G
                 if missing:
                     return self.refuse(f"Add {', '.join(missing)} under Edit Registration before submitting the project.")
 
+        from_status = budget.status
         budget = review_budget(budget, user, to_status, action, remarks)
+        log_budget_event(user, budget.project, STEP_EVENTS[self.step],
+                         f"LIB {dict(BudgetReview.ACTION_CHOICES)[action]}: {dict(LineItemBudget.STATUS_CHOICES)[from_status]} to "
+                         f"{budget.get_status_display()}.", budget, previous={"status": from_status}, new={"status": to_status},
+                         remarks=remarks, version=budget.version_number)
         lib_signal(budget)
         if self.step in ("submit", "resubmit"):
             # Task 15 (2026-10-30): the campus CRC/CRD get an e-mail once the submission is saved
@@ -314,6 +348,11 @@ class FinanceEditView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.Ge
         if problem:
             return self.refuse(problem)
         edits = LineItemEdit.objects.bulk_create(edits)
+        for edit in edits:
+            previous = {field: old for field, (old, _) in edit.changes.items()}
+            new = {field: value for field, (_, value) in edit.changes.items()}
+            _log_line_item(request.user, edit.line_item, "LIB_LINE_ITEM_EDITED_BY_FINANCE", "Finance/Accounting/Budget updated",
+                           previous=previous, new=new, remarks=edit.reason, line_item_edit=edit.pk)
         lib_signal(budget)
         transaction.on_commit(lambda: lib_updated(budget, request.user, edits))
         return Response(LineItemBudgetSerializer(budget).data)
