@@ -27,7 +27,7 @@ from .models import CollegeUnit, CooperatingAgency, FundingType, Program, Projec
 from .serializers import (
     ProjectEndorserSerializer, ProjectSerializer, ProjectTeamMemberSerializer, StudySerializer, TargetBeneficiarySerializer,
     objective_items,
-    WorkPlanMilestoneSerializer, leader_owns,
+    WorkPlanMilestoneSerializer, co_leader_problem, leader_owns,
 )
 
 NEW_OR_CONTINUING = (("new", "New Proposal"), ("continuing", "Continuing"))
@@ -42,6 +42,7 @@ OLD_COLLEGE_UNIT_LABELS = ("Implementing Unit", "College Unit")
 # Client 2026-10-29 (Task 4, Q-A): the NTP number is the official code. Older templates have the Project Code row
 # instead; it is never copied into the NTP, so such a file needs the NTP row filled.
 NTP_LABEL = "NTP (Notice to Proceed No.)"
+LEAD_STAFF_ID_LABEL = "Project Leader Staff ID"
 LEGACY_PROJECT_CODE_LABEL = "LSPU Faculty Research Number (Project Code)"
 
 # (label in column A, serializer field, kind, choices, note in column C). Order follows the form.
@@ -61,9 +62,9 @@ PROJECT_FIELDS = [
     (NTP_LABEL, "ntp_number", "text", None, "Required, must be unique; the NTP number is the project's official code"),
     ("Program Code (if under a Program)", "program", "program", None, "Optional; code of an existing RMIS Program"),
     ("Funding Type", "funding_type", "choice", FUNDING_TYPES, "Required"),
-    ("Project Leader Staff ID", "lead_staff_id", "staff_id", None,
-     "RMIS account with the Project Leader role; format the cell as Text so leading zeros stay"),
-    ("Project Leader E-mail Address", "lead", "user", None, "Used when the Staff ID is blank"),
+    (LEAD_STAFF_ID_LABEL, "lead_staff_id", "staff_id", None,
+     "Required; RMIS account with the Project Leader role; format the cell as Text so leading zeros stay"),
+    ("Project Leader E-mail Address", "lead", "user", None, "Optional; when given, must be the same account as the Staff ID"),
     ("Project Leader Gender", "lead_gender", "choice", Project.GENDER_CHOICES, "Male or Female"),
     ("Contact No./s.", "contact_number", "text", None, ""),
     ("Start Date", "start_date", "date", None, "Required; date cell or YYYY-MM-DD"),
@@ -760,27 +761,47 @@ def _pick_account(data, staff_field, email_field, error):
     return User.objects.filter(pk=data[email_field]).first() if data.get(email_field) else None
 
 
+def _row_reported(errors, sheet, row):
+    return any(e["sheet"] == sheet and e["row"] == row for e in errors)
+
+
 def _fill_from_accounts(project_data, tables, errors):
     """Resolve the Project Leader and Project Team accounts. The leader's blank Gender/Contact No. are filled from the
-    profile (filled cells are this project's own values); a team row's name and gender always come from its account."""
+    profile (filled cells are this project's own values); a team row's name and gender always come from its account.
+    Client Task 45 (2026-11-06): the Project Leader's Staff ID and each team row's RMIS E-mail and Staff ID are required,
+    and there is at most one Co-Project Leader, a Project Leader or Project Staff account (Carl's Q1, Q2)."""
+    if "lead_staff_id" not in project_data and not any(e["sheet"] == "Project" and e["field"] == LEAD_STAFF_ID_LABEL for e in errors):
+        errors.append({"sheet": "Project", "row": None, "field": LEAD_STAFF_ID_LABEL,
+                       "message": "The Project Leader's Staff ID is required."})
     lead = _pick_account(project_data, "lead_staff_id", "lead", lambda message: errors.append(
-        {"sheet": "Project", "row": None, "field": "Project Leader Staff ID", "message": message}))
+        {"sheet": "Project", "row": None, "field": LEAD_STAFF_ID_LABEL, "message": message}))
     if lead:
         if lead.gender:
             project_data.setdefault("lead_gender", lead.gender)
         if lead.mobile_number:
             project_data.setdefault("contact_number", lead.mobile_number)
+    co_leaders = 0
     for row_number, data in tables.get("Project Team", []):
-        reported = any(e["sheet"] == "Project Team" and e["row"] == row_number for e in errors)
-        member = _pick_account(data, "user_staff_id", "user", lambda message, row=row_number: errors.append(
-            {"sheet": "Project Team", "row": row, "field": "Staff ID", "message": message}))
+        sheet = "Project Team"
+        add = lambda field, message, row=row_number: errors.append({"sheet": sheet, "row": row, "field": field, "message": message})
+        given = {"RMIS E-mail": "user" in data, "Staff ID": "user_staff_id" in data}
+        reported = _row_reported(errors, sheet, row_number)
+        member = _pick_account(data, "user_staff_id", "user", lambda message: add("Staff ID", message))
         if member:
             # Client Task 45: never the workbook's own name/gender, only the account's
             data["name"], data["gender"] = member.display_name, member.gender or ""
-        elif not reported and not any(e["sheet"] == "Project Team" and e["row"] == row_number for e in errors):
-            errors.append({"sheet": "Project Team", "row": row_number, "field": "RMIS E-mail", "message": (
-                "Give the member's RMIS E-mail and Staff ID; the name and gender come from the account. "
-                "Members without an RMIS account are added later in Edit Registration.")})
+        if not reported and not _row_reported(errors, sheet, row_number):
+            if not any(given.values()):
+                add("RMIS E-mail", "Give the member's RMIS E-mail and Staff ID; the name and gender come from the account. "
+                                   "Members without an RMIS account are added later in Edit Registration.")
+            else:
+                for field in [f for f, present in given.items() if not present]:
+                    add(field, f"The member's {field} is required too.")
+        if data.get("member_role") == "co_leader":
+            co_leaders += 1
+            problem = "A project has only one Co-Project Leader." if co_leaders > 1 else co_leader_problem(member)
+            if problem:
+                add("Role", problem)
 
 
 def _serializer_errors(sheet, row, serializer_errors, labels):
@@ -876,6 +897,110 @@ def registration_draft(project, request):
         "endorsers": rows(ProjectEndorserSerializer, project.endorsers),
         "line_items": rows(LineItemSerializer, LineItem.objects.filter(budget__project=project)),
     }
+
+
+# Client Task 45 (2026-11-06): Upload via Excel opens the workbook in the Manual Entry wizard as a review before
+# anything is registered. Where each sheet's rows go in the wizard's draft.
+DRAFT_TABLES = {"Project Team": "team", "Study Components": "studies", "Expected Outputs (6Ps)": "outputs",
+                "Target Beneficiaries": "beneficiaries", "Budget Requirements": "line_items", "Work Plan": "milestones"}
+# The project fields of the draft and their blank values (the API's own shape, as Manual Entry loads it)
+DRAFT_PROJECT_BLANK = {
+    "title": "", "funding_type": "", "lead": None, "lead_gender": "", "contact_number": "", "ntp_number": "",
+    "ntp_date": None, "toe_signed_date": None, "is_dry_research": None, "start_date": None, "target_end_date": None,
+    "rde_thrust": "", "rde_priority": "", "sdgs": [], "sectors": [], "sector_other": "", "is_continuing": False,
+    "continuing_year": None, "research_type": "", "research_priority_area": "", "research_typology": [], "campus": "",
+    "implementing_unit": "", "college": "", "total_cost": None, "cooperating_agencies": "", "objectives": "",
+    "background": "", "methodology": "", "socio_economic_significance": "", "monitoring_evaluation": "", "references": "",
+    "description": "", "expected_outcomes": "", "expected_impacts": "", "proposal_submitted_on": None,
+    "proposal_reviewed_on": None, "proposal_approved_on": None, "reviewing_body": "",
+}
+
+
+def _check_budget_rows(project_data, rows, errors):
+    """The LIB rules a Budget Requirements row would meet on registration, without saving: an active LIB Item of its
+    class, and a split over the project's periods that adds up to Qty x Unit Cost. Leaves each row as a draft line item."""
+    periods = allocation_periods(Project(start_date=project_data.get("start_date"), target_end_date=project_data.get("target_end_date")))
+    one_year = (periods or ["Q1"])[0] == "Q1"
+    for row_number, data in rows:
+        add = lambda field, exc, row=row_number: errors.append(
+            {"sheet": "Budget Requirements", "row": row, "field": field, "message": _first_message(exc)})
+        fill_line_item_amount(data)
+        split = [{"period": key[len("alloc_"):], "amount": data.pop(key)} for key in [k for k in data if k.startswith("alloc_")]]
+        if one_year:
+            split = [{**a, "period": a["period"][2:]} if a["period"].startswith("Y1Q") else a for a in split]
+        data["allocations"] = split
+        if data.get("category") and data.get("description"):
+            try:
+                data["description"] = catalog_item_name(data["category"], data["description"])
+            except ValidationError as exc:
+                add("Particulars", exc)
+        if split and periods:
+            try:
+                data["allocations"] = clean_allocations(split, periods, Decimal(data["amount"]))
+            except ValidationError as exc:
+                add("Y1 Q1 - Y3 Q4", exc)
+
+
+def _issue_keys(errors, tables):
+    """Each issue also names its draft field (Project sheet) or table and row index, so the wizard can show it."""
+    labels = {_norm(label): field for label, field, *_ in PROJECT_FIELDS + LEGACY_PROJECT_FIELDS}
+    labels[_norm(LEAD_STAFF_ID_LABEL)] = "lead"
+    labels[_norm("Project Leader E-mail Address")] = "lead"
+    positions = {name: {row: i for i, (row, _) in enumerate(rows)} for name, rows in tables.items()}
+    for error in errors:
+        if error["sheet"] == "Project":
+            error["key"] = labels.get(_norm(error["field"] or ""), "project")
+        elif error["sheet"] in DRAFT_TABLES:
+            error["key"] = DRAFT_TABLES[error["sheet"]]
+            error["index"] = positions.get(error["sheet"], {}).get(error["row"])
+    return errors
+
+
+def review_workbook(file_obj):
+    """Upload via Excel review (client Task 45): every value the workbook holds, read with the import's rules but
+    saved nowhere, as Manual Entry's draft, plus the issues found. A cell that fails (e.g. a College Unit the System
+    Admin removed) is left blank in the draft and listed, never replaced by another value. Registering then goes
+    through Manual Entry's own POST projects/, which checks everything again. Returns (draft, issues); draft is None
+    when the file can't be read."""
+    try:
+        wb = openpyxl.load_workbook(file_obj, data_only=True)
+    except Exception as exc:  # not an xlsx, or corrupted
+        return None, [{"sheet": None, "row": None, "field": "file", "message": f"Could not read workbook: {exc}"}]
+    if "Project" not in wb.sheetnames:
+        return None, [{"sheet": None, "row": None, "field": "file", "message": "Missing the 'Project' sheet; use the RMIS template."}]
+    errors = []
+    project_data = _read_project_sheet(wb["Project"], errors)
+    tables = {name: _read_table(wb[name], name, errors) for name in TABLE_SHEETS if name in wb.sheetnames}
+    _check_work_plan(tables.get("Work Plan", []), errors)
+    _fill_from_accounts(project_data, tables, errors)
+    _check_budget_rows(project_data, tables.get("Budget Requirements", []), errors)
+
+    project = {**DRAFT_PROJECT_BLANK, **{k: v for k, v in project_data.items() if k in DRAFT_PROJECT_BLANK}}
+    lead = User.objects.filter(pk=project["lead"]).first() if project["lead"] else None
+    if lead and not project["campus"]:
+        project["campus"] = lead.campus  # a blank Campus is the leader's, as on registration
+    rows = lambda name: [data for _, data in tables.get(name, [])]
+    draft = {
+        "project": project,
+        "team": [{"id": i, "member_role": d.get("member_role", "member"), "name": d.get("name", ""), "gender": d.get("gender", ""),
+                  "user": d.get("user")} for i, d in enumerate(rows("Project Team"), start=1)],
+        "studies": [{"id": i, "title": d.get("title", ""), "lead": d.get("lead")} for i, d in enumerate(rows("Study Components"), start=1)],
+        "outputs": [{"id": i, "category": d.get("category", ""), "description": d.get("description", ""),
+                     "target_count": d.get("target_count", "")} for i, d in enumerate(rows("Expected Outputs (6Ps)"), start=1)],
+        "beneficiaries": [{"id": i, "group": d.get("group", ""), "description": d.get("description", ""), "total": d.get("total", "")}
+                          for i, d in enumerate(rows("Target Beneficiaries"), start=1)],
+        "milestones": [{"id": i, "title": d.get("title", ""), "start_date": d.get("start_date"), "target_date": d.get("target_date", ""),
+                        "tasks_total": 0} for i, d in enumerate(rows("Work Plan"), start=1)],
+        "line_items": [{"id": i, "category": d.get("category", ""), "description": d.get("description", ""),
+                        "specification": d.get("specification", ""), "unit": d.get("unit", ""), "quantity": d.get("quantity"),
+                        "unit_cost": d.get("unit_cost"), "amount": d.get("amount"), "allocations": d.get("allocations", []),
+                        "fiscal_year": d.get("fiscal_year")} for i, d in enumerate(rows("Budget Requirements"), start=1)],
+        "endorsers": [{"id": i, "role_code": role_code, "user": None, "name": project_data[name_field], "designation": designation,
+                       "signed_on": project_data.get(date_field)}
+                      for i, (name_field, date_field, designation, role_code) in enumerate(
+                          [a for a in ANNEX_A_SIGNATORIES if project_data.get(a[0])], start=1)],
+    }
+    return draft, _issue_keys(errors, tables)
 
 
 def proposal_preview(project):

@@ -488,6 +488,18 @@ class ProjectSerializer(serializers.ModelSerializer):
         return attrs
 
 
+# Client Task 45 (Carl's Q1, 2026-11-06): a Co-Project Leader with an account is a Project Leader or Project Staff
+# account, and a project has at most one Co-Project Leader. A typed name without an account is still accepted.
+CO_LEADER_ROLES = ("project_leader", "project_staff")
+
+
+def co_leader_problem(user):
+    """Why this account can't be the Co-Project Leader, or None."""
+    if user and (not user.role or user.role.code not in CO_LEADER_ROLES):
+        return f"{user.display_name} can't be the Co-Project Leader: pick a Project Leader or Project Staff account."
+    return None
+
+
 class ProjectTeamMemberSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProjectTeamMember
@@ -495,6 +507,15 @@ class ProjectTeamMemberSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         project = attrs.get("project", getattr(self.instance, "project", None))
+        if attrs.get("member_role", getattr(self.instance, "member_role", None)) == "co_leader":
+            problem = co_leader_problem(attrs.get("user", getattr(self.instance, "user", None)))
+            if problem:
+                raise serializers.ValidationError({"user": problem})
+            others = ProjectTeamMember.objects.filter(project=project, member_role="co_leader")
+            if self.instance:
+                others = others.exclude(pk=self.instance.pk)
+            if others.exists():
+                raise serializers.ValidationError({"member_role": "A project has only one Co-Project Leader."})
         ensure_registrant_in_scope(self, project)
         ensure_registration_editor(self, project, attrs)
         ensure_registration_open(project, registration_changes(self, attrs))

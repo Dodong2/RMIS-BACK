@@ -325,7 +325,9 @@ class ProjectImportView(APIView):
     """POST multipart `file`: registers one project (plus team, studies, 6Ps, beneficiaries, LIB, work plan)
     from a filled template. All-or-nothing: any row error rolls the whole import back and lists every error.
     `?dry_run=1` runs the same import, returns {"preview": ...} for the SF-018 preview and {"draft": ...} for Manual
-    Entry to load and edit before registering (client 2026-10-23), and always rolls back."""
+    Entry to load and edit before registering (client 2026-10-23), and always rolls back.
+    `?review=1` (client Task 45, 2026-11-06): 200 {"draft", "issues"} even when cells are wrong, so the wizard shows
+    every value and every issue; nothing is saved (importer.review_workbook)."""
 
     permission_classes = [HasRole("projects.register")]
     parser_classes = [MultiPartParser]
@@ -334,6 +336,11 @@ class ProjectImportView(APIView):
         file_obj = request.FILES.get("file")
         if not file_obj:
             return Response({"file": "Upload the filled .xlsx template as `file`."}, status=status.HTTP_400_BAD_REQUEST)
+        if request.query_params.get("review") == "1":
+            draft, issues = importer.review_workbook(file_obj)
+            if draft is None:
+                return Response({"errors": issues}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"draft": draft, "issues": issues})
         with transaction.atomic():
             project, errors = importer.import_workbook(file_obj, request)
             if errors:

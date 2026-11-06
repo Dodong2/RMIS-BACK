@@ -10,7 +10,7 @@ from budget_lib.models import LibItem
 from research_projects.models import CollegeUnit, FundingType, Project, RdeThrust
 from research_projects.rde_agenda import seed_rde_agenda
 
-from .tests import ExcelImportTests
+from . import tests as base
 
 
 class TemplateDropdownTests(RMISTestCase):
@@ -81,8 +81,8 @@ class TemplateDropdownTests(RMISTestCase):
 class ProjectTeamAccountTests(RMISTestCase):
     """Task 45-A: a Project Team row is an RMIS account; the workbook can't supply someone's name or gender."""
 
-    fill_project = ExcelImportTests.fill_project
-    upload = ExcelImportTests.upload
+    fill_project = base.ExcelImportTests.fill_project
+    upload = base.ExcelImportTests.upload
 
     def setUp(self):
         super().setUp()
