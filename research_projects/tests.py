@@ -242,10 +242,39 @@ class NestedRegistrationTests(RMISTestCase):
         self.assertFalse(Project.objects.exists())
 
     def test_empty_tables_add_no_rows(self):
-        response = self.register(self.payload(team=[], outputs=[], milestones=[], endorsers=[], line_items=[]))
+        # Task 47-A: the LIB is no longer optional (its Grand Total must equal the Total Project/Study Cost)
+        response = self.register(self.payload(team=[], outputs=[], milestones=[], endorsers=[]))
 
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(self.saved_rows(), (1, 2, 0, 1, 0, 0, 0, 0))
+        self.assertEqual(self.saved_rows(), (1, 2, 0, 1, 0, 0, 1, 1))
+
+    def test_a_lib_grand_total_that_differs_from_the_total_cost_saves_nothing(self):
+        """Client Task 47: a mismatched registration is refused, so no Draft is left that can't be edited."""
+        response = self.register(self.payload(total_cost="709000.00"))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["errors"]["line_items"],
+                         "The LIB Grand Total (100,000.00) must equal the Total Project/Study Cost (709,000.00).")
+        self.assertEqual(self.saved_rows(), (0,) * 8)
+
+    def test_a_registration_without_lib_line_items_saves_nothing(self):
+        for line_items in ([], None):
+            payload = self.payload(line_items=line_items)
+            if line_items is None:
+                del payload["line_items"]
+            response = self.register(payload)
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("line_items", response.data["errors"])
+            self.assertEqual(self.saved_rows(), (0,) * 8)
+
+    def test_centavo_amounts_that_add_up_are_not_a_false_mismatch(self):
+        rows = [{"category": "mooe", "description": "Traveling Expenses - Local", "fiscal_year": 2027, "unit": "lot",
+                 "quantity": "1", "unit_cost": cost, "allocations": [{"period": "Q1", "amount": cost}]} for cost in ("0.10", "0.20")]
+
+        response = self.register(self.payload(total_cost="0.30", line_items=rows))
+
+        self.assertEqual(response.status_code, 201, response.data)
 
     def test_a_retried_registration_replays_instead_of_saving_twice(self):
         first = self.register(self.payload(), HTTP_IDEMPOTENCY_KEY="register-0001")

@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from accounts.permissions import HasRole, ProjectVisibleMixin, acting_for, ensure_in_scope, role_can
 from budget_lib.models import allocation_periods
 from budget_lib.events import log_registration_lib
-from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
+from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer, total_cost_problem
 from config.concurrency import AtomicMutationMixin, idempotent, lock
 from document_management.storage import delete_documents
 from outputs.serializers import ExpectedOutputSerializer
@@ -145,6 +145,8 @@ class ProjectListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
                         row_errors.append({"row": index, "errors": item.errors})
             if row_errors:
                 errors[key] = row_errors
+        if "line_items" not in errors and (problem := registration_lib_problem(project)):
+            errors["line_items"] = problem
         if errors:
             transaction.set_rollback(True)  # idempotent() commits a 4xx response's work otherwise
             return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -213,6 +215,15 @@ class ProjectCodeAvailableView(APIView):
         if not code:
             return Response({"code": "Pass the project code as ?code=."}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"code": code, "available": not Project.objects.filter(project_code=code).exists()})
+
+
+def registration_lib_problem(project):
+    """Client Task 47 (2026-11-06): a registration (Manual Entry or Excel) is refused, Draft included, unless its LIB
+    Grand Total equals the Total Project/Study Cost, so no Draft is left with a LIB that can no longer be fixed."""
+    budget = project.budgets.filter(is_current=True).first()
+    if budget is None:
+        return "Add the LIB line items. The LIB Grand Total must equal the Total Project/Study Cost."
+    return total_cost_problem(budget)
 
 
 def create_project_lib(project, rows, request, source="Manual Entry"):

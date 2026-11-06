@@ -130,8 +130,13 @@ class CoLeaderRuleTests(RMISTestCase):
         super().setUp()
         self.admin, self.leader = self.make_user("system_admin"), self.make_user("project_leader")
 
+    # Task 47-A: a registration needs a LIB whose Grand Total equals the Total Project/Study Cost (100,000.00)
+    LIB = [{"category": "mooe", "description": "Traveling Expenses - Local", "fiscal_year": 2027, "unit": "lot",
+            "quantity": "1", "unit_cost": "100000", "allocations": [{"period": "Q1", "amount": "100000"}]}]
+
     def register(self, team):
-        return self.client_for(self.admin).post("/api/projects/", {**base.project_payload(self.leader), "team": team}, format="json")
+        return self.client_for(self.admin).post("/api/projects/", {**base.project_payload(self.leader), "team": team, "line_items": self.LIB},
+                                                format="json")
 
     def row(self, user=None, name="Co"):
         return {"member_role": "co_leader", "name": name, "gender": "", "user": user.pk if user else None}
@@ -139,7 +144,8 @@ class CoLeaderRuleTests(RMISTestCase):
     def test_project_leader_project_staff_or_a_typed_name(self):
         for i, user in enumerate([self.make_user("project_leader"), self.make_user("project_staff"), None]):
             response = self.client_for(self.admin).post("/api/projects/", {
-                **base.project_payload(self.leader), "ntp_number": f"NTP-CO-{i}", "title": f"Co-leader {i}", "team": [self.row(user)]}, format="json")
+                **base.project_payload(self.leader), "ntp_number": f"NTP-CO-{i}", "title": f"Co-leader {i}", "team": [self.row(user)],
+                "line_items": self.LIB}, format="json")
             self.assertEqual(response.status_code, 201, (i, response.data))
 
     def test_other_roles_and_a_second_co_leader_are_refused(self):
