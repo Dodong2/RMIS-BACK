@@ -268,6 +268,35 @@ class NestedRegistrationTests(RMISTestCase):
             self.assertIn("line_items", response.data["errors"])
             self.assertEqual(self.saved_rows(), (0,) * 8)
 
+    def lib_row(self, item, cost, **extra):
+        return {"category": "mooe", "description": item, "fiscal_year": 2027, "unit": "lot", "quantity": "1", "unit_cost": cost,
+                "allocations": [{"period": "Q1", "amount": cost}], **extra}
+
+    def test_task_49_client_example_cost_adjusted_to_the_lib_registers(self):
+        """Client Task 49: Excel review leaves Item-less rows out; 709,000 cost vs a 409,000 LIB is refused, 409,000 registers."""
+        rows = [self.lib_row("Traveling Expenses - Local", "409000")]
+        refused = self.register(self.payload(total_cost="709000.00", line_items=rows))
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn("709,000.00", refused.data["errors"]["line_items"])
+        self.assertEqual(self.saved_rows(), (0,) * 8)
+
+        response = self.register(self.payload(total_cost="409000.00", line_items=rows))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(float(Project.objects.get().total_cost), 409000)  # never changed by the server
+        self.assertEqual(float(LineItem.objects.get().amount), 409000)
+
+    def test_optional_lib_fields_left_blank_still_register(self):
+        row = self.lib_row("Traveling Expenses - Local", "100000", unit="", specification="")
+        response = self.register(self.payload(line_items=[row]))
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual((LineItem.objects.get().unit, LineItem.objects.get().specification), ("", ""))
+
+    def test_a_lib_row_without_its_item_sent_directly_is_refused(self):
+        response = self.register(self.payload(line_items=[self.lib_row("", "100000")]))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("line_items", response.data["errors"])
+        self.assertEqual(self.saved_rows(), (0,) * 8)
+
     def test_centavo_amounts_that_add_up_are_not_a_false_mismatch(self):
         rows = [{"category": "mooe", "description": "Traveling Expenses - Local", "fiscal_year": 2027, "unit": "lot",
                  "quantity": "1", "unit_cost": cost, "allocations": [{"period": "Q1", "amount": cost}]} for cost in ("0.10", "0.20")]
