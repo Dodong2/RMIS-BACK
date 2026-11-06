@@ -4,6 +4,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Prefetch
+from django.http import Http404
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
@@ -376,12 +378,25 @@ class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):
 
 class ProcurementBalanceView(APIView):
     """Task 22 (2026-10-30): a LIB item's procurement figures per project year (and its quarters) for the New
-    Procurement Request modal; the same year_balance() the request validation uses."""
+    Procurement Request modal; the same year_balance() the request validation uses.
+    ?line_item=<id> -> {"line_item", "years"}; ?budget=<id> -> {"budget", "items": [{"line_item", "years"}]}."""
 
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         items = in_scope(LineItem.objects.select_related("budget__project"), request.user, "budget__project")
+        budget = request.query_params.get("budget", "")
+        if budget:
+            # Client Task 48-A: every item of one LIB at once, for Link to LIB Item's Available amounts
+            rows = list(items.filter(budget_id=budget).order_by("id").prefetch_related(
+                "realignments_to", "realignments_from", "disbursements",
+                Prefetch("procurement_requests", queryset=ProcurementRequest.objects.select_related("disbursement")),
+            )) if budget.isdigit() else []
+            if not rows:
+                raise Http404
+            years = project_years(rows[0].budget.project)
+            return Response({"budget": int(budget), "items": [
+                {"line_item": item.pk, "years": [year_balance(item, year) for year in years]} for item in rows]})
         item = generics.get_object_or_404(items, pk=request.query_params.get("line_item") or 0)
         years = project_years(item.budget.project)
         return Response({"line_item": item.pk, "years": [year_balance(item, year) for year in years]})

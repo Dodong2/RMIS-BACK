@@ -377,6 +377,43 @@ class YearBudgetTests(RMISTestCase):
         self.assertEqual(self.file(1000).status_code, 400)
         self.assertFalse(ProcurementRequest.objects.exists())
 
+    def test_budget_lists_every_item_with_the_same_figures_as_one_item(self):
+        """Client Task 48-A: New Procurement Request reads all items of the LIB in one call (Link to LIB Item)."""
+        other = LineItem.objects.create(budget=self.budget, category="mooe", description="Office Supplies Expenses", amount=450,
+                                        specification="PAPER CLIP", allocations=[{"period": "Y1Q1", "amount": "450"}])
+        pr = ProcurementRequest.objects.get(pk=self.file(30000).data["id"])
+        Disbursement.objects.create(line_item=self.item, amount=30000, disbursed_on=date(2026, 6, 1), recorded_by=self.leader,
+                                    procurement_request=pr)
+        self.file(10000)  # unpaid
+
+        response = self.leader_client.get(BALANCE_URL, {"budget": self.budget.id})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        items = {row["line_item"]: row["years"] for row in response.data["items"]}
+        self.assertEqual(set(items), {self.item.id, other.id})
+        self.assertEqual(items[self.item.id], self.leader_client.get(BALANCE_URL, {"line_item": self.item.id}).data["years"])
+        year1 = items[self.item.id][0]
+        self.assertEqual({k: year1[k] for k in ("approved", "committed", "paid", "unpaid", "available")},
+                         {"approved": 100000, "committed": 40000, "paid": 30000, "unpaid": 10000, "available": 60000})
+        # The other item's money isn't touched by this item's requests and payment
+        self.assertEqual([(y["year"], y["approved"], y["available"]) for y in items[other.id]], [(1, 450, 450), (2, 0, 0)])
+
+    def test_budget_reads_all_items_in_a_fixed_number_of_queries(self):
+        """Task 48-A: the DB is remote, so the query count must not grow with the number of items."""
+        for n in range(5):
+            LineItem.objects.create(budget=self.budget, category="mooe", description=f"Item {n}", amount=100,
+                                    allocations=[{"period": "Y1Q1", "amount": "100"}])
+        self.file(30000)
+        self.leader_client.get(BALANCE_URL, {"budget": self.budget.id})  # warm-up: auth/session rows
+        with self.assertNumQueries(6):  # scope check, items, then one query per related table
+            response = self.leader_client.get(BALANCE_URL, {"budget": self.budget.id})
+        self.assertEqual(len(response.data["items"]), 6)
+
+    def test_budget_of_another_leaders_project_is_not_found(self):
+        stranger = self.client_for(self.make_user("project_leader"))
+        self.assertEqual(stranger.get(BALANCE_URL, {"budget": self.budget.id}).status_code, 404)
+        self.assertEqual(self.leader_client.get(BALANCE_URL).status_code, 404)
+
     def test_a_failed_create_leaves_no_reservation(self):
         self._patch("financial_monitoring.views.record_procurement_event", side_effect=RuntimeError("boom"))
         self.leader_client.raise_request_exception = False

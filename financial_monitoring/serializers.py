@@ -88,6 +88,15 @@ def project_year_of(project, day):
     return min(max(months // 12 + 1, 1), years[-1])
 
 
+def _related(line_item, name, *select):
+    """A line item's related rows, from prefetch_related when the caller prefetched them (Task 48-A: every item of a
+    LIB in a few queries), else read fresh (e.g. under the request validation's row lock)."""
+    manager = getattr(line_item, name)
+    if name in getattr(line_item, "_prefetched_objects_cache", {}):
+        return list(manager.all())
+    return list(manager.select_related(*select))
+
+
 def year_balance(line_item, year, exclude_procurement_pk=None):
     """
     Task 22 (2026-10-30), the one procurement budget calculation for a line item's project year:
@@ -106,19 +115,17 @@ def year_balance(line_item, year, exclude_procurement_pk=None):
                 quarters[quarter] = Decimal(str(row["amount"]))
     approved = sum(quarters.values(), Decimal("0"))
     for realignment, sign in (
-        *((r, 1) for r in line_item.realignments_to.filter(status__in=APPLIED_STATUSES)),
-        *((r, -1) for r in line_item.realignments_from.filter(status__in=APPLIED_STATUSES)),
+        *((r, 1) for r in _related(line_item, "realignments_to") if r.status in APPLIED_STATUSES),
+        *((r, -1) for r in _related(line_item, "realignments_from") if r.status in APPLIED_STATUSES),
     ):
         moment = realignment.reviewed_at or realignment.created_at
         if project_year_of(project, timezone.localdate(moment)) == year:
             approved += sign * realignment.amount
 
-    requests = line_item.procurement_requests.filter(project_year=year).exclude(status="cancelled")
-    if exclude_procurement_pk:
-        requests = requests.exclude(pk=exclude_procurement_pk)
-    requests = list(requests.select_related("disbursement"))
-    manual = [d for d in line_item.disbursements.filter(procurement_request__isnull=True)
-              if project_year_of(project, d.disbursed_on) == year]
+    requests = [r for r in _related(line_item, "procurement_requests", "disbursement")
+                if r.project_year == year and r.status != "cancelled" and (not exclude_procurement_pk or r.pk != exclude_procurement_pk)]
+    manual = [d for d in _related(line_item, "disbursements")
+              if d.procurement_request_id is None and project_year_of(project, d.disbursed_on) == year]
     manual_total = sum((d.amount for d in manual), Decimal("0"))
     committed = sum((r.amount for r in requests), Decimal("0")) + manual_total
     paid = manual_total + sum((r.disbursement.amount for r in requests if hasattr(r, "disbursement")), Decimal("0"))
