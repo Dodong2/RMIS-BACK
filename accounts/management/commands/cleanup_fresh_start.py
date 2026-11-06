@@ -37,6 +37,7 @@ CLEAR = [
     "personnel.StaffProfile", "personnel.ProjectAssignment", "personnel.Task", "personnel.TaskDeliverable",
     "personnel.TaskUpdate", "personnel.PersonnelChange", "personnel.PropertyClearance",
     "budget_lib.LineItemBudget", "budget_lib.BudgetReview", "budget_lib.LineItem", "budget_lib.LineItemEdit",
+    "budget_lib.BudgetEventLog",  # Task 46 (Carl 2026-11-06): cleared with the test data it logs, like accounts.AuditLog
     "financial_monitoring.Disbursement", "financial_monitoring.BudgetRealignment",
     "financial_monitoring.ProcurementRequest", "financial_monitoring.ProcurementStatusEvent",
     "compliance.EthicsReviewReference", "compliance.SimilarityCheckRecord", "compliance.AIUseDeclaration",
