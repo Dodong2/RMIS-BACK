@@ -32,3 +32,16 @@ def log_budget_event(user, project, event, description, target, *, target_id=Non
         target_id=target.pk if target_id is None else target_id,
         previous=previous, new=new, remarks=remarks or "", amount=amount, details=details,
     )
+
+
+def log_registration_lib(user, budget, source):
+    """LIB v1 saved as part of a project registration (Manual Entry, the registration LIB step, or Upload via Excel);
+    one row with every line item. Call it inside the registration's transaction: a rolled-back registration or an
+    Excel dry run leaves nothing."""
+    items = [line_item_values(item) for item in budget.line_items.order_by("id")]
+    total = sum((item["amount"] for item in items), start=0)
+    return log_budget_event(
+        user, budget.project, "LIB_CREATED_AT_REGISTRATION",
+        f"Created LIB version {budget.version_number} with {len(items)} line item(s) during project registration ({source}).",
+        budget, new={"status": budget.status, "line_items": items}, amount=total, version=budget.version_number, source=source,
+    )

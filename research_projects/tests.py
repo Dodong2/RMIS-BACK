@@ -213,6 +213,17 @@ class NestedRegistrationTests(RMISTestCase):
         self.assertEqual(response.data["errors"]["beneficiaries"][0]["row"], 1)
         self.assertEqual(self.saved_rows(), (0,) * 8)
 
+    def test_manual_entry_lib_is_logged_and_a_failed_registration_logs_nothing(self):
+        """Task 46-B (Event Logs Budget): the LIB saved with a Manual Entry registration; a rolled-back one leaves no row."""
+        from budget_lib.models import BudgetEventLog
+
+        self.assertEqual(self.register(self.payload(beneficiaries=[{"group": "", "total": 1}])).status_code, 400)
+        self.assertFalse(BudgetEventLog.objects.exists())
+        self.assertEqual(self.register(self.payload()).status_code, 201)
+        log = BudgetEventLog.objects.get()
+        self.assertEqual((log.event, log.actor, log.amount, log.details["source"], len(log.new["line_items"])),
+                         ("LIB_CREATED_AT_REGISTRATION", self.admin, 100000, "Manual Entry", 1))
+
     def test_the_lib_keeps_the_lib_steps_rules(self):
         # A dated project's line items need their quarterly split, as on POST projects/<id>/lib/
         row = {"category": "mooe", "description": "Traveling Expenses - Local", "unit": "lot", "quantity": "1", "unit_cost": "100"}
@@ -717,6 +728,24 @@ class ExcelImportTests(RMISTestCase):
         self.assertEqual(project.target_beneficiaries.get().total, 2000)
         self.assertEqual(LineItem.objects.get(budget__project=project).amount, 10000)
         self.assertEqual(project.milestones.count(), 1)
+
+    def test_excel_registration_logs_its_lib_but_a_dry_run_does_not(self):
+        """Task 46-B (Event Logs Budget): Upload via Excel's LIB is logged; the review dry run saves nothing."""
+        from budget_lib.models import BudgetEventLog
+
+        self.fill_project()
+        self.workbook["Budget Requirements"].append([2026, "MOOE", "Traveling Expenses - Local", None, "pax", 4, 2500, None])
+        buffer = io.BytesIO()
+        self.workbook.save(buffer)
+        buffer.seek(0)
+        buffer.name = "registration.xlsx"
+        dry = self.client_for(self.admin).post("/api/projects/import/?dry_run=1", {"file": buffer}, format="multipart")
+        self.assertEqual(dry.status_code, 200, dry.data)
+        self.assertFalse(BudgetEventLog.objects.exists())
+        self.assertEqual(self.upload().status_code, 201)
+        log = BudgetEventLog.objects.get()
+        self.assertEqual((log.event, log.actor_role, log.project_code, log.amount, log.details["source"]),
+                         ("LIB_CREATED_AT_REGISTRATION", "system_admin", "LSPU-X1", 10000, "Upload via Excel"))
 
 
     def test_template_rows_without_particulars_or_description_import(self):

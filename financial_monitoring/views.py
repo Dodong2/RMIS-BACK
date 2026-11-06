@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import BudgetScopedMixin, HasRole, role_can, scoped_projects
+from budget_lib.events import changed_values, log_budget_event
 from budget_lib.models import LineItem, LineItemBudget
 from config.concurrency import idempotent, lock, lock_line_items
 from realtime.notify import notify, project_audience
@@ -79,7 +80,13 @@ class DisbursementListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        serializer.save(recorded_by=self.request.user)
+        disbursement = serializer.save(recorded_by=self.request.user)
+        item = disbursement.line_item
+        log_budget_event(self.request.user, item.budget.project, "DISBURSEMENT_RECORDED",
+                         f"Recorded a disbursement of {disbursement.amount:,.2f} against LIB line item {item.description}.",
+                         disbursement, new={"amount": disbursement.amount, "disbursed_on": disbursement.disbursed_on,
+                                            "reference_number": disbursement.reference_number, "payee": disbursement.payee},
+                         amount=disbursement.amount, line_item=item.pk, line_item_description=item.description)
 
 
 class DisbursementDetailView(BudgetScopedMixin, generics.RetrieveAPIView):
@@ -133,6 +140,9 @@ class RealignmentListCreateView(BudgetScopedMixin, generics.ListCreateAPIView):
 
         serializer.save(requested_by=request.user, batch=uuid.uuid4())
         saved = serializer.instance if many else [serializer.instance]
+        for realignment in saved:
+            log_realignment(request.user, realignment, "REALIGNMENT_REQUESTED", "Requested",
+                            new={"status": realignment.status}, remarks=realignment.justification)
         realignment_signal("financial.realignment.created", saved[0])  # one signal per request, even for a bulk one
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -166,12 +176,36 @@ class RealignmentReviewView(APIView):
 
         serializer = RealignmentReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        previous = realignment.status
         realignment = review_realignment(
             realignment, request.user,
             serializer.validated_data["decision"],
         )
+        log_realignment(request.user, realignment, "REALIGNMENT_REJECTED" if realignment.status == "rejected" else "REALIGNMENT_APPROVED",
+                        "Reviewed", previous={"status": previous}, new={"status": realignment.status})
         realignment_signal("financial.realignment.reviewed", realignment)
         return Response(BudgetRealignmentSerializer(realignment).data)
+
+
+def log_realignment(user, realignment, event, verb, **values):
+    source, target = realignment.from_line_item, realignment.to_line_item
+    target_name = target.description if target else realignment.new_item_description
+    log_budget_event(user, source.budget.project, event,
+                     f"{verb} a realignment of {realignment.amount:,.2f} from {source.description} to {target_name}.",
+                     realignment, amount=realignment.amount, tier=realignment.tier, from_line_item=source.pk,
+                     from_line_item_description=source.description, to_line_item=target.pk if target else None,
+                     to_line_item_description=target_name, batch=realignment.batch, **values)
+
+
+def log_procurement(user, procurement, event, verb, **values):
+    item = procurement.line_item
+    log_budget_event(user, item.budget.project, event, f"{verb} procurement request #{procurement.pk} ({procurement.description}).",
+                     procurement, amount=procurement.amount, line_item=item.pk, line_item_description=item.description,
+                     project_year=procurement.project_year, quarter=procurement.quarter, **values)
+
+
+PROCUREMENT_STATUS_EVENTS = {"returned_for_revision": ("PROCUREMENT_RETURNED_FOR_REVISION", "Returned"),
+                             "completed": ("PROCUREMENT_COMPLETED", "Completed")}
 
 
 def realignment_signal(event_type, realignment):
@@ -229,6 +263,8 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
     def perform_create(self, serializer):
         procurement = serializer.save(requested_by=self.request.user)
         record_procurement_event(procurement, "", self.request.user)
+        log_procurement(self.request.user, procurement, "PROCUREMENT_REQUEST_CREATED", "Created",
+                        new={"status": procurement.status, "description": procurement.description, "amount": procurement.amount})
         procurement_signal("procurement.created", procurement)
         transaction.on_commit(lambda: notifications.request_filed(procurement))
 
@@ -248,6 +284,8 @@ class ProcurementReceiveView(APIView):
         procurement.received_at = timezone.now()
         procurement.save()
         record_procurement_event(procurement, "requested", request.user)
+        log_procurement(request.user, procurement, "PROCUREMENT_REQUEST_RECEIVED", "Received",
+                        previous={"status": "requested"}, new={"status": procurement.status})
         procurement_signal("procurement.updated", procurement)
         transaction.on_commit(lambda: notifications.request_received(procurement))
         return Response(ProcurementRequestSerializer(procurement).data)
@@ -272,6 +310,9 @@ class ProcurementStatusView(APIView):
             procurement.completed_at = timezone.now()  # not paid yet: Finance confirms the payment (ProcurementPayView)
         procurement.save()
         record_procurement_event(procurement, previous, request.user, serializer.validated_data.get("remarks", ""))
+        event, verb = PROCUREMENT_STATUS_EVENTS.get(procurement.status, ("PROCUREMENT_STATUS_UPDATED", "Updated the status of"))
+        log_procurement(request.user, procurement, event, verb, previous={"status": previous}, new={"status": procurement.status},
+                        remarks=serializer.validated_data.get("remarks", ""))
         procurement_signal("procurement.updated", procurement)
         if procurement.status == "returned_for_revision":
             transaction.on_commit(lambda: notifications.request_returned(procurement))
@@ -297,7 +338,10 @@ class ProcurementPayView(APIView):
         serializer = ProcurementPaySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         lock_line_items(procurement.line_item)
-        post_procurement_disbursement(procurement, user=request.user, **serializer.validated_data)
+        disbursement = post_procurement_disbursement(procurement, user=request.user, **serializer.validated_data)
+        log_procurement(request.user, procurement, "PROCUREMENT_PAYMENT_CONFIRMED", "Confirmed the payment of",
+                        new={"paid": disbursement.amount, "paid_on": disbursement.disbursed_on,
+                             "reference_number": disbursement.reference_number}, disbursement=disbursement.pk)
         procurement_signal("procurement.updated", procurement)
         return Response(ProcurementRequestSerializer(ProcurementRequest.objects.get(pk=procurement.pk)).data)
 
@@ -319,8 +363,13 @@ class ProcurementResubmitView(BudgetScopedMixin, generics.GenericAPIView):
         data["remarks"] = request.data.get("remarks", "")  # the leader's note replaces the Procurement Office's return reason
         serializer = self.get_serializer(procurement, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
+        fields = ("status", "description", "amount", "project_year", "quarter")
+        before = {f: getattr(procurement, f) for f in fields}
         procurement = serializer.save(status="requested", received_by=None, received_at=None)
         record_procurement_event(procurement, "returned_for_revision", request.user, data["remarks"])
+        previous, new = changed_values(before, {f: getattr(procurement, f) for f in fields})
+        log_procurement(request.user, procurement, "PROCUREMENT_REQUEST_RESUBMITTED", "Resubmitted",
+                        previous=previous, new=new, remarks=data["remarks"])
         procurement_signal("procurement.updated", procurement)
         return Response(serializer.data)
 

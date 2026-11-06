@@ -15,6 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from accounts.models import STAFF_ID_MESSAGE, STAFF_ID_PATTERN, User
 from accounts.permissions import LEADER_ROLES
+from budget_lib.events import log_registration_lib
 from budget_lib.models import LibItem, LineItem, allocation_periods
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer, catalog_item_name, clean_allocations, line_total
 from rest_framework.exceptions import ValidationError
@@ -774,6 +775,8 @@ def import_workbook(file_obj, request):
             else:
                 errors.extend(_serializer_errors(name, row_number, row_serializer.errors, labels))
     user = request.user
+    if budget is not None and not errors:
+        log_registration_lib(user, budget, "Upload via Excel")
     if user.role and user.role.code in LEADER_ROLES and not leader_owns(user, project):
         errors.append({"sheet": "Project", "row": None, "field": "Project Leader E-mail Address", "message": (
             "Leaders can only upload a project they lead, one under a Program they lead (Program Code), "

@@ -146,3 +146,36 @@ class BudgetEventLogTests(RMISTestCase):
 
     def test_no_admin_page_for_the_log(self):
         self.assertNotIn(BudgetEventLog, admin.site._registry)
+
+
+class RegistrationLibEventLogTests(RMISTestCase):
+    """Task 46-B (Carl 2026-11-06): the LIB saved with a registration is logged too."""
+
+    ROWS = [
+        {"category": "mooe", "description": "Traveling Expenses - Local", "fiscal_year": 2026, "unit": "pax", "quantity": "4", "unit_cost": "2500"},
+        {"category": "co", "description": "Information and Communication Technology Equipment", "fiscal_year": 2026, "unit": "unit",
+         "quantity": "1", "unit_cost": "7500"},
+    ]
+
+    def setUp(self):
+        super().setUp()
+        self.leader = self.make_user("project_leader", staff_id="1001")
+        self.project = Project.objects.create(title="B", project_code="B-1", funding_type="core_funded", lead=self.leader)
+
+    def post_lib(self, rows):
+        return self.client_for(self.leader).post(f"/api/projects/{self.project.id}/lib/", {"line_items": rows}, format="json")
+
+    def test_registration_lib_step_logs_every_line_item(self):
+        self.assertEqual(self.post_lib(self.ROWS).status_code, 201)
+        log = BudgetEventLog.objects.get()
+        self.assertEqual((log.event, log.actor_role, log.amount, log.details["source"]),
+                         ("LIB_CREATED_AT_REGISTRATION", "project_leader", Decimal("17500.00"), "registration LIB step"))
+        self.assertEqual([(i["description"], i["amount"]) for i in log.new["line_items"]],
+                         [("Traveling Expenses - Local", "10000.00"), ("Information and Communication Technology Equipment", "7500.00")])
+
+    def test_refused_registration_lib_logs_nothing(self):
+        self.assertEqual(self.post_lib([{**self.ROWS[0], "unit": "nope"}]).status_code, 400)
+        self.assertFalse(BudgetEventLog.objects.exists())
+        self.post_lib(self.ROWS)
+        self.assertEqual(self.post_lib(self.ROWS).status_code, 400)  # already has a LIB
+        self.assertEqual(BudgetEventLog.objects.count(), 1)

@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.permissions import HasRole, ProjectVisibleMixin, acting_for, ensure_in_scope, role_can
 from budget_lib.models import allocation_periods
+from budget_lib.events import log_registration_lib
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer
 from config.concurrency import AtomicMutationMixin, idempotent, lock
 from document_management.storage import delete_documents
@@ -214,7 +215,7 @@ class ProjectCodeAvailableView(APIView):
         return Response({"code": code, "available": not Project.objects.filter(project_code=code).exists()})
 
 
-def create_project_lib(project, rows, request):
+def create_project_lib(project, rows, request, source="Manual Entry"):
     """The registration's draft LIB v1: the budget and its line items. Returns (budget, row errors); the caller rolls
     back when there are errors. Shared by ProjectLibView and Manual Entry's registration (client 2026-10-29)."""
     # Every row needs its per-year/per-quarter split once the project has dates (client meeting 2026-10-14)
@@ -230,6 +231,8 @@ def create_project_lib(project, rows, request):
             item.save()
         else:
             errors.append({"row": index, "errors": item.errors})
+    if not errors:
+        log_registration_lib(request.user, budget, source)
     return budget, errors
 
 
@@ -251,7 +254,7 @@ class ProjectLibView(APIView):
             return Response({"detail": "This project already has a LIB. Edit it under Budget Management."},
                             status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
-            budget, errors = create_project_lib(project, rows, request)
+            budget, errors = create_project_lib(project, rows, request, source="registration LIB step")
             if errors:
                 transaction.set_rollback(True)
                 return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
