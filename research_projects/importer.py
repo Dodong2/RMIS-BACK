@@ -12,6 +12,7 @@ import openpyxl
 from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from accounts.models import STAFF_ID_MESSAGE, STAFF_ID_PATTERN, User
 from accounts.permissions import LEADER_ROLES
@@ -109,12 +110,12 @@ ANNEX_A_SIGNATORIES = [
 ]
 
 TABLE_SHEETS = {
+    # Client Task 45 (2026-11-06): no Name/Gender columns; both come from the member's RMIS account. Older templates'
+    # Name and Gender columns are ignored.
     "Project Team": [
         ("Role", "member_role", "choice", TEAM_ROLES),
-        ("Name", "name", "text", None),
-        ("Gender", "gender", "choice", Project.GENDER_CHOICES),
-        ("RMIS E-mail (optional)", "user", "user", None),
-        ("Staff ID (optional)", "user_staff_id", "staff_id", None),
+        ("RMIS E-mail", "user", "user", None),
+        ("Staff ID", "user_staff_id", "staff_id", None),
     ],
     "Study Components": [
         ("Study Title", "title", "text", None),
@@ -151,7 +152,8 @@ TABLE_SHEETS = {
     ],
 }
 # Templates downloaded before 2026-10-23 still say "Target Date"; read it as the End Date.
-OLD_TABLE_HEADERS = {"Work Plan": {"target_date": "Target Date"}}
+OLD_TABLE_HEADERS = {"Work Plan": {"target_date": "Target Date"},
+                     "Project Team": {"user": "RMIS E-mail (optional)", "user_staff_id": "Staff ID (optional)"}}
 # Typed dates besides real date cells: YYYY-MM-DD, MM/DD/YYYY (Excel's Philippine default), "March 1, 2027"
 DATE_FORMATS = ("%m/%d/%Y", "%B %d, %Y", "%b %d, %Y")
 TABLE_SERIALIZERS = {
@@ -333,6 +335,72 @@ def build_work_plan_template():
     return buffer.getvalue()
 
 
+LISTS_SHEET = "Lists"
+TABLE_ROWS_WITH_DROPDOWNS = 500  # rows 2-501 of each table sheet get the dropdowns
+
+
+def _labels(choices):
+    return [label for _, label in choices]
+
+
+def _dropdown_lists():
+    """Client Task 45 (2026-11-06): the template's choices, read at every download so System Admin changes count.
+    Returns [(Lists header, values, targets)]; a target is ("Project", field) for that row's Value cell or
+    (sheet, field) for a table column. No targets = a multi-value field, typed comma-separated and only listed."""
+    thrusts = RdeThrust.objects.filter(parent=None)
+    return [
+        ("Funding Type", [name for _, name in FUNDING_TYPES], [("Project", "funding_type")]),
+        ("Gender", _labels(Project.GENDER_CHOICES), [("Project", "lead_gender")]),
+        ("Campus", _labels(User.CAMPUS_CHOICES), [("Project", "campus")]),
+        ("College Unit", list(CollegeUnit.objects.values_list("name", flat=True)), [("Project", "implementing_unit")]),
+        ("New or Continuing", _labels(NEW_OR_CONTINUING), [("Project", "is_continuing")]),
+        ("Basic or Applied Research", _labels(Project.RESEARCH_TYPE_CHOICES), [("Project", "research_type")]),
+        ("Wet or Dry Research", _labels(WET_OR_DRY), [("Project", "is_dry_research")]),
+        ("RDE Thrust", list(thrusts.values_list("name", flat=True)), [("Project", "rde_thrust")]),
+        ("RDE Priority Area", list(RdeThrust.objects.filter(parent__in=thrusts).order_by("parent__name", "name")
+                                   .values_list("name", flat=True)), [("Project", "rde_priority")]),
+        ("Project Team Role", _labels(TEAM_ROLES), [("Project Team", "member_role")]),
+        ("6Ps Item", _labels(SIX_PS), [("Expected Outputs (6Ps)", "category")]),
+        ("Budget Category", [short for _, short, _ in CATEGORY_LEGEND], [("Budget Requirements", "category")]),
+        ("LIB Item (Particulars)", list(LibItem.objects.filter(is_active=True).order_by("category", "name")
+                                        .values_list("name", flat=True)), [("Budget Requirements", "description")]),
+        ("Unit", _labels(LineItem.UNIT_CHOICES), [("Budget Requirements", "unit")]),
+        ("Sector (type, comma-separated)", _labels(Project.SECTOR_CHOICES), []),
+        ("Research Typology (type, comma-separated)", _labels(Project.TYPOLOGY_CHOICES), []),
+        ("SDGs (type the numbers, comma-separated)", [str(n) for n in range(1, 18)], []),
+        ("Cooperating Agency/ies (type, separated by ;)", list(CooperatingAgency.objects.values_list("name", flat=True)), []),
+    ]
+
+
+def _add_dropdowns(wb):
+    """A protected Lists sheet (one column per choice list) and list Data Validation on the cells that take one value.
+    A dropdown only helps typing: the import still checks every value against the current System Admin data."""
+    lists = wb.create_sheet(LISTS_SHEET)
+    project_rows = {field: row for row, (_, field, *_rest) in enumerate(PROJECT_FIELDS, start=2)}
+    for col, (header, values, targets) in enumerate(_dropdown_lists(), start=1):
+        letter = get_column_letter(col)
+        lists.cell(row=1, column=col, value=header).font = Font(bold=True)
+        lists.column_dimensions[letter].width = max(20, min(60, max((len(v) for v in [header, *values]), default=20) + 2))
+        for row, value in enumerate(values, start=2):
+            lists.cell(row=row, column=col, value=value)
+        if not values or not targets:
+            continue
+        for sheet_name, field in targets:
+            sheet = wb[sheet_name]
+            validation = DataValidation(type="list", formula1=f"{LISTS_SHEET}!${letter}$2:${letter}${len(values) + 1}",
+                                        allow_blank=True, showErrorMessage=True, errorStyle="stop",
+                                        errorTitle="Not in the list", error=f"Pick a {header} from the list (Lists sheet).")
+            if sheet_name == "Project":
+                validation.add(f"B{project_rows[field]}")
+            else:
+                index = [f for _, f, *_rest in TABLE_SHEETS[sheet_name]].index(field) + 1
+                column = get_column_letter(index)
+                validation.add(f"{column}2:{column}{TABLE_ROWS_WITH_DROPDOWNS + 1}")
+            sheet.add_data_validation(validation)
+    lists.freeze_panes = "A2"
+    lists.protection.sheet = True  # read-only reference; no password
+
+
 def build_template():
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -356,6 +424,7 @@ def build_template():
     for name in TABLE_SHEETS:
         _add_table_sheet(wb.create_sheet(name), name)
     _add_category_legend(wb)
+    _add_dropdowns(wb)
     for sheet in wb.worksheets:
         for cell in sheet[1]:
             cell.font = Font(bold=True)
@@ -692,8 +761,8 @@ def _pick_account(data, staff_field, email_field, error):
 
 
 def _fill_from_accounts(project_data, tables, errors):
-    """Resolve the Project Leader and Project Team accounts and fill blank Gender/Contact No./Name from their profiles.
-    Filled cells are kept: they are this project's own values."""
+    """Resolve the Project Leader and Project Team accounts. The leader's blank Gender/Contact No. are filled from the
+    profile (filled cells are this project's own values); a team row's name and gender always come from its account."""
     lead = _pick_account(project_data, "lead_staff_id", "lead", lambda message: errors.append(
         {"sheet": "Project", "row": None, "field": "Project Leader Staff ID", "message": message}))
     if lead:
@@ -702,12 +771,16 @@ def _fill_from_accounts(project_data, tables, errors):
         if lead.mobile_number:
             project_data.setdefault("contact_number", lead.mobile_number)
     for row_number, data in tables.get("Project Team", []):
+        reported = any(e["sheet"] == "Project Team" and e["row"] == row_number for e in errors)
         member = _pick_account(data, "user_staff_id", "user", lambda message, row=row_number: errors.append(
-            {"sheet": "Project Team", "row": row, "field": "Staff ID (optional)", "message": message}))
+            {"sheet": "Project Team", "row": row, "field": "Staff ID", "message": message}))
         if member:
-            data.setdefault("name", member.display_name)
-            if member.gender:
-                data.setdefault("gender", member.gender)
+            # Client Task 45: never the workbook's own name/gender, only the account's
+            data["name"], data["gender"] = member.display_name, member.gender or ""
+        elif not reported and not any(e["sheet"] == "Project Team" and e["row"] == row_number for e in errors):
+            errors.append({"sheet": "Project Team", "row": row_number, "field": "RMIS E-mail", "message": (
+                "Give the member's RMIS E-mail and Staff ID; the name and gender come from the account. "
+                "Members without an RMIS account are added later in Edit Registration.")})
 
 
 def _serializer_errors(sheet, row, serializer_errors, labels):
