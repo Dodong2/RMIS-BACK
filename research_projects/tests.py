@@ -1555,8 +1555,9 @@ class WorkPlanExcelTests(RMISTestCase):
 class LibExcelTests(RMISTestCase):
     """Task 12 (2026-10-29): Step 4 Budget (LIB) has its own Excel template and import, separate from Upload via Excel.
     Client Task 50 (2026-11-07): that template is Upload via Excel's Budget Requirements sheet (columns, Legend, Lists
-    dropdowns). Task 51: a period without its Y/Q column is 0.00 (the old LIB sheet still needs every column); the import
-    is all-or-nothing and saves nothing."""
+    dropdowns). Task 51: a period without its Y/Q column is 0.00 (the old LIB sheet still needs every column). Task 52: on the
+    Budget Requirements sheet Unit and Particulars may be blank and a Total-only row is Qty 1; the import is all-or-nothing
+    and saves nothing."""
 
     TEMPLATE_URL = "/api/projects/lib-template/"
     PARSE_URL = "/api/projects/parse-lib/"
@@ -1719,7 +1720,7 @@ class LibExcelTests(RMISTestCase):
             [None, "MOOE", "Common Office Supplies", None, "unit", 1, 100, None, 100],
             [None, "MOOE", "Training Expenses", None, "unit", 1, 100, None, 60, 30],
             [None, "MOOE", "Training Expenses", None, "unit", "two", 100, None, 200],
-            [None, "MOOE", "Training Expenses", None, None, 1, 100, None, 100],
+            [None, "MOOE", "Training Expenses", None, "unit", 1, None, None, 100],
             [None, "CO", "Office Equipment", None, "unit", 1, -5, None, -5],
             ["next year", "MOOE", "Training Expenses", None, "unit", 1, 100, None, 100],
         ])
@@ -1730,6 +1731,51 @@ class LibExcelTests(RMISTestCase):
         self.assertEqual(sorted({e["row"] for e in response.data["errors"]}), [first + n for n in range(1, 8)])
         self.assertTrue(all(e["sheet"] == self.SHEET for e in response.data["errors"]))
         self.assertIn("Particulars", [e["field"] for e in response.data["errors"] if e["row"] == first + 2])
+
+    def test_a_row_with_only_its_total_reads_as_qty_one_and_a_blank_particulars_is_an_itemless_row(self):
+        # Task 52 (2026-11-07): the Vetiver LIB gives only Category, Specification, Total and the split, like Upload via Excel
+        workbook = self.workbook()
+        self.fill(workbook[self.SHEET], [
+            [2027, "MOOE", None, "Office Supplies and Fuels", None, None, None, 300000, 150000, None, 150000],
+            [2027, "MOOE", "Labor & Wages", "Contract Labor", None, None, None, 227620.8, 113810.4, None, 113810.4],
+        ])
+        LibItem.objects.get_or_create(category="mooe", name="Labor & Wages")
+
+        response = self.parse(workbook)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        first, second = response.data["rows"]
+        self.assertEqual((first["description"], first["specification"], first["unit"], first["quantity"], first["unit_cost"], first["amount"]),
+                         ("", "Office Supplies and Fuels", "", "1", "300000", "300000.00"))
+        self.assertEqual((second["description"], second["quantity"], second["unit_cost"], second["amount"]),
+                         ("Labor & Wages", "1", "227620.8", "227620.80"))
+        self.assertEqual(second["allocations"][0], {"period": "Q1", "amount": "113810.40"})
+
+    def test_a_total_only_row_still_needs_its_split_to_add_up_and_qty_without_unit_cost_is_refused(self):
+        workbook = self.workbook()
+        first = self.fill(workbook[self.SHEET], [
+            [None, "MOOE", None, None, None, None, None, 300, 100],
+            [None, "MOOE", None, None, None, 2, None, None, 100],
+            [None, "MOOE", None, None, None, None, None, 0, None],
+        ])
+
+        response = self.parse(workbook)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(sorted((e["row"], e["field"]) for e in response.data["errors"]),
+                         [(first, "Budget periods"), (first + 1, "Unit Cost"), (first + 2, "Total")])
+
+    def test_an_old_lib_sheet_still_needs_item_unit_qty_and_unit_cost(self):
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "LIB"
+        sheet.append(["Particulars", "Item", "Specification (optional)", "Unit", "Qty", "Unit Cost (₱)", "Total (₱)", "Q1", "Q2", "Q3", "Q4"])
+        sheet.append(["MOOE", None, None, None, None, None, 100, 100])
+
+        response = self.parse(workbook)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(sorted(e["field"] for e in response.data["errors"]), ["Item", "Qty", "Unit", "Unit Cost (₱)"])
 
     def test_a_whole_upload_via_excel_workbook_reads_its_budget_requirements(self):
         from research_projects.importer import build_template

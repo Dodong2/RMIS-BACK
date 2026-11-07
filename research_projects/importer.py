@@ -729,7 +729,8 @@ def _lib_layout(wb, periods):
 def read_lib(file_obj, periods):
     """Step 4's LIB import as Manual Entry LIB rows, checked with the LineItem rules (catalog Item, Qty x Unit Cost, a
     split over exactly the project's periods). Reads the Budget Requirements sheet (client Task 50; a whole Upload via
-    Excel workbook works too) or a Task 12 template's LIB sheet. Returns (rows, errors); all-or-nothing, nothing is saved."""
+    Excel workbook works too) or a Task 12 template's LIB sheet. On Budget Requirements, Unit and Particulars may be blank
+    and a Total-only row is Qty 1 (Task 52). Returns (rows, errors); all-or-nothing, nothing is saved."""
     try:
         wb = openpyxl.load_workbook(file_obj, data_only=True)
     except Exception as exc:  # not an xlsx, or corrupted
@@ -758,15 +759,28 @@ def read_lib(file_obj, periods):
                 data[field] = _convert(cells[i], kind, choices)
             except CellError as exc:
                 row_errors.append(error(r, label, str(exc)))
+        optional = {"specification", "fiscal_year"}
+        if name != LIB_SHEET:
+            # Task 52: like Upload via Excel, Unit and Particulars may be blank (no Item = a red row to pick on Step 4)
+            # and a row with only its Total reads as Qty 1 x Unit Cost = Total
+            optional |= {"unit", "description"}
+            if data.get("quantity") is None and data.get("unit_cost") is None and not row_errors:
+                try:
+                    row_total = _convert(cells[total], "decimal", None)
+                except CellError as exc:
+                    row_errors.append(error(r, total_label, str(exc)))
+                    row_total = None
+                if row_total is not None:
+                    data["quantity"], data["unit_cost"] = "1", row_total
         for label, field, *_ in fields:
-            if field not in ("specification", "fiscal_year") and data.get(field) is None and not any(e["field"] == label for e in row_errors):
+            if field not in optional and data.get(field) is None and not any(e["field"] == label for e in row_errors):
                 row_errors.append(error(r, label, f"Enter the {label.replace(' (₱)', '')}."))
         if data.get("specification") and len(data["specification"]) > 300:
             row_errors.append(error(r, labels["specification"], "Keep it to 300 characters."))
         for field in ("quantity", "unit_cost"):
             if data.get(field) is not None and Decimal(data[field]) < 0:
                 row_errors.append(error(r, labels[field], "Can't be negative."))
-        if not row_errors:
+        if not row_errors and data.get("description"):
             try:
                 data["description"] = catalog_item_name(data["category"], data["description"])
             except ValidationError as exc:
@@ -795,7 +809,7 @@ def read_lib(file_obj, periods):
             data["amount"] = str(amount)
         errors.extend(row_errors)
         if not row_errors:
-            rows.append({"specification": "", **{k: v for k, v in data.items() if v is not None}})
+            rows.append({"description": "", "specification": "", "unit": "", **{k: v for k, v in data.items() if v is not None}})
     if not rows and not errors:
         errors.append(error(None, "Items", f"The {name} sheet has no items. Fill at least one row."))
     if errors:
