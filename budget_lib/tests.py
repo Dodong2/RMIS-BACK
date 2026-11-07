@@ -465,7 +465,7 @@ class LibDownloadTests(RMISTestCase):
         )
         self.budget = LineItemBudget.objects.create(project=self.project, version_number=1, status="endorsed")
         LineItem.objects.create(budget=self.budget, category="mooe", description="Training Expenses", specification="Venue, 2 days",
-                                unit="pax", quantity=Decimal("20"), unit_cost=Decimal("500.50"), amount=Decimal("10010"),
+                                fiscal_year=2027, unit="pax", quantity=Decimal("20"), unit_cost=Decimal("500.50"), amount=Decimal("10010"),
                                 allocations=[{"period": "Y1Q1", "amount": "4010.00"}, {"period": "Y1Q4", "amount": "6000.00"}])
         LineItem.objects.create(budget=self.budget, category="co", description="Office Equipment", unit="unit",
                                 quantity=Decimal("1"), unit_cost=Decimal("5490"), amount=Decimal("5490"),
@@ -482,15 +482,14 @@ class LibDownloadTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Disposition"], 'attachment; filename="LIB_NTP-9_v1.xlsx"')
-        sheet = openpyxl.load_workbook(io.BytesIO(response.content))["LIB"]
-        header = next(r for r in range(1, 20) if sheet.cell(row=r, column=1).value == "Particulars")
-        self.assertEqual([c.value for c in sheet[header] if c.value],
-                         ["Particulars", "Item", "Specification (optional)", "Unit", "Qty", "Unit Cost (₱)", "Total (₱)",
-                          "Y1Q1", "Y1Q2", "Y1Q3", "Y1Q4", "Y2Q1"])
-        rows = [[c.value for c in sheet[header + i]][:12] for i in (1, 2)]
-        self.assertEqual(rows[0], ["MOOE", "Training Expenses", "Venue, 2 days", "pax", 20, 500.5, 10010, 4010, None, None, 6000, None])
-        self.assertEqual(rows[1], ["CO", "Office Equipment", None, "unit", 1, 5490, 5490, None, None, None, None, 5490])
-        self.assertIn("LEGEND", [sheet.cell(row=r, column=1).value for r in range(header + 1, sheet.max_row + 1)])
+        sheet = openpyxl.load_workbook(io.BytesIO(response.content))["Budget Requirements"]  # client Task 50
+        self.assertEqual([c.value for c in sheet[1]][:13],
+                         ["Fiscal Year", "Category", "Particulars", "Specification (optional)", "Unit", "Qty", "Unit Cost", "Total",
+                          "Y1 Q1", "Y1 Q2", "Y1 Q3", "Y1 Q4", "Y2 Q1"])
+        rows = [[c.value for c in sheet[r]][:13] for r in (2, 3)]
+        self.assertEqual(rows[0], [2027, "MOOE", "Training Expenses", "Venue, 2 days", "pax", 20, 500.5, 10010, 4010, None, None, 6000, None])
+        self.assertEqual(rows[1], [None, "CO", "Office Equipment", None, "unit", 1, 5490, 5490, None, None, None, None, 5490])
+        self.assertEqual(sheet["H4"].value, '=IF(AND(F4<>"",G4<>""),F4*G4,"")')
 
     def test_the_download_reads_back_as_the_same_lib(self):
         from research_projects.importer import read_lib
@@ -518,11 +517,10 @@ class LibDownloadTests(RMISTestCase):
 
         from research_projects.importer import build_lib_template
 
-        sheet = openpyxl.load_workbook(io.BytesIO(build_lib_template("2027-01-01", "2027-12-31", ["Q1", "Q2", "Q3", "Q4"])))["LIB"]
-        header = next(r for r in range(1, 20) if sheet.cell(row=r, column=1).value == "Particulars")
-        self.assertEqual(sheet.cell(row=header + 1, column=7).value, f'=IF(AND(E{header + 1}<>"",F{header + 1}<>""),E{header + 1}*F{header + 1},"")')
-        self.assertIsNone(sheet.cell(row=header + 1, column=1).value)
-        self.assertEqual(sheet.cell(row=header + 30 + 2, column=1).value, "LEGEND")
+        sheet = openpyxl.load_workbook(io.BytesIO(build_lib_template("2027-01-01", "2027-12-31", ["Q1", "Q2", "Q3", "Q4"])))["Budget Requirements"]
+        self.assertEqual(sheet["H2"].value, '=IF(AND(F2<>"",G2<>""),F2*G2,"")')
+        self.assertEqual(sheet["H31"].value, '=IF(AND(F31<>"",G31<>""),F31*G31,"")')
+        self.assertIsNone(sheet["B2"].value)
 
 
 class FinanceEditTests(RMISTestCase):
