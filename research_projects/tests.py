@@ -1555,7 +1555,8 @@ class WorkPlanExcelTests(RMISTestCase):
 class LibExcelTests(RMISTestCase):
     """Task 12 (2026-10-29): Step 4 Budget (LIB) has its own Excel template and import, separate from Upload via Excel.
     Client Task 50 (2026-11-07): that template is Upload via Excel's Budget Requirements sheet (columns, Legend, Lists
-    dropdowns). The project's periods must have their Y/Q column; the import is all-or-nothing and saves nothing."""
+    dropdowns). Task 51: a period without its Y/Q column is 0.00 (the old LIB sheet still needs every column); the import
+    is all-or-nothing and saves nothing."""
 
     TEMPLATE_URL = "/api/projects/lib-template/"
     PARSE_URL = "/api/projects/parse-lib/"
@@ -1673,16 +1674,42 @@ class LibExcelTests(RMISTestCase):
         self.assertEqual([(e["row"], e["field"]) for e in response.data["errors"]], [(first, "Y2 Q1")])
         self.assertIn("Outside this project's Start and End Dates", response.data["errors"][0]["message"])
 
-    def test_a_missing_period_column_is_named(self):
-        dates = {"start_date": "2027-01-01", "target_end_date": "2030-03-31"}  # needs Y4 Q1
-        workbook = self.workbook()  # Y1 Q1 - Y3 Q4 only
+    def test_a_missing_period_column_is_read_as_zero_like_upload_via_excel(self):
+        # Task 51 (2026-11-07): Upload via Excel reads a period without a column as 0.00; Step 4 now does the same
+        dates = {"start_date": "2027-01-01", "target_end_date": "2030-01-31"}  # needs Y4 Q1
+        workbook = self.workbook({"start_date": "2027-01-01", "target_end_date": "2029-12-31"})  # Y1 Q1 - Y3 Q4 only
         self.fill(workbook[self.SHEET], [[None, "MOOE", "Office Supplies Expenses", None, "unit", 1, 100, None, 100]])
 
         response = self.parse(workbook, dates)
 
+        self.assertEqual(response.status_code, 200, response.data)
+        allocations = response.data["rows"][0]["allocations"]
+        self.assertEqual(len(allocations), 13)
+        self.assertEqual(allocations[0], {"period": "Y1Q1", "amount": "100.00"})
+        self.assertEqual(allocations[-1], {"period": "Y4Q1", "amount": "0.00"})
+
+    def test_without_a_period_column_the_other_periods_must_still_add_up_to_the_total(self):
+        dates = {"start_date": "2027-01-01", "target_end_date": "2030-01-31"}
+        workbook = self.workbook({"start_date": "2027-01-01", "target_end_date": "2029-12-31"})
+        first = self.fill(workbook[self.SHEET], [[None, "MOOE", "Office Supplies Expenses", None, "unit", 1, 100, None, 60]])
+
+        response = self.parse(workbook, dates)
+
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Y4 Q1", " ".join(e["message"] for e in response.data["errors"]))
+        self.assertEqual([(e["row"], e["field"]) for e in response.data["errors"]], [(first, "Budget periods")])
         self.assertNotIn("rows", response.data)
+
+    def test_an_old_lib_sheet_still_needs_every_period_column(self):
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "LIB"
+        sheet.append(["Particulars", "Item", "Specification (optional)", "Unit", "Qty", "Unit Cost (₱)", "Total (₱)", "Q1", "Q2", "Q3"])
+        sheet.append(["MOOE", "Office Supplies Expenses", None, "unit", 1, 100, None, 100])
+
+        response = self.parse(workbook)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Missing period column(s) Q4", response.data["errors"][0]["message"])
 
     def test_row_errors_name_the_row_and_nothing_comes_back(self):
         workbook = self.workbook()

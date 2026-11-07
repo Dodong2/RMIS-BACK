@@ -709,11 +709,12 @@ def _lib_layout(wb, periods):
         keys = {c: _period_key(t, one_year) for c, t in enumerate(titles) if c >= len(columns) and t not in (None, "")}
         unknown = [str(titles[c]) for c, key in keys.items() if key is None]
     found = list(keys.values())
-    missing = [p for p in periods if p not in found]
+    # Task 51: a period without a column is 0.00 on Budget Requirements, as in Upload via Excel; the old LIB sheet stays exact
+    missing = [p for p in periods if p not in found] if name == LIB_SHEET else []
     if unknown:
         errors.append(error("Budget periods", f"Column(s) {', '.join(unknown)} are not period columns (Y1 Q1, Y1 Q2, ...)."))
     if missing:
-        errors.append(error("Budget periods", f"Missing period column(s) {', '.join(_period_header(p) if name == BUDGET_SHEET else p for p in missing)}. "
+        errors.append(error("Budget periods", f"Missing period column(s) {', '.join(missing)}. "
                                               f"This project's periods are {', '.join(periods)}."))
     if name == LIB_SHEET:
         extra = [p for p in dict.fromkeys(found) if p not in periods]
