@@ -12,6 +12,7 @@ PERMISSIONS = {
     "personnel.view_leader_load": ("personnel", "View leader concurrency load", "accounts.permission_seed:LEADER_LOAD"),
     "personnel.assign_tasks": ("personnel", "Assign, review, and manage tasks", "personnel.serializers:TASK_ASSIGNER_ROLES"),
     "personnel.clearance": ("personnel", "Acknowledge property clearance", "personnel.serializers:CLEARANCE_ROLES"),
+    "personnel.view_coordination": ("personnel", "View Personnel Coordination and Personnel Changes", "personnel.serializers:COORDINATION_VIEW_ROLES"),
     "budget.manage": ("budget_lib", "Encode LIB budgets and line items", "budget_lib.views:MANAGE_ROLES"),
     "budget.certify": ("budget_lib", "Certify a LIB budget (Budget Officer)", "budget_lib.serializers:CERTIFY_ROLES"),
     "budget.endorse": ("budget_lib", "Endorse or return a LIB before certification (CRC Chair)", "budget_lib.serializers:ENDORSE_ROLES"),
@@ -50,7 +51,7 @@ PERMISSIONS = {
 # Gates that were inline HasRole([...]) lists rather than named constants.
 SYSTEM_ADMIN_ONLY = ["system_admin"]
 USERS_BY_ROLE = ["system_admin", "crc_chair", "riuh", "project_leader"]
-LEADER_LOAD = ["system_admin", "crc_chair", "riuh", "project_leader"]
+LEADER_LOAD = ["system_admin", "vprei", "university_admin", "crc_chair", "riuh", "project_leader"]
 
 
 def sync_role_permissions():

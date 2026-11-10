@@ -20,7 +20,9 @@ from .models import (
 # Client Task 41 (2026-11-03): CRC/CRD views personnel and tasks only (accounts 0031).
 MANAGE_ROLES = ["system_admin", "riuh"]
 TASK_ASSIGNER_ROLES = MANAGE_ROLES + ["project_leader"]
-CLEARANCE_ROLES = MANAGE_ROLES + ["procurement_officer_lib"]
+# Task 54 (2026-11-10): Procurement no longer clears PAR; Personnel Coordination/Changes are read by these 5 only.
+CLEARANCE_ROLES = MANAGE_ROLES
+COORDINATION_VIEW_ROLES = ["system_admin", "vprei", "university_admin", "crc_chair", "riuh"]
 
 # record type -> (model, required lead role, concurrency cap or None for no cap). One leader role since 2026-10-27.
 LEAD_RECORDS = {

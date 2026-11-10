@@ -698,3 +698,60 @@ class WorkLogLeaderFlowTests(WorkLogFixture, RMISTestCase):
 
         data = self.leader_client.get(f"/api/personnel/tasks/{self.task_id}/").data
         self.assertEqual((data["logged_hours"], data["progress_pct"]), ("16.00", 40))
+
+
+class PersonnelCoordinationAccessTests(RMISTestCase):
+    """Client Task 54 (2026-11-10): Personnel Coordination and Personnel Changes = the 5 oversight roles (view-only
+    except system_admin/riuh); Leader Load = those 5 + project_leader; Procurement no longer clears PAR."""
+
+    VIEWERS = {"system_admin", "vprei", "university_admin", "crc_chair", "riuh"}
+    LEADER_LOAD = VIEWERS | {"project_leader"}
+    ALL = VIEWERS | {"finance_budget", "procurement_officer_lib", "project_leader", "project_staff"}
+
+    def setUp(self):
+        super().setUp()
+        self.users = {code: self.make_user(code) for code in self.ALL}
+        self.leader = self.users["project_leader"]
+        self.project = Project.objects.create(title="P", project_code="T54-1", funding_type="institutional", lead=self.leader, status="active")
+
+    def test_reads_follow_the_matrix(self):
+        for code, user in self.users.items():
+            client = self.client_for(user)
+            for url in ("/api/personnel/staff-profiles/", "/api/personnel/changes/", "/api/personnel/collaboration/"):
+                expected = 200 if code in self.VIEWERS else 403
+                self.assertEqual(client.get(url).status_code, expected, f"{code} {url}")
+            expected = 200 if code in self.LEADER_LOAD else 403
+            self.assertEqual(client.get("/api/personnel/leaders/load/").status_code, expected, f"{code} leader load")
+
+    def test_leader_load_rows_are_the_same_for_every_allowed_role(self):
+        rows = {code: self.client_for(self.users[code]).get("/api/personnel/leaders/load/").json() for code in self.LEADER_LOAD}
+        row = next(r for r in rows["system_admin"] if r["user"] == self.leader.pk)
+        self.assertEqual((row["active_projects"], row["project_cap"]), (1, 3))
+        for code, data in rows.items():
+            self.assertEqual(data, rows["system_admin"], code)
+
+    def test_only_system_admin_and_riuh_write(self):
+        staff = self.users["project_staff"]
+        for code in self.VIEWERS:
+            response = self.client_for(self.users[code]).post("/api/personnel/staff-profiles/", {"user": staff.pk, "staff_level": 1}, format="json")
+            if code in ("system_admin", "riuh"):
+                self.assertEqual(response.status_code, 201, code)
+                from .models import StaffProfile
+                StaffProfile.objects.filter(user=staff).delete()
+            else:
+                self.assertEqual(response.status_code, 403, code)
+
+    def test_procurement_can_no_longer_clear_par(self):
+        from .models import PersonnelChange, ProjectAssignment, PropertyClearance
+        old = ProjectAssignment.objects.create(user=self.users["project_staff"], project=self.project, start_date=datetime.date(2026, 1, 1))
+        change = PersonnelChange.objects.create(change_type="staff", assignment=old, project=self.project, outgoing=old.user,
+                                                incoming=self.make_user("project_staff"), reason="r", initiated_by=self.users["riuh"])
+        PropertyClearance.objects.get_or_create(change=change)
+        url = f"/api/personnel/changes/{change.pk}/clearance/"
+        self.assertEqual(self.client_for(self.users["procurement_officer_lib"]).patch(url, {"par_number": "PAR-1"}, format="json").status_code, 403)
+        self.assertEqual(self.client_for(self.users["riuh"]).patch(url, {"par_number": "PAR-1"}, format="json").status_code, 200)
+        self.assertEqual(self.client_for(self.users["procurement_officer_lib"]).get(f"/api/personnel/changes/{change.pk}/").status_code, 403)
+
+    def test_assignment_reads_stay_open_for_other_pages(self):
+        for code, user in self.users.items():
+            self.assertEqual(self.client_for(user).get("/api/personnel/assignments/?active=true").status_code, 200, code)

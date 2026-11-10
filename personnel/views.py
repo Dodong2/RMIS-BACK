@@ -40,6 +40,15 @@ class ManageWritesMixin:
         return [HasRole("personnel.manage")]
 
 
+class CoordinationMixin(ManageWritesMixin):
+    """Personnel Coordination/Changes: personnel.view_coordination read (Task 54), personnel.manage write."""
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [HasRole("personnel.view_coordination")]
+        return super().get_permissions()
+
+
 class LeaderAssignmentView(APIView):
     permission_classes = [HasRole("personnel.manage")]
 
@@ -73,12 +82,12 @@ class LeaderLoadView(APIView):
         ])
 
 
-class StaffProfileListCreateView(ManageWritesMixin, generics.ListCreateAPIView):
+class StaffProfileListCreateView(CoordinationMixin, generics.ListCreateAPIView):
     queryset = StaffProfile.objects.select_related("user").order_by("user__email")
     serializer_class = StaffProfileSerializer
 
 
-class StaffProfileDetailView(ManageWritesMixin, generics.RetrieveUpdateAPIView):
+class StaffProfileDetailView(CoordinationMixin, generics.RetrieveUpdateAPIView):
     queryset = StaffProfile.objects.all()
     serializer_class = StaffProfileSerializer
 
@@ -323,7 +332,7 @@ class CollaborationView(APIView):
     """Departments involved per active project (Objective 1c). Departments come from the project
     leader's and study leaders' `office` plus each active assignment's `department`."""
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasRole("personnel.view_coordination")]
 
     def get(self, request):
         projects = Project.objects.filter(status="active").select_related("lead").prefetch_related(
@@ -347,7 +356,7 @@ class CollaborationView(APIView):
         return Response(rows)
 
 
-class PersonnelChangeListCreateView(AtomicMutationMixin, ManageWritesMixin, generics.ListCreateAPIView):
+class PersonnelChangeListCreateView(AtomicMutationMixin, CoordinationMixin, generics.ListCreateAPIView):
     queryset = PersonnelChange.objects.select_related("clearance").order_by("-created_at")
     serializer_class = PersonnelChangeSerializer
 
@@ -355,7 +364,7 @@ class PersonnelChangeListCreateView(AtomicMutationMixin, ManageWritesMixin, gene
 class PersonnelChangeDetailView(generics.RetrieveAPIView):
     queryset = PersonnelChange.objects.select_related("clearance")
     serializer_class = PersonnelChangeSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasRole("personnel.view_coordination")]
 
 
 class ClearanceView(APIView):
