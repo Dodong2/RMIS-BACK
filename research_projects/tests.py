@@ -732,7 +732,7 @@ class ExcelImportTests(RMISTestCase):
             "NTP (Notice to Proceed No.)": "LSPU-X1",
             "Funding Type": "Institutional",
             "Project Leader E-mail Address": "Leader@LSPU.test",
-            # Task 45-B: the Project Leader's Staff ID is required (the e-mail, when given, must be the same account)
+            # Task 57: the Staff ID or the e-mail is enough; both given here must be the same account
             "Project Leader Staff ID": User.objects.get(email__iexact="leader@lspu.test").staff_id,
             "Project Leader Gender": "Female",
             "Start Date": datetime.datetime(2026, 1, 1),
@@ -1400,9 +1400,9 @@ class StaffIdExcelTests(RMISTestCase):
         self.by_staff_id("012345", **{"Project Leader E-mail Address": "leader@lspu.test"})
         self.assertEqual(self.upload().status_code, 201)
 
-    def test_older_template_without_staff_id_columns_is_refused(self):
-        """Task 45-B (Carl 2026-11-06): the Staff IDs are required, so a pre-2026-10-28 template (e-mail only) is refused
-        with a clear error; its typed team Name/Gender columns are never used."""
+    def test_older_template_without_staff_id_columns_reads_the_e_mails(self):
+        """Client Task 57 (2026-11-12, replaces Task 45-B's "both required"): the e-mail alone picks the account, so a
+        pre-2026-10-28 template (e-mail only) registers; its typed team Name/Gender columns are never used."""
         sheet = self.workbook["Project"]
         sheet.delete_rows(next(r.row for r in sheet["A"] if r.value == "Project Leader Staff ID"))
         del self.workbook["Project Team"]
@@ -1413,12 +1413,49 @@ class StaffIdExcelTests(RMISTestCase):
 
         response = self.upload()
 
+        self.assertEqual(response.status_code, 201, response.data)
+        project = Project.objects.get()
+        self.assertEqual((project.lead_id, project.lead_gender), (self.leader.pk, "female"))
+        self.assertEqual(list(project.team_members.values_list("name", "gender", "user")), [("Ben Reyes", "male", self.staff.pk)])
+
+    def test_the_leader_by_e_mail_only_fills_gender_and_contact(self):
+        self.by_staff_id(None, **{"Project Leader E-mail Address": "leader@lspu.test"})
+        self.assertEqual(self.upload().status_code, 201)
+        project = Project.objects.get()
+        self.assertEqual((project.lead_id, project.lead_gender, project.contact_number), (self.leader.pk, "female", "09171234567"))
+
+    def test_the_leader_needs_the_staff_id_or_the_e_mail(self):
+        self.by_staff_id(None)
+        self.assertEqual(self.lead_error(), ["The Project Leader's Staff ID or E-mail Address is required."])
+
+    def test_a_member_by_e_mail_only_or_staff_id_only_is_filled_from_the_account(self):
+        other = self.make_user("project_staff", email="ana@lspu.test", staff_id="333333", gender="female",
+                               first_name="Ana", last_name="Cruz")
+        self.by_staff_id("012345")
+        self.workbook["Project Team"].append(["Team Member", self.staff.email, None])
+        self.workbook["Project Team"].append(["Team Member", None, "333333"])
+
+        self.assertEqual(self.upload().status_code, 201)
+        self.assertEqual(sorted(Project.objects.get().team_members.values_list("name", "gender", "user")),
+                         [("Ana Cruz", "female", other.pk), ("Ben Reyes", "male", self.staff.pk)])
+
+    def test_an_unknown_member_staff_id_is_an_error(self):
+        self.by_staff_id("012345")
+        self.workbook["Project Team"].append(["Team Member", None, "999999"])
+        response = self.upload()
         self.assertEqual(response.status_code, 400)
-        self.assertEqual([(e["sheet"], e["field"], e["message"]) for e in response.data["errors"]], [
-            ("Project", "Project Leader Staff ID", "The Project Leader's Staff ID is required."),
-            ("Project Team", "Staff ID", "The member's Staff ID is required too."),
-        ])
-        self.assertFalse(Project.objects.exists())
+        self.assertEqual([(e["row"], e["field"]) for e in response.data["errors"]], [(2, "Staff ID")])
+        self.assertIn("No RMIS account with Staff ID '999999'", response.data["errors"][0]["message"])
+
+    def test_rows_without_e_mail_and_staff_id_are_not_members(self):
+        self.by_staff_id("012345")
+        team = self.workbook["Project Team"]
+        team.append(["Co-Project Leader", None, None])
+        team.append(["Team Member", None, "222222"])
+        team.append(["Team Member", None, None])
+
+        self.assertEqual(self.upload().status_code, 201)
+        self.assertEqual(list(Project.objects.get().team_members.values_list("user", flat=True)), [self.staff.pk])
 
     def test_template_cells_for_staff_ids_are_text(self):
         sheet = self.workbook["Project"]

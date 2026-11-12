@@ -73,15 +73,20 @@ class ExcelReviewTests(RMISTestCase):
         self.assertEqual((project["implementing_unit"], project["campus"], project["title"]),
                          ("", "Siniloan", "Bridging Academia and Communities"))  # blank Campus = the leader's, never a guess
 
-    def test_the_staff_ids_are_required(self):
+    def test_the_e_mail_or_the_staff_id_is_enough_and_rows_without_both_are_left_out(self):
+        """Client Task 57 (2026-11-12): either one picks the account; a row with neither is not a member."""
         self.fill_project(**{"Project Leader Staff ID": None})
         self.workbook["Project Team"].append(["Team Member", "ben@lspu.test", None])
         self.workbook["Project Team"].append(["Team Member", None, None])
+        self.workbook["Project Team"].append(["Team Member", None, "999999"])
         response = self.review()
-        self.assertEqual(self.issues(response), [("lead", None, "Project Leader Staff ID"), ("team", 0, "Staff ID"),
-                                                 ("team", 1, "RMIS E-mail")])
-        self.assertEqual(response.data["draft"]["project"]["lead"], self.leader.pk)  # the e-mail still found the account
+        self.assertEqual(self.issues(response), [("team", 1, "Staff ID")])
+        self.assertEqual(response.data["draft"]["project"]["lead"], self.leader.pk)
         self.assertEqual([t["name"] for t in response.data["draft"]["team"]], ["Ben Reyes", ""])
+
+    def test_the_leader_needs_the_staff_id_or_the_e_mail(self):
+        self.fill_project(**{"Project Leader Staff ID": None, "Project Leader E-mail Address": None})
+        self.assertEqual(self.issues(self.review()), [("lead", None, "Project Leader Staff ID")])
 
     def test_staff_id_and_e_mail_of_different_accounts(self):
         self.fill_project()

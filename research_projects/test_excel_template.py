@@ -95,7 +95,8 @@ class ProjectTeamAccountTests(RMISTestCase):
     def template_workbook(self):
         return openpyxl.load_workbook(io.BytesIO(self.client_for(self.admin).get("/api/projects/import-template/").content))
 
-    def test_a_row_without_an_account_is_an_error(self):
+    def test_an_unknown_e_mail_is_an_error_and_a_row_without_e_mail_and_staff_id_is_left_out(self):
+        """Client Task 57 (2026-11-12): a row with only a Role is not a member and is no error."""
         self.fill_project()
         self.workbook["Project Team"].append(["Team Member", None, None])
         self.workbook["Project Team"].append(["Team Member", "nobody@lspu.test", None])
@@ -104,6 +105,5 @@ class ProjectTeamAccountTests(RMISTestCase):
 
         self.assertEqual(response.status_code, 400)
         errors = [(e["row"], e["field"], e["message"][:30]) for e in response.data["errors"] if e["sheet"] == "Project Team"]
-        self.assertEqual(errors, [(3, "RMIS E-mail", "No RMIS account with e-mail 'n"),
-                                  (2, "RMIS E-mail", "Give the member's RMIS E-mail ")])
+        self.assertEqual(errors, [(3, "RMIS E-mail", "No RMIS account with e-mail 'n")])
         self.assertFalse(Project.objects.exists())

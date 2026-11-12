@@ -63,8 +63,8 @@ PROJECT_FIELDS = [
     ("Program Code (if under a Program)", "program", "program", None, "Optional; code of an existing RMIS Program"),
     ("Funding Type", "funding_type", "choice", FUNDING_TYPES, "Required"),
     (LEAD_STAFF_ID_LABEL, "lead_staff_id", "staff_id", None,
-     "Required; RMIS account with the Project Leader role; format the cell as Text so leading zeros stay"),
-    ("Project Leader E-mail Address", "lead", "user", None, "Optional; when given, must be the same account as the Staff ID"),
+     "Required unless the e-mail is given; RMIS account with the Project Leader role; format the cell as Text so leading zeros stay"),
+    ("Project Leader E-mail Address", "lead", "user", None, "Required unless the Staff ID is given; when both, the same account"),
     ("Project Leader Gender", "lead_gender", "choice", Project.GENDER_CHOICES, "Male or Female"),
     ("Contact No./s.", "contact_number", "text", None, ""),
     ("Start Date", "start_date", "date", None, "Required; date cell or YYYY-MM-DD"),
@@ -837,11 +837,15 @@ def _row_reported(errors, sheet, row):
 def _fill_from_accounts(project_data, tables, errors):
     """Resolve the Project Leader and Project Team accounts. The leader's blank Gender/Contact No. are filled from the
     profile (filled cells are this project's own values); a team row's name and gender always come from its account.
-    Client Task 45 (2026-11-06): the Project Leader's Staff ID and each team row's RMIS E-mail and Staff ID are required,
-    and there is at most one Co-Project Leader, a Project Leader or Project Staff account (Carl's Q1, Q2)."""
-    if "lead_staff_id" not in project_data and not any(e["sheet"] == "Project" and e["field"] == LEAD_STAFF_ID_LABEL for e in errors):
+    Client Task 57 (2026-11-12, replaces Task 45's "both required"): the Staff ID or the e-mail is enough, for the
+    Project Leader and for each team row; when both are given they must be the same account. A team row with neither
+    is left out (not a member, no error). At most one Co-Project Leader, a Project Leader or Project Staff account
+    (Task 45, Carl's Q1)."""
+    lead_cells = (LEAD_STAFF_ID_LABEL, "Project Leader E-mail Address")
+    if ("lead_staff_id" not in project_data and "lead" not in project_data
+            and not any(e["sheet"] == "Project" and e["field"] in lead_cells for e in errors)):
         errors.append({"sheet": "Project", "row": None, "field": LEAD_STAFF_ID_LABEL,
-                       "message": "The Project Leader's Staff ID is required."})
+                       "message": "The Project Leader's Staff ID or E-mail Address is required."})
     lead = _pick_account(project_data, "lead_staff_id", "lead", lambda message: errors.append(
         {"sheet": "Project", "row": None, "field": LEAD_STAFF_ID_LABEL, "message": message}))
     if lead:
@@ -849,23 +853,17 @@ def _fill_from_accounts(project_data, tables, errors):
             project_data.setdefault("lead_gender", lead.gender)
         if lead.mobile_number:
             project_data.setdefault("contact_number", lead.mobile_number)
+    sheet = "Project Team"
+    if sheet in tables:
+        tables[sheet] = [(row, data) for row, data in tables[sheet]
+                         if "user" in data or "user_staff_id" in data or _row_reported(errors, sheet, row)]
     co_leaders = 0
-    for row_number, data in tables.get("Project Team", []):
-        sheet = "Project Team"
+    for row_number, data in tables.get(sheet, []):
         add = lambda field, message, row=row_number: errors.append({"sheet": sheet, "row": row, "field": field, "message": message})
-        given = {"RMIS E-mail": "user" in data, "Staff ID": "user_staff_id" in data}
-        reported = _row_reported(errors, sheet, row_number)
         member = _pick_account(data, "user_staff_id", "user", lambda message: add("Staff ID", message))
         if member:
             # Client Task 45: never the workbook's own name/gender, only the account's
             data["name"], data["gender"] = member.display_name, member.gender or ""
-        if not reported and not _row_reported(errors, sheet, row_number):
-            if not any(given.values()):
-                add("RMIS E-mail", "Give the member's RMIS E-mail and Staff ID; the name and gender come from the account. "
-                                   "Members without an RMIS account are added later in Edit Registration.")
-            else:
-                for field in [f for f, present in given.items() if not present]:
-                    add(field, f"The member's {field} is required too.")
         if data.get("member_role") == "co_leader":
             co_leaders += 1
             problem = "A project has only one Co-Project Leader." if co_leaders > 1 else co_leader_problem(member)
