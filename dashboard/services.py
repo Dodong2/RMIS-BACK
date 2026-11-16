@@ -25,7 +25,7 @@ from monitoring.models import MidtermReport, MonthlyProgressReport, TerminalRepo
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
 from outputs.serializers import compute_ip_incentive_eligible, compute_publication_incentive
 from personnel.models import Task
-from research_projects.models import CollegeUnit, Project
+from research_projects.models import CollegeUnit, FundingType, Program, Project
 
 from .models import PlanningTarget
 
@@ -278,20 +278,22 @@ def compute_performance_dashboard(campus=None, college=None, user=None):
             "outputs": p.publication_count + p.ip_count + p.creative_count,
             "approved": approved, "actual": actual,
         })
-    # Overview "Budget Allocation by Funding Agency" (prototype; Carl 2026-10-14). Projects carry no agency
-    # field, so this is the current LIB's line items summed per funding source.
-    by_agency = (
-        LineItem.objects.filter(budget__in=current_budgets).values_list("funding_source").annotate(total=Sum("amount"))
+    # Overview "Budget Allocation by Funding Type" (Task 62-66 batch, client Task 64-D 2026-11-16): the current LIB's
+    # line items summed per project Funding Type. It used LineItem.funding_source, which the LIB form no longer fills,
+    # so every peso showed as "Unspecified"; the overall total is unchanged.
+    by_type = (
+        LineItem.objects.filter(budget__in=current_budgets)
+        .values_list("budget__project__funding_type")
+        .annotate(total=Sum("amount"))
     )
-    agency_totals = {}
-    for source, total in by_agency:
-        agency = source.strip() or "Unspecified"
-        agency_totals[agency] = agency_totals.get(agency, 0.0) + float(total)
+    type_names = dict(Program.FUNDING_CHOICES)
+    type_names.update(FundingType.objects.values_list("code", "name"))
     return {
         "weights": RANKING_WEIGHTS,
         "projects": rows,
-        "budget_by_funding_agency": [
-            {"agency": a, "total": t} for a, t in sorted(agency_totals.items(), key=lambda kv: (-kv[1], kv[0]))
+        "budget_by_funding_type": [
+            {"funding_type": code, "label": type_names.get(code, code), "total": float(total)}
+            for code, total in sorted(by_type, key=lambda kv: (-kv[1], kv[0]))
         ],
         "monthly_disbursements": _latest_12_months(
             Disbursement.objects.filter(line_item__budget__in=current_budgets)

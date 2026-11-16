@@ -203,10 +203,14 @@ class PerformanceDashboardTests(RMISTestCase):
         self.assertEqual(siniloan[-1]["total"], 1000.0)
         self.assertEqual(empty, [])
 
-    def test_budget_by_funding_agency_sums_current_lib_items_per_funding_source(self):
+    def test_budget_by_funding_type_sums_current_lib_items_per_project_funding_type(self):
+        # Task 64-D (2026-11-16): grouped by the project's Funding Type, not LineItem.funding_source ("Unspecified").
         from budget_lib.models import LineItem, LineItemBudget
+        from research_projects.models import FundingType
 
+        FundingType.objects.update_or_create(code="institutional", defaults={"name": "Institutional (LSPU-Funded)"})
         a1 = Project.objects.get(project_code="A-1")
+        Project.objects.filter(pk=a1.pk).update(funding_type="institutional")
         budget = LineItemBudget.objects.get(project=a1)
         LineItem.objects.filter(budget=budget).update(funding_source="DOST-PCAARRD")
         LineItem.objects.create(budget=budget, category="ps", description="Honoraria", amount=300, funding_source="LSPU GAA")
@@ -214,16 +218,18 @@ class PerformanceDashboardTests(RMISTestCase):
         LineItem.objects.create(budget=old, category="ps", description="Old", amount=9999, funding_source="CHED")
         client = self.client_for(self.make_user("vprei"))
 
-        everything = client.get("/api/dashboard/performance/").data["budget_by_funding_agency"]
-        siniloan = client.get("/api/dashboard/performance/", {"campus": "Siniloan"}).data["budget_by_funding_agency"]
+        data = client.get("/api/dashboard/performance/").data
+        everything = data["budget_by_funding_type"]
+        siniloan = client.get("/api/dashboard/performance/", {"campus": "Siniloan"}).data["budget_by_funding_type"]
 
-        # B-1's line item has no funding source; the old (non-current) LIB version is ignored.
-        self.assertEqual(everything, [
-            {"agency": "DOST-PCAARRD", "total": 1000.0},
-            {"agency": "Unspecified", "total": 1000.0},
-            {"agency": "LSPU GAA", "total": 300.0},
-        ])
-        self.assertEqual(siniloan, [{"agency": "Unspecified", "total": 1000.0}])
+        # funding_source no longer matters; the old (non-current) LIB version is ignored.
+        self.assertEqual([(r["funding_type"], r["total"]) for r in everything], [("institutional", 1300.0), ("core_funded", 1000.0)])
+        self.assertEqual(everything[0]["label"], "Institutional (LSPU-Funded)")
+        self.assertTrue(everything[1]["label"])
+        self.assertNotIn("budget_by_funding_agency", data)
+        self.assertEqual([(r["funding_type"], r["total"]) for r in siniloan], [("core_funded", 1000.0)])
+        # Same overall total as the approved budget of the projects' current LIBs.
+        self.assertEqual(sum(r["total"] for r in everything), sum(p["approved"] for p in data["projects"]))
 
     def test_project_staff_cannot_see_performance(self):
         response = self.client_for(self.make_user("project_staff")).get("/api/dashboard/performance/")
