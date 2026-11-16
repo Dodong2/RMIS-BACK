@@ -4,7 +4,8 @@ from .models import ForecastRun, MonthlyForecast
 from .services import unpaid_commitments
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-FORECAST_ROLES = ["system_admin", "vprei", "finance_budget", "project_leader"]
+# Client Task 66 (2026-11-16): Project Leader, RIUH, CRC/CRD, Finance/Accounting/Budget (+ system_admin); not VP for REI.
+FORECAST_ROLES = ["system_admin", "project_leader", "riuh", "crc_chair", "finance_budget"]
 
 
 class MonthlyForecastSerializer(serializers.ModelSerializer):

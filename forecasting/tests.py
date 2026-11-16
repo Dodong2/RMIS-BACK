@@ -99,6 +99,7 @@ class AccessTests(ForecastTestCase):
         super().setUp()
         self.other_leader = self.make_user("project_leader", campus="Sta. Cruz")
         self.other = self.make_project("NTP-2", self.other_leader, "Sta. Cruz")
+        self.make_item(self.other, amount=5000)
         self.mine = ForecastRun.objects.create(project=self.project, run_by=self.leader, status="insufficient_data")
         self.theirs = ForecastRun.objects.create(project=self.other, run_by=self.other_leader, status="insufficient_data")
 
@@ -106,9 +107,10 @@ class AccessTests(ForecastTestCase):
         return {row["id"] for row in self.client_for(user).get(URL).data}
 
     def test_permission_roles(self):
-        for code in ("system_admin", "vprei", "finance_budget", "project_leader"):
+        # Client Task 66 (2026-11-16): Project Leader, RIUH, CRC/CRD, Finance (+ system_admin); not VP for REI.
+        for code in ("system_admin", "project_leader", "riuh", "crc_chair", "finance_budget"):
             self.assertTrue(role_can(self.make_user(code), "forecasting.run"), code)
-        for code in ("university_admin", "crc_chair", "riuh", "procurement_officer_lib", "project_staff"):
+        for code in ("vprei", "university_admin", "procurement_officer_lib", "project_staff"):
             self.assertFalse(role_can(self.make_user(code), "forecasting.run"), code)
 
     def test_leader_runs_their_own_project(self):
@@ -125,15 +127,15 @@ class AccessTests(ForecastTestCase):
     def test_staff_cannot_run(self):
         self.assertEqual(self.client_for(self.make_user("project_staff")).post(URL + "trigger/", {"project": self.project.pk}).status_code, 403)
 
-    def test_core_funded_is_still_refused(self):
+    def test_an_active_core_funded_project_can_be_run(self):
         core = self.make_project("NTP-3", self.leader, funding_type="core_funded")
-        self.assertEqual(self.client_for(self.leader).post(URL + "trigger/", {"project": core.pk}).status_code, 400)
+        self.make_item(core, amount=1000)
+        self.assertEqual(self.client_for(self.leader).post(URL + "trigger/", {"project": core.pk}).status_code, 201)
 
     def test_list_and_detail_follow_the_row_scope(self):
         self.assertEqual(self.ids(self.leader), {self.mine.pk})
         self.assertEqual(self.ids(self.finance), {self.mine.pk})
-        self.assertEqual(self.ids(self.make_user("project_staff")), set())
-        self.assertEqual(self.ids(self.make_user("vprei")), {self.mine.pk, self.theirs.pk})
+        self.assertEqual(self.ids(self.make_user("system_admin")), {self.mine.pk, self.theirs.pk})
         client = self.client_for(self.leader)
         self.assertEqual(client.get(f"{URL}{self.mine.pk}/").status_code, 200)
         self.assertEqual(client.get(f"{URL}{self.theirs.pk}/").status_code, 404)
@@ -146,3 +148,61 @@ class AccessTests(ForecastTestCase):
         self.request(250)
         row = self.client_for(self.leader).get(f"{URL}{self.mine.pk}/").data
         self.assertEqual(float(row["unpaid_commitments"]), 250.0)
+
+
+class ActiveProjectsAndRolesTests(ForecastTestCase):
+    """Client Task 66 (2026-11-16): only Active projects (current LIB certified), the four roles, campus scope."""
+
+    PROJECTS = "/api/forecasting/projects/"
+
+    def setUp(self):
+        super().setUp()
+        self.pending = self.make_project("NTP-P", self.leader)
+        LineItemBudget.objects.create(project=self.pending, version_number=1, status="endorsed")
+        self.no_lib = self.make_project("NTP-N", self.leader)
+        self.elsewhere = self.make_project("NTP-E", self.make_user("project_leader", campus="Sta. Cruz"), "Sta. Cruz")
+        self.make_item(self.elsewhere, amount=1000)
+        self.old_run = ForecastRun.objects.create(project=self.pending, run_by=self.leader, status="insufficient_data")
+
+    def codes(self, user):
+        response = self.client_for(user).get(self.PROJECTS)
+        self.assertEqual(response.status_code, 200)
+        return {row["project_code"] for row in response.data}
+
+    def test_dropdown_lists_only_active_projects_in_scope_for_each_role(self):
+        self.assertEqual(self.codes(self.leader), {"NTP-1"})
+        for code in ("finance_budget", "riuh", "crc_chair"):
+            self.assertEqual(self.codes(self.make_user(code, campus="Siniloan")), {"NTP-1"}, code)
+        self.assertEqual(self.codes(self.make_user("system_admin")), {"NTP-1", "NTP-E"})
+        row = self.client_for(self.leader).get(self.PROJECTS).data[0]
+        self.assertEqual(set(row), {"id", "project_code", "title"})
+
+    def test_a_non_active_project_cannot_be_run_or_read_by_id(self):
+        client = self.client_for(self.make_user("system_admin"))
+        for project in (self.pending, self.no_lib):
+            self.assertEqual(client.post(URL + "trigger/", {"project": project.pk}).status_code, 404)
+        self.assertEqual(client.get(URL, {"project": self.pending.pk}).data, [])
+        self.assertEqual(client.get(f"{URL}{self.old_run.pk}/").status_code, 404)
+
+    def test_a_returned_or_superseded_lib_is_not_active(self):
+        LineItemBudget.objects.filter(project=self.project).update(is_current=False)
+        LineItemBudget.objects.create(project=self.project, version_number=2, status="returned")
+        self.assertEqual(self.codes(self.leader), set())
+
+    def test_riuh_and_crc_can_run_their_campus_project_only(self):
+        for code in ("riuh", "crc_chair"):
+            client = self.client_for(self.make_user(code, campus="Siniloan"))
+            with mock.patch.object(services, "_fit_and_forecast", return_value=([1.0] * 3, [[0, 2]] * 3)):
+                self.assertEqual(client.post(URL + "trigger/", {"project": self.project.pk}).status_code, 201, code)
+            self.assertEqual(client.post(URL + "trigger/", {"project": self.elsewhere.pk}).status_code, 404, code)
+
+    def test_other_roles_get_403_everywhere(self):
+        for code in ("vprei", "university_admin", "procurement_officer_lib", "project_staff"):
+            client = self.client_for(self.make_user(code, campus="Siniloan"))
+            for response in (
+                client.get(self.PROJECTS),
+                client.get(URL),
+                client.get(f"{URL}{self.old_run.pk}/"),
+                client.post(URL + "trigger/", {"project": self.project.pk}),
+            ):
+                self.assertEqual(response.status_code, 403, code)

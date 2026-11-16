@@ -3,12 +3,10 @@ from django.db import models
 
 from research_projects.models import Project
 
-FORECASTABLE_FUNDING_TYPES = ("institutional", "externally_funded")
-
 
 class ForecastRun(models.Model):
-    """One ARIMA fit+forecast attempt for a project. Institutional/Externally-funded
-    projects only (Core-Funded is excluded per the docx's module scope)."""
+    """One ARIMA fit+forecast attempt for a project. Any funding type; only Active projects (current LIB certified)
+    may be run since client Task 66 (2026-11-16), see views.forecastable_projects."""
 
     STATUS_CHOICES = (
         ("success", "Success"),

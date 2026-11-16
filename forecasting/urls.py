@@ -1,8 +1,9 @@
 from django.urls import path
 
-from .views import ForecastRunDetailView, ForecastRunListView, ForecastRunTriggerView
+from .views import ForecastProjectListView, ForecastRunDetailView, ForecastRunListView, ForecastRunTriggerView
 
 urlpatterns = [
+    path("projects/", ForecastProjectListView.as_view()),
     path("runs/", ForecastRunListView.as_view()),
     path("runs/<int:pk>/", ForecastRunDetailView.as_view()),
     path("runs/trigger/", ForecastRunTriggerView.as_view()),
