@@ -76,12 +76,23 @@ class AHPPairwiseComparison(models.Model):
 
 class FundingRecommendationRun(models.Model):
     """One WSM scoring pass over a candidate set of projects, using a
-    finalized AHP run's weights."""
+    finalized AHP run's weights. weights_snapshot/formulas_snapshot record what this run used, so later weight or
+    formula edits never change how an old run reads (Task 76)."""
+
+    METHOD_MINMAX = "minmax_v1"
+    METHOD_ABSOLUTE = "absolute_v2"
+    METHOD_CHOICES = (
+        (METHOD_MINMAX, "Relative min-max scale (before Task 76)"),
+        (METHOD_ABSOLUTE, "Absolute 0-100 scale"),
+    )
 
     ahp_run = models.ForeignKey(AHPMatrixRun, on_delete=models.PROTECT, related_name="recommendation_runs")
     label = models.CharField(max_length=200)
     funding_type_filter = models.CharField(max_length=20, blank=True)
     campus_filter = models.CharField(max_length=100, blank=True)
+    method = models.CharField(max_length=20, choices=METHOD_CHOICES, default=METHOD_ABSOLUTE)
+    weights_snapshot = models.JSONField(default=dict, blank=True, help_text="{criterion_id: weight 0-1} used by this run")
+    formulas_snapshot = models.JSONField(default=dict, blank=True, help_text="{criterion_id: {metric_key, mode, formula?}}")
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="recommendation_runs")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -100,7 +111,7 @@ class ProjectScore(models.Model):
     run = models.ForeignKey(FundingRecommendationRun, on_delete=models.CASCADE, related_name="scores")
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="decision_scores")
     raw_scores = models.JSONField(default=dict, help_text="{criterion_id: raw computed value}")
-    normalized_scores = models.JSONField(default=dict, help_text="{criterion_id: min-max normalized 0-1}")
+    normalized_scores = models.JSONField(default=dict, help_text="{criterion_id: score 0-1} (score/100; min-max in minmax_v1 runs)")
     composite_score = models.FloatField()
     rank = models.PositiveIntegerField()
 

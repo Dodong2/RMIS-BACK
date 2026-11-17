@@ -99,8 +99,7 @@ def _risk_score_inverse(project):
     return 25 - compute_project_risk(project)["risk_score"]  # 25 = max on the 5x5 scale
 
 
-# Every metric here is defined so a HIGHER raw value is always better —
-# _normalize()'s min-max scaling depends on that being true for all of them.
+# Every metric here is defined so a HIGHER raw value is always better.
 CRITERIA_METRICS = {
     "output_score": _output_score,
     "compliance_score": _compliance_score,
@@ -111,24 +110,39 @@ CRITERIA_METRICS = {
     "risk_score_inverse": _risk_score_inverse,
 }
 
+# Task 76 (Figma DSS): each standard metric is put on an absolute 0-100 scale, so a project's score no longer
+# depends on who else is in the run (the old min-max scaling gave every tied project 100).
+_TO_100 = {
+    "compliance_score": lambda v: v * 100,
+    "budget_utilization_pct": lambda v: v,
+    "monitoring_health": lambda v: v * 100,
+    "renewal_eligible": lambda v: v * 100,
+    "overrun_risk_inverse": lambda v: v * 100,
+    "risk_score_inverse": lambda v: v * 4,  # 25 = best on the 5x5 scale
+}
 
-def _normalize(raw_by_project):
-    """Min-max normalize one criterion's raw values across the candidate set."""
-    values = list(raw_by_project.values())
-    lo, hi = min(values), max(values)
-    if hi == lo:
-        return {pid: 1.0 for pid in raw_by_project}  # all tied — no discriminating info, don't penalize
-    return {pid: (v - lo) / (hi - lo) for pid, v in raw_by_project.items()}
+
+def _clamp(v):
+    return max(0.0, min(100.0, float(v)))
+
+
+def standard_scores(metric_key, raw_by_project):
+    """{project_id: 0-100}. Output volume is a count with no upper bound, so it is scored against the highest
+    count in the run (0 when nobody has outputs); every other metric already has a fixed range."""
+    if metric_key == "output_score":
+        top = max(raw_by_project.values(), default=0)
+        return {pid: (_clamp(v / top * 100) if top else 0.0) for pid, v in raw_by_project.items()}
+    return {pid: _clamp(_TO_100[metric_key](v)) for pid, v in raw_by_project.items()}
 
 
 def run_wsm(ahp_run, projects, created_by, label, funding_type_filter="", campus_filter=""):
     from .models import FundingRecommendationRun, ProjectScore
 
     criteria = list(ahp_run.criteria.filter(is_active=True))
-    weights = ahp_run.weights
+    weights = {str(c.id): float(ahp_run.weights.get(str(c.id), 0)) for c in criteria}
 
     raw_by_criterion = {c.id: {p.id: CRITERIA_METRICS[c.metric_key](p) for p in projects} for c in criteria}
-    normalized_by_criterion = {c.id: _normalize(raw_by_criterion[c.id]) for c in criteria}
+    score_by_criterion = {c.id: standard_scores(c.metric_key, raw_by_criterion[c.id]) for c in criteria}
 
     run = FundingRecommendationRun.objects.create(
         ahp_run=ahp_run,
@@ -136,13 +150,17 @@ def run_wsm(ahp_run, projects, created_by, label, funding_type_filter="", campus
         created_by=created_by,
         funding_type_filter=funding_type_filter,
         campus_filter=campus_filter,
+        method=FundingRecommendationRun.METHOD_ABSOLUTE,
+        weights_snapshot=weights,
+        formulas_snapshot={str(c.id): {"metric_key": c.metric_key, "mode": "standard"} for c in criteria},
     )
 
     composite_by_project = {}
     for p in projects:
         raw = {c.id: raw_by_criterion[c.id][p.id] for c in criteria}
-        normalized = {c.id: normalized_by_criterion[c.id][p.id] for c in criteria}
-        composite = sum(normalized[c.id] * float(weights.get(str(c.id), 0)) for c in criteria)
+        # Stored as 0-1 (score / 100) so normalized_scores keeps its old shape for the pages that read it.
+        normalized = {c.id: score_by_criterion[c.id][p.id] / 100 for c in criteria}
+        composite = sum(normalized[c.id] * weights[str(c.id)] for c in criteria)
         composite_by_project[p.id] = (raw, normalized, composite)
 
     ranked = sorted(projects, key=lambda p: composite_by_project[p.id][2], reverse=True)
@@ -165,7 +183,7 @@ def sensitivity_analysis(run, criterion_id, delta):
     the ranking would change. Reuses this run's already-stored normalized
     scores rather than re-querying project data."""
     scores = list(run.scores.all())
-    weights = {int(k): float(v) for k, v in run.ahp_run.weights.items()}
+    weights = {int(k): float(v) for k, v in (run.weights_snapshot or run.ahp_run.weights).items()}
 
     if criterion_id not in weights:
         raise ValueError("criterion is not part of this run's AHP weighting")

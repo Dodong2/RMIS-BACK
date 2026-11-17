@@ -44,8 +44,11 @@ class FundingRecommendationRunSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FundingRecommendationRun
-        fields = ["id", "ahp_run", "label", "funding_type_filter", "campus_filter", "created_by", "created_at", "scores"]
-        read_only_fields = ["created_by"]
+        fields = [
+            "id", "ahp_run", "label", "funding_type_filter", "campus_filter", "created_by", "created_at",
+            "method", "weights_snapshot", "formulas_snapshot", "scores",
+        ]
+        read_only_fields = ["created_by", "method", "weights_snapshot", "formulas_snapshot"]
 
 
 class DecisionRecordSerializer(serializers.ModelSerializer):
