@@ -320,3 +320,58 @@ class FinanceSupportingDocumentsTests(RMISTestCase):
         crc = self.listed(self.make_user("crc_chair", campus="Siniloan"))
         self.assertIn(self.docs["crc", "proposal_form"].id, crc)
         self.assertIn(self.docs["ready", "ntp"].id, crc)
+
+
+class CampusDocumentScopeTests(RMISTestCase):
+    """Task 70 (2026-11-17): campus roles (CRC/CRD, Finance, RIUH, Procurement) see documents of their own campus only
+    (client 2026-10-27 campus scope); an account without a campus isn't limited; an explicit share still works."""
+
+    def setUp(self):
+        super().setUp()
+        self.docs = {}
+        for campus in ("Siniloan", "Los Baños"):
+            leader = self.make_user("project_leader", campus=campus)
+            project = Project.objects.create(title=campus, project_code=f"{campus}-1", funding_type="core_funded",
+                                             lead=leader, campus=campus, college="CCS")
+            for doc_type, sensitivity in (("ntp", "project_team"), ("proposal_form", "project_team"),
+                                          ("other", "financial"), ("terminal_report", "restricted")):
+                self.docs[campus, doc_type] = Document.objects.create(
+                    project=project, document_type=doc_type, sensitivity=sensitivity, version_number=1,
+                    storage_path=f"{campus}/{doc_type}.pdf", file_name=f"{doc_type}.pdf", file_size=1, uploaded_by=leader)
+
+    def listed(self, user):
+        return {d["id"] for d in self.client_for(user).get("/api/documents/documents/").data}
+
+    def ids(self, campus, *types):
+        return {self.docs[campus, t].id for t in types}
+
+    def test_each_campus_role_sees_its_own_campus_only(self):
+        expected = {"crc_chair": ("ntp", "proposal_form"), "riuh": ("ntp", "proposal_form", "terminal_report"),
+                    "procurement_officer_lib": ("other",), "finance_budget": ("other",)}
+        for role, types in expected.items():
+            self.assertEqual(self.listed(self.make_user(role, campus="Siniloan")), self.ids("Siniloan", *types), role)
+
+    def test_other_campus_document_is_a_404(self):
+        crc = self.client_for(self.make_user("crc_chair", campus="Los Baños"))
+        self.assertEqual(crc.get(f"/api/documents/documents/{self.docs['Siniloan', 'ntp'].id}/").status_code, 404)
+        self.assertEqual(crc.get(f"/api/documents/documents/{self.docs['Los Baños', 'ntp'].id}/").status_code, 200)
+
+    def test_college_scope_narrows_further_and_no_campus_is_not_limited(self):
+        self.assertEqual(self.listed(self.make_user("crc_chair", campus="Siniloan", scope={"college": "CAS"})), set())
+        self.assertEqual(self.listed(self.make_user("crc_chair", campus="")),
+                         self.ids("Siniloan", "ntp", "proposal_form") | self.ids("Los Baños", "ntp", "proposal_form"))
+
+    def test_shared_document_from_another_campus_still_opens(self):
+        from datetime import date, timedelta
+
+        crc = self.make_user("crc_chair", campus="Los Baños")
+        document = self.docs["Siniloan", "ntp"]
+        DocumentShare.objects.create(document=document, user=crc, granted_by=document.uploaded_by,
+                                     expires_on=date.today() + timedelta(days=5))
+        self.assertIn(document.id, self.listed(crc))
+
+    def test_university_wide_roles_unchanged(self):
+        everything = {d.id for d in self.docs.values()}
+        self.assertEqual(self.listed(self.make_user("system_admin", campus="Siniloan")), everything)
+        no_forms = everything - self.ids("Siniloan", "proposal_form") - self.ids("Los Baños", "proposal_form")
+        self.assertEqual(self.listed(self.make_user("vprei", campus="Siniloan")), no_forms)  # forms: client 2026-10-09

@@ -168,7 +168,22 @@ def visible_documents(user, queryset):
     from datetime import date
 
     shared = queryset.filter(shares__user=user, shares__revoked_at__isnull=True, shares__expires_on__gte=date.today())
-    return (_without_others_proposal_forms(user, _visible_by_role(user, queryset)) | shared).distinct()
+    by_role = _visible_by_role(user, queryset)
+    if user.role and user.role.code in CAMPUS_SCOPED_ROLES:
+        by_role = _on_own_campus(user, by_role)
+    return (_without_others_proposal_forms(user, by_role) | shared).distinct()
+
+
+def _on_own_campus(user, queryset):
+    """Task 70 (2026-11-17): CRC/CRD, Finance, RIUH and Procurement see documents of their own campus (and college, when
+    their scope names one) only, like scoped_projects (client 2026-10-27). An account without a campus isn't limited.
+    Only the campus part: the draft rule of scoped_projects isn't applied to documents."""
+    college = (user.scope or {}).get("college")
+    if user.campus:
+        queryset = queryset.filter(project__campus__iexact=user.campus)
+    if college:
+        queryset = queryset.filter(project__college__iexact=college)
+    return queryset
 
 
 def _without_others_proposal_forms(user, queryset):
