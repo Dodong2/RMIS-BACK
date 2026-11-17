@@ -13,6 +13,7 @@ from .models import AHPMatrixRun, AHPPairwiseComparison, DecisionCriterion, Deci
 from .serializers import (
     AHPMatrixRunSerializer,
     AHPPairwiseComparisonSerializer,
+    CriterionFormulaSerializer,
     DecisionCriterionSerializer,
     DecisionRecordSerializer,
     FundingRecommendationRunSerializer,
@@ -31,6 +32,19 @@ class RoleWritesMixin:
 class DecisionCriterionListCreateView(RoleWritesMixin, generics.ListCreateAPIView):
     queryset = DecisionCriterion.objects.all()
     serializer_class = DecisionCriterionSerializer
+
+
+class DecisionCriterionDetailView(RoleWritesMixin, generics.RetrieveUpdateAPIView):
+    queryset = DecisionCriterion.objects.all()
+    serializer_class = DecisionCriterionSerializer
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def partial_update(self, request, *args, **kwargs):
+        criterion = self.get_object()
+        serializer = CriterionFormulaSerializer(criterion, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(DecisionCriterionSerializer(criterion).data)
 
 
 class AHPMatrixRunListCreateView(RoleWritesMixin, generics.ListCreateAPIView):

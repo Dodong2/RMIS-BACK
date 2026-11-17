@@ -6,6 +6,7 @@ from .views import (
     AHPMatrixRunDetailView,
     AHPMatrixRunFinalizeView,
     AHPMatrixRunListCreateView,
+    DecisionCriterionDetailView,
     DecisionCriterionListCreateView,
     FundingRecommendationRunDetailView,
     FundingRecommendationRunListView,
@@ -15,6 +16,7 @@ from .views import (
 
 urlpatterns = [
     path("criteria/", DecisionCriterionListCreateView.as_view()),
+    path("criteria/<int:pk>/", DecisionCriterionDetailView.as_view()),
     path("ahp-runs/", AHPMatrixRunListCreateView.as_view()),
     path("ahp-runs/<int:pk>/", AHPMatrixRunDetailView.as_view()),
     path("ahp-runs/<int:pk>/comparisons/", AHPComparisonSubmitView.as_view()),

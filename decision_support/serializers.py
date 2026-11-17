@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from . import formula
 from .models import (
     AHPMatrixRun, AHPPairwiseComparison, DecisionCriterion, DecisionRecord, FundingRecommendationRun, ProjectScore,
 )
@@ -12,7 +13,34 @@ DECISION_ROLES = DSS_ROLES + ["university_admin"]  # final approval: University 
 class DecisionCriterionSerializer(serializers.ModelSerializer):
     class Meta:
         model = DecisionCriterion
-        fields = ["id", "name", "metric_key", "description", "is_active", "created_at"]
+        fields = ["id", "name", "metric_key", "description", "formula_mode", "custom_formula", "is_active", "created_at"]
+
+    def validate(self, attrs):
+        return validate_formula(attrs, self.instance)
+
+
+def validate_formula(attrs, instance=None):
+    mode = attrs.get("formula_mode", instance.formula_mode if instance else "standard")
+    text = attrs.get("custom_formula", instance.custom_formula if instance else "")
+    if mode == "custom":
+        try:
+            formula.validate(text)
+        except ValueError as exc:
+            raise serializers.ValidationError({"custom_formula": str(exc)})
+        if "custom_formula" in attrs:
+            attrs["custom_formula"] = text.strip()
+    return attrs
+
+
+class CriterionFormulaSerializer(serializers.ModelSerializer):
+    """PATCH criteria/<id>/: only the scoring formula can change after an indicator is defined."""
+
+    class Meta:
+        model = DecisionCriterion
+        fields = ["formula_mode", "custom_formula"]
+
+    def validate(self, attrs):
+        return validate_formula(attrs, self.instance)
 
 
 class AHPPairwiseComparisonSerializer(serializers.ModelSerializer):

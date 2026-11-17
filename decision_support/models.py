@@ -23,6 +23,11 @@ class DecisionCriterion(models.Model):
     name = models.CharField(max_length=150, unique=True)
     metric_key = models.CharField(max_length=30, choices=CRITERIA_METRIC_CHOICES)
     description = models.TextField(blank=True)
+    # Task 76-B: "standard" uses the metric's built-in formula; "custom" uses custom_formula (decision_support.formula).
+    # Switching back to standard keeps the saved custom_formula, it is only ignored.
+    FORMULA_MODE_CHOICES = (("standard", "Standard formula"), ("custom", "Custom formula"))
+    formula_mode = models.CharField(max_length=10, choices=FORMULA_MODE_CHOICES, default="standard")
+    custom_formula = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

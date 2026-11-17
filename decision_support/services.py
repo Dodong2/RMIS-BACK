@@ -8,6 +8,8 @@ from monitoring.serializers import compute_escalation_status, compute_renewal_el
 from outputs.models import CreativeWorkRecord, IPRecord, PublicationRecord
 from risk_indicators.services import compute_project_risk
 
+from . import formula
+
 # Saaty's Random Index (RI) table for consistency-ratio normalization, n=1..10.
 SAATY_RANDOM_INDEX = {1: 0.0, 2: 0.0, 3: 0.58, 4: 0.90, 5: 1.12, 6: 1.24, 7: 1.32, 8: 1.41, 9: 1.45, 10: 1.49}
 
@@ -135,6 +137,25 @@ def standard_scores(metric_key, raw_by_project):
     return {pid: _clamp(_TO_100[metric_key](v)) for pid, v in raw_by_project.items()}
 
 
+def formula_snapshot(criterion):
+    if criterion.formula_mode == "custom":
+        return {"metric_key": criterion.metric_key, "mode": "custom", "formula": criterion.custom_formula}
+    return {"metric_key": criterion.metric_key, "mode": "standard"}
+
+
+def custom_scores(criterion, projects, own_raw, standard):
+    """{project_id: 0-100} from the indicator's custom formula. `score` is its standard score; any other variable is
+    that metric's raw value, computed only when the formula uses it."""
+    used = formula.validate(criterion.custom_formula)
+    extra = {key: {p.id: CRITERIA_METRICS[key](p) for p in projects} for key in used - {"score", criterion.metric_key}}
+    result = {}
+    for p in projects:
+        values = {"score": standard[p.id], criterion.metric_key: own_raw[p.id]}
+        values.update({key: by_project[p.id] for key, by_project in extra.items()})
+        result[p.id] = formula.evaluate(criterion.custom_formula, values)
+    return result
+
+
 def run_wsm(ahp_run, projects, created_by, label, funding_type_filter="", campus_filter=""):
     from .models import FundingRecommendationRun, ProjectScore
 
@@ -143,6 +164,9 @@ def run_wsm(ahp_run, projects, created_by, label, funding_type_filter="", campus
 
     raw_by_criterion = {c.id: {p.id: CRITERIA_METRICS[c.metric_key](p) for p in projects} for c in criteria}
     score_by_criterion = {c.id: standard_scores(c.metric_key, raw_by_criterion[c.id]) for c in criteria}
+    for c in criteria:
+        if c.formula_mode == "custom":
+            score_by_criterion[c.id] = custom_scores(c, projects, raw_by_criterion[c.id], score_by_criterion[c.id])
 
     run = FundingRecommendationRun.objects.create(
         ahp_run=ahp_run,
@@ -152,7 +176,7 @@ def run_wsm(ahp_run, projects, created_by, label, funding_type_filter="", campus
         campus_filter=campus_filter,
         method=FundingRecommendationRun.METHOD_ABSOLUTE,
         weights_snapshot=weights,
-        formulas_snapshot={str(c.id): {"metric_key": c.metric_key, "mode": "standard"} for c in criteria},
+        formulas_snapshot={str(c.id): formula_snapshot(c) for c in criteria},
     )
 
     composite_by_project = {}
