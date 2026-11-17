@@ -271,3 +271,52 @@ class SupportingDocumentsPdfOnlyTests(RMISTestCase):
     def test_other_document_types_keep_word_and_excel(self):
         self.assertEqual(self.attach("other", file=SimpleUploadedFile("LIB.xlsx", b"PK sheet")).status_code, 201)
         self.assertEqual(self.stage("Notes.docx", b"PK word").status_code, 201)
+
+
+class FinanceSupportingDocumentsTests(RMISTestCase):
+    """Task 69 (2026-11-17): Finance/Accounting/Budget sees a project's supporting documents (Supporting Document
+    History in Open Review / View Information) once the project's current LIB reached them, on their campus only.
+    Never the Research Proposal Form (client 2026-10-09)."""
+
+    def setUp(self):
+        super().setUp()
+        from budget_lib.models import LineItemBudget
+
+        self.finance = self.make_user("finance_budget", campus="Siniloan")
+        self.lib = {}
+        self.docs = {}
+        for name, campus, status in (("ready", "Siniloan", "endorsed"), ("certified", "Siniloan", "certified"),
+                                     ("crc", "Siniloan", "for_checking"), ("other_campus", "Los Baños", "endorsed")):
+            leader = self.make_user("project_leader", campus=campus)
+            project = Project.objects.create(title=name, project_code=f"{name}-1", funding_type="core_funded", lead=leader, campus=campus)
+            self.lib[name] = LineItemBudget.objects.create(project=project, version_number=1, status=status)
+            for doc_type in ("ntp", "notice_of_approval", "proposal_form"):
+                self.docs[name, doc_type] = Document.objects.create(
+                    project=project, document_type=doc_type, sensitivity="project_team", version_number=1,
+                    storage_path=f"{name}/{doc_type}.pdf", file_name=f"{doc_type}.pdf", file_size=1, uploaded_by=leader)
+
+    def listed(self, user):
+        return {d["id"] for d in self.client_for(user).get("/api/documents/documents/").data}
+
+    def test_finance_sees_ntp_and_approve_proposal_of_projects_that_reached_them(self):
+        expected = {self.docs[name, t].id for name in ("ready", "certified") for t in ("ntp", "notice_of_approval")}
+        self.assertEqual(self.listed(self.finance), expected)
+        response = self.client_for(self.finance).get(f"/api/documents/documents/{self.docs['ready', 'ntp'].id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["download_url"], "https://signed.example/file")  # the View button
+
+    def test_finance_is_denied_the_rest(self):
+        client = self.client_for(self.finance)
+        for key in (("ready", "proposal_form"), ("crc", "ntp"), ("other_campus", "ntp")):
+            self.assertEqual(client.get(f"/api/documents/documents/{self.docs[key].id}/").status_code, 404, key)
+
+    def test_returning_the_lib_hides_them_again(self):
+        self.lib["ready"].status = "returned"
+        self.lib["ready"].save()
+        self.assertNotIn(self.docs["ready", "ntp"].id, self.listed(self.finance))
+
+    def test_other_roles_unchanged(self):
+        self.assertEqual(self.listed(self.make_user("procurement_officer_lib", campus="Siniloan")), set())
+        crc = self.listed(self.make_user("crc_chair", campus="Siniloan"))
+        self.assertIn(self.docs["crc", "proposal_form"].id, crc)
+        self.assertIn(self.docs["ready", "ntp"].id, crc)

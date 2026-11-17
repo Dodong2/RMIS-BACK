@@ -193,7 +193,18 @@ def _visible_by_role(user, queryset):
         return queryset.filter(sensitivity__in=("project_team", "restricted"))
     if code == "crc_chair":
         return queryset.filter(sensitivity="project_team")
-    if code in ("finance_budget", "procurement_officer_lib"):
+    if code == "finance_budget":
+        # Task 69 (2026-11-17): plus the supporting documents (NTP, Approve Proposal, ...) of the projects on their campus
+        # whose current LIB reached the Budget Officer, the same projects ReadyForBudgetOfficerMixin lets them review.
+        # The Research Proposal Form stays out (_without_others_proposal_forms).
+        from budget_lib.views import BUDGET_OFFICER_STATUSES
+
+        reviewed = Project.objects.filter(budgets__is_current=True, budgets__status__in=BUDGET_OFFICER_STATUSES)
+        scope = scoped_projects(user)
+        if scope is not None:
+            reviewed = reviewed.filter(pk__in=scope.values("pk"))
+        return queryset.filter(Q(sensitivity="financial") | Q(sensitivity="project_team", project__in=reviewed.values("pk")))
+    if code == "procurement_officer_lib":
         return queryset.filter(sensitivity="financial")
     if code in LEADER_ROLES or code == "project_staff":
         leads = [user.pk, *acting_for(user)]
