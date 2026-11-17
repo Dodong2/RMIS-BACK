@@ -130,6 +130,54 @@ class AHPMatrixRunFinalizeView(APIView):
         return Response(AHPMatrixRunSerializer(run).data)
 
 
+MANUAL_WEIGHT_MIN, MANUAL_WEIGHT_MAX = 1, 60  # Figma Assign Weights — DSS-02 sliders
+
+
+def manual_weight_errors(weights, criteria_ids):
+    """weights = {criterion_id: whole percent}. Returns an error message, or None when valid."""
+    if not isinstance(weights, dict):
+        return "weights must be an object of {indicator id: percent}."
+    try:
+        given = {int(k): v for k, v in weights.items()}
+    except (TypeError, ValueError):
+        return "weights keys must be indicator ids."
+    if set(given) != set(criteria_ids):
+        return "Give a weight for every indicator in this model, and only those."
+    if any(type(v) is not int for v in given.values()):
+        return "Weights must be whole percents."
+    low, high = (100, 100) if len(criteria_ids) == 1 else (MANUAL_WEIGHT_MIN, MANUAL_WEIGHT_MAX)
+    if any(not low <= v <= high for v in given.values()):
+        return f"Each weight must be from {low}% to {high}%."
+    total = sum(given.values())
+    if total != 100:
+        return f"Weights must add up to 100% (now {total}%)."
+    return None
+
+
+class AHPMatrixRunWeightsView(APIView):
+    """POST {"weights": {criterion_id: percent}}: Edit Weights — DSS-02. Replaces the model's weights (it becomes
+    ready to run); recommendation runs made earlier keep their own weights_snapshot."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        if not role_can(request.user, "dss.manage"):
+            return Response({"detail": "You can't edit DSS weights."}, status=status.HTTP_403_FORBIDDEN)
+        with transaction.atomic():
+            run = lock(AHPMatrixRun.objects.all(), pk=pk)
+            weights = request.data.get("weights")
+            error = manual_weight_errors(weights, list(run.criteria.values_list("id", flat=True)))
+            if error:
+                return Response({"weights": [error]}, status=status.HTTP_400_BAD_REQUEST)
+            run.weights = {str(int(k)): v / 100 for k, v in weights.items()}
+            run.weight_source = "manual"
+            run.status = "finalized"
+            run.consistency_ratio = None
+            run.is_consistent = None
+            run.save(update_fields=["weights", "weight_source", "status", "consistency_ratio", "is_consistent"])
+        return Response(AHPMatrixRunSerializer(run).data)
+
+
 class FundingRecommendationRunTriggerView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_scope = "compute"
@@ -141,9 +189,10 @@ class FundingRecommendationRunTriggerView(APIView):
             )
 
         ahp_run = get_object_or_404(AHPMatrixRun, pk=request.data.get("ahp_run"))
-        if ahp_run.status != "finalized" or not ahp_run.is_consistent:
+        ready = ahp_run.status == "finalized" and (ahp_run.weight_source == "manual" or ahp_run.is_consistent)
+        if not ready:
             return Response(
-                {"detail": "AHP run must be finalized with a Consistency Ratio <= 0.10 before it can be used."},
+                {"detail": "Set this model's weights first (Edit Weights, or AHP with a Consistency Ratio <= 0.10)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

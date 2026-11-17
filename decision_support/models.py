@@ -51,6 +51,9 @@ class AHPMatrixRun(models.Model):
     weights = models.JSONField(default=dict, blank=True, help_text="{criterion_id: normalized weight}, set on finalize")
     consistency_ratio = models.FloatField(null=True, blank=True)
     is_consistent = models.BooleanField(null=True, blank=True, help_text="True when consistency_ratio <= 0.10")
+    # Task 76-C: "manual" = set directly on Edit Weights (DSS-02, whole percents summing to 100); no consistency ratio.
+    WEIGHT_SOURCE_CHOICES = (("ahp", "AHP pairwise comparison"), ("manual", "Edit Weights"))
+    weight_source = models.CharField(max_length=10, choices=WEIGHT_SOURCE_CHOICES, default="ahp")
 
     class Meta:
         ordering = ["-created_at"]

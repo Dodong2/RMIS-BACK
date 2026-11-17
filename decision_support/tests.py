@@ -214,3 +214,79 @@ class CustomFormulaRunTests(RunTestBase):
         scores, _ = self.run_with(raw)
         self.assertAlmostEqual(scores[self.p1.id]["composite_score"], 0.56)  # 80 x 1
         self.assertAlmostEqual(scores[self.p2.id]["composite_score"], 0.30)  # 20 x 0 -> 0, + 1 x 0.3
+
+
+class EditWeightsTests(RunTestBase):
+    """Task 76-C: Edit Weights — DSS-02 (whole percents, 1-60 each, sum 100)."""
+
+    def post_weights(self, weights, user=None):
+        return self.client_for(user or self.admin).post(
+            f"/api/decision-support/ahp-runs/{self.model.id}/weights/", {"weights": weights}, format="json"
+        )
+
+    def test_valid_weights_are_saved_as_fractions(self):
+        response = self.post_weights({str(self.budget.id): 40, str(self.compliance.id): 60})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["weights"], {str(self.budget.id): 0.4, str(self.compliance.id): 0.6})
+        self.assertEqual((response.data["weight_source"], response.data["status"]), ("manual", "finalized"))
+        self.assertIsNone(response.data["consistency_ratio"])
+
+    def test_invalid_weights_are_rejected_and_nothing_changes(self):
+        b, c = str(self.budget.id), str(self.compliance.id)
+        for bad in [
+            {b: 50, c: 40},            # sum 90
+            {b: 70, c: 30},            # above 60
+            {b: 0, c: 100},            # below 1 / above 60
+            {b: 50.5, c: 49.5},        # not whole
+            {b: 50, c: "50"},          # not a number
+            {b: 100},                  # missing an indicator
+            {b: 40, c: 50, "99999": 10},  # not in the model
+            [50, 50],
+        ]:
+            response = self.post_weights(bad)
+            self.assertEqual(response.status_code, 400, bad)
+            self.assertIn("weights", response.data)
+        self.model.refresh_from_db()
+        self.assertEqual((self.model.weights[b], self.model.weight_source), (0.7, "ahp"))
+
+    def test_single_indicator_model_must_be_100(self):
+        single = AHPMatrixRun.objects.create(label="One", created_by=self.admin)
+        single.criteria.set([self.budget])
+        url = f"/api/decision-support/ahp-runs/{single.id}/weights/"
+        client = self.client_for(self.admin)
+        self.assertEqual(client.post(url, {"weights": {str(self.budget.id): 60}}, format="json").status_code, 400)
+        self.assertEqual(client.post(url, {"weights": {str(self.budget.id): 100}}, format="json").status_code, 200)
+
+    def test_only_dss_managers_can_edit_weights(self):
+        for code in ("project_staff", "crc_chair", "finance_budget", "university_admin"):
+            response = self.post_weights({str(self.budget.id): 40, str(self.compliance.id): 60}, self.make_user(code))
+            self.assertEqual(response.status_code, 403, code)
+
+    def test_draft_model_can_run_after_edit_weights_and_weights_drive_the_score(self):
+        self.model.status, self.model.is_consistent, self.model.weights = "draft", None, {}
+        self.model.save()
+        self.assertEqual(self.post_weights({str(self.budget.id): 40, str(self.compliance.id): 60}).status_code, 200)
+        scores, data = self.run_with({
+            "budget_utilization_pct": {self.p1: 80.0, self.p2: 20.0},
+            "compliance_score": {self.p1: 0.0, self.p2: 1.0},
+        })
+        self.assertAlmostEqual(scores[self.p1.id]["composite_score"], 0.32)  # 80 x 0.4
+        self.assertAlmostEqual(scores[self.p2.id]["composite_score"], 0.68)  # 20 x 0.4 + 100 x 0.6
+        self.assertEqual(data["weights_snapshot"], {str(self.budget.id): 0.4, str(self.compliance.id): 0.6})
+
+    def test_editing_weights_later_leaves_earlier_runs_alone(self):
+        raw = {"budget_utilization_pct": {self.p1: 80.0, self.p2: 20.0}, "compliance_score": {self.p1: 0.0, self.p2: 1.0}}
+        _, first = self.run_with(raw)
+        self.post_weights({str(self.budget.id): 40, str(self.compliance.id): 60})
+        run = FundingRecommendationRun.objects.get(pk=first["id"])
+        self.assertEqual(run.weights_snapshot, {str(self.budget.id): 0.7, str(self.compliance.id): 0.3})
+        self.assertAlmostEqual(run.scores.get(project=self.p1).composite_score, 0.56)
+
+    def test_inconsistent_ahp_model_still_cannot_run(self):
+        self.model.is_consistent = False
+        self.model.save()
+        response = self.client_for(self.admin).post(
+            "/api/decision-support/recommendation-runs/trigger/",
+            {"ahp_run": self.model.id, "project_ids": [self.p1.id, self.p2.id]}, format="json",
+        )
+        self.assertEqual(response.status_code, 400)

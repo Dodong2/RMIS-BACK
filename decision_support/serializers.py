@@ -56,9 +56,9 @@ class AHPMatrixRunSerializer(serializers.ModelSerializer):
         model = AHPMatrixRun
         fields = [
             "id", "label", "criteria", "created_by", "created_at", "status",
-            "weights", "consistency_ratio", "is_consistent", "comparisons",
+            "weights", "weight_source", "consistency_ratio", "is_consistent", "comparisons",
         ]
-        read_only_fields = ["created_by", "status", "weights", "consistency_ratio", "is_consistent"]
+        read_only_fields = ["created_by", "status", "weights", "weight_source", "consistency_ratio", "is_consistent"]
 
 
 class ProjectScoreSerializer(serializers.ModelSerializer):
