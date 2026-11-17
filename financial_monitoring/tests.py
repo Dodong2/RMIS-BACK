@@ -524,3 +524,57 @@ class ProcurementEmailThreadTests(RMISTestCase):
                 if thread.name == "procurement-email":
                     thread.join(5)
         self.assertEqual([c.kwargs["json"]["to"][0]["email"] for c in self.brevo_post.call_args_list], ["a@lspu.test", "b@lspu.test"])
+
+
+class BudgetSummarySumsTests(RMISTestCase):
+    """Task 68-A2 (2026-11-17): the Budget Summary reads each item's realignment and disbursement sums in one query
+    (with_balance_sums) instead of three per item; the figures must equal line_item_balance's own queries."""
+
+    def setUp(self):
+        super().setUp()
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from financial_monitoring.serializers import line_item_balance
+
+        self.capture, self.connection, self.line_item_balance = CaptureQueriesContext, connection, line_item_balance
+        self.leader = self.make_user("project_leader")
+        project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader)
+        self.budget = LineItemBudget.objects.create(project=project, version_number=1, status="certified")
+        self.client = self.client_for(self.make_user("system_admin"))
+
+    def add_item(self, amount, name):
+        return LineItem.objects.create(budget=self.budget, category="mooe", description=name, amount=amount)
+
+    def realign(self, source, target, amount, status):
+        BudgetRealignment.objects.create(from_line_item=source, to_line_item=target, amount=amount, tier="minor",
+                                         status=status, justification="x", requested_by=self.leader)
+
+    def summary(self):
+        with self.capture(self.connection) as queries:
+            response = self.client.get(f"/api/financial/budgets/{self.budget.pk}/summary/")
+        self.assertEqual(response.status_code, 200)
+        return response.data, len(queries)
+
+    def test_figures_match_line_item_balance_and_queries_do_not_grow(self):
+        a, b, c = self.add_item(100000, "A"), self.add_item(50000, "B"), self.add_item(20000, "C")
+        _, few = self.summary()
+        self.realign(a, b, 10000, "approved")
+        self.realign(a, c, 5000, "implemented")
+        self.realign(b, a, 2500, "pending_approval")  # not applied: ignored
+        self.realign(c, a, 1000, "rejected")  # ignored
+        Disbursement.objects.create(line_item=a, amount=30000, disbursed_on=date(2026, 6, 1), recorded_by=self.leader)
+        Disbursement.objects.create(line_item=a, amount=1500, disbursed_on=date(2026, 7, 1), recorded_by=self.leader)
+        Disbursement.objects.create(line_item=b, amount=60000, disbursed_on=date(2026, 7, 1), recorded_by=self.leader)
+        for n in range(5):
+            self.add_item(1000, f"Extra {n}")
+        data, many = self.summary()
+        self.assertEqual(few, many)
+        rows = {row["line_item"]: row for row in data["line_items"]}
+        for item in LineItem.objects.filter(budget=self.budget):
+            expected = self.line_item_balance(item)
+            self.assertEqual({k: rows[item.pk][k] for k in expected}, expected, item.description)
+        self.assertEqual((rows[a.pk]["adjusted"], rows[a.pk]["actual"], rows[a.pk]["available"]), (85000, 31500, 53500))
+        self.assertEqual((rows[b.pk]["adjusted"], rows[b.pk]["available"]), (60000, 0))
+        self.assertEqual(rows[c.pk]["adjusted"], 25000)
+        self.assertEqual(data["totals"]["adjusted"], 175000)

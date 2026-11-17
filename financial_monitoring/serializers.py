@@ -2,7 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import OuterRef, Subquery, Sum
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -29,18 +29,37 @@ REALIGNMENT_MIN_LEAD_DAYS = 60  # "at least two (2) months before the end of the
 PENDING_STATUSES = ("pending_approval", "pending_bor")
 
 
+def _total_per_item(model, fk, **filters):
+    return Subquery(model.objects.filter(**{fk: OuterRef("pk")}, **filters).order_by().values(fk)
+                    .annotate(total=Sum("amount")).values("total"))
+
+
+def with_balance_sums(line_items):
+    """Task 68-A2 (2026-11-17): the three sums line_item_balance needs, read with the line items in one query instead of
+    three per item. Same filters as line_item_balance's own queries."""
+    from .models import BudgetRealignment, Disbursement
+
+    return line_items.annotate(
+        sum_moved_in=_total_per_item(BudgetRealignment, "to_line_item", status__in=APPLIED_STATUSES),
+        sum_moved_out=_total_per_item(BudgetRealignment, "from_line_item", status__in=APPLIED_STATUSES),
+        sum_actual=_total_per_item(Disbursement, "line_item"),
+    )
+
+
 def line_item_balance(line_item, exclude_realignment_pk=None):
     """Approved / Adjusted / Actual / Available figures for one line item."""
-    applied_in = line_item.realignments_to.filter(status__in=APPLIED_STATUSES)
-    applied_out = line_item.realignments_from.filter(status__in=APPLIED_STATUSES)
-    if exclude_realignment_pk:
-        applied_in = applied_in.exclude(pk=exclude_realignment_pk)
-        applied_out = applied_out.exclude(pk=exclude_realignment_pk)
-
-    moved_in = applied_in.aggregate(total=Sum("amount"))["total"] or 0
-    moved_out = applied_out.aggregate(total=Sum("amount"))["total"] or 0
+    if exclude_realignment_pk is None and hasattr(line_item, "sum_actual"):  # annotated by with_balance_sums
+        moved_in, moved_out, actual = line_item.sum_moved_in or 0, line_item.sum_moved_out or 0, line_item.sum_actual or 0
+    else:
+        applied_in = line_item.realignments_to.filter(status__in=APPLIED_STATUSES)
+        applied_out = line_item.realignments_from.filter(status__in=APPLIED_STATUSES)
+        if exclude_realignment_pk:
+            applied_in = applied_in.exclude(pk=exclude_realignment_pk)
+            applied_out = applied_out.exclude(pk=exclude_realignment_pk)
+        moved_in = applied_in.aggregate(total=Sum("amount"))["total"] or 0
+        moved_out = applied_out.aggregate(total=Sum("amount"))["total"] or 0
+        actual = line_item.disbursements.aggregate(total=Sum("amount"))["total"] or 0
     adjusted = line_item.amount + moved_in - moved_out
-    actual = line_item.disbursements.aggregate(total=Sum("amount"))["total"] or 0
     return {
         "approved": line_item.amount,
         "adjusted": adjusted,

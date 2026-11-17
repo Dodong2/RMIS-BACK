@@ -34,6 +34,7 @@ from .serializers import (
     post_procurement_disbursement,
     project_years,
     review_realignment,
+    with_balance_sums,
     year_balance,
 )
 
@@ -415,7 +416,7 @@ class BudgetSummaryView(APIView):
         if projects is not None:
             budgets = budgets.filter(project__in=projects)
         budget = generics.get_object_or_404(budgets, pk=pk)
-        line_items = budget.line_items.all().order_by("category", "id")
+        line_items = with_balance_sums(budget.line_items.all()).order_by("category", "id")  # Task 68-A2
         fiscal_year = request.query_params.get("fiscal_year")
         if fiscal_year:
             line_items = line_items.filter(fiscal_year=fiscal_year)
