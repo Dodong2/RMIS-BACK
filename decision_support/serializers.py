@@ -29,7 +29,7 @@ def validate_formula(attrs, instance=None):
         except ValueError as exc:
             raise serializers.ValidationError({"custom_formula": str(exc)})
         if "custom_formula" in attrs:
-            attrs["custom_formula"] = text.strip()
+            attrs["custom_formula"] = formula.normalize(text)
     return attrs
 
 

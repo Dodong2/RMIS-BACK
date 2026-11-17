@@ -19,6 +19,9 @@ VARIABLES = (
     "risk_score_inverse",
 )
 MAX_LENGTH = 300
+# Task 77-A: people type the symbols they see in the standard formula text, so these are read as their ASCII form.
+_ALIASES = {"×": "*", "÷": "/", "−": "-", "–": "-"}
+_ALLOWED_CHARS = set("0123456789.+-*/(),_ \t\nabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 _BINARY = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
 _UNARY = {ast.USub: operator.neg, ast.UAdd: operator.pos}
@@ -50,13 +53,23 @@ def _check(node):
     raise ValueError("Only numbers, variables, + - * /, parentheses, min() and max() are allowed.")
 
 
+def normalize(expression):
+    text = (expression or "").strip()
+    for alias, ascii_op in _ALIASES.items():
+        text = text.replace(alias, ascii_op)
+    return text
+
+
 def validate(expression):
     """Return the variables the formula uses, or raise ValueError with a message for the user."""
-    text = (expression or "").strip()
+    text = normalize(expression)
     if not text:
         raise ValueError("Enter a formula, or uncheck Edit to use the standard formula.")
     if len(text) > MAX_LENGTH:
         raise ValueError(f"A formula can be at most {MAX_LENGTH} characters.")
+    bad = next((ch for ch in text if ch not in _ALLOWED_CHARS), None)
+    if bad is not None:
+        raise ValueError(f'"{bad}" can\'t be used in a formula. Use numbers, variables, + - * /, parentheses, min() and max().')
     try:
         tree = ast.parse(text, mode="eval")
     except SyntaxError:
@@ -84,5 +97,5 @@ def _eval(node, values):
 def evaluate(expression, values):
     """Score 0-100 for one project. `values` must hold every variable the formula uses."""
     validate(expression)
-    result = _eval(ast.parse(expression.strip(), mode="eval"), values)
+    result = _eval(ast.parse(normalize(expression), mode="eval"), values)
     return max(0.0, min(100.0, result))

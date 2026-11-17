@@ -1,5 +1,6 @@
 """Task 76-A: standard scores are absolute 0-100 (no min-max), and each run keeps the weights/formulas it used."""
 import importlib
+import re
 from unittest.mock import patch
 
 from django.apps import apps
@@ -336,3 +337,26 @@ class DssAccessTests(RunTestBase):
         client = self.client_for(self.make_user("finance_budget"))
         self.assertEqual(client.post("/api/decision-support/criteria/", {"name": "X", "metric_key": "output_score"}, format="json").status_code, 403)
         self.assertEqual(client.post("/api/decision-support/recommendation-runs/trigger/", {"ahp_run": self.model.id}, format="json").status_code, 403)
+
+
+class FormulaSymbolTests(RMISTestCase):
+    """Task 77-A: x / ÷ / − typed as shown in the standard formula text are accepted; other symbols get named."""
+
+    def test_unicode_operators_are_read_as_ascii(self):
+        from decision_support import formula
+        self.assertEqual(formula.normalize(" score × 2 ÷ 4 − 1 "), "score * 2 / 4 - 1")
+        self.assertEqual(formula.evaluate("score × 2 ÷ 4 − 1", {"score": 60}), 29.0)
+
+    def test_unknown_symbol_is_named_in_the_error(self):
+        from decision_support import formula
+        for text, symbol in [("score % 2", "%"), ("score = 50", "="), ("score ^ 2", "^"), ("budget's", "'")]:
+            with self.assertRaisesRegex(ValueError, re.escape(f'"{symbol}" can\'t be used'), msg=text):
+                formula.validate(text)
+
+    def test_saved_formula_is_stored_in_ascii(self):
+        admin = self.make_user("system_admin")
+        response = self.client_for(admin).post("/api/decision-support/criteria/", {
+            "name": "Half budget", "metric_key": "budget_utilization_pct", "formula_mode": "custom", "custom_formula": "score ÷ 2",
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["custom_formula"], "score / 2")
