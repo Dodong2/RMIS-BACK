@@ -25,7 +25,7 @@ class RoleWritesMixin:
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
-            return [permissions.IsAuthenticated()]
+            return [HasRole("dss.view")]  # client Task 76: the DSS is for system_admin, vprei, university_admin, crc_chair
         return [HasRole(self.write_permission)]
 
 
@@ -224,17 +224,17 @@ class FundingRecommendationRunTriggerView(APIView):
 class FundingRecommendationRunListView(generics.ListAPIView):
     queryset = FundingRecommendationRun.objects.all()
     serializer_class = FundingRecommendationRunSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasRole("dss.view")]
 
 
 class FundingRecommendationRunDetailView(generics.RetrieveAPIView):
     queryset = FundingRecommendationRun.objects.all()
     serializer_class = FundingRecommendationRunSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasRole("dss.view")]
 
 
 class SensitivityAnalysisView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasRole("dss.view")]
     throttle_scope = "compute"
 
     def get(self, request, pk):

@@ -155,9 +155,9 @@ class ForecastingDashboardView(APIView):
 
 
 class FundingAllocationDashboardView(APIView):
-    """?run=<id> (defaults to the latest recommendation run)."""
+    """?run=<id> (defaults to the latest recommendation run). DSS data, so DSS roles only (client Task 76)."""
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasRole("dss.view")]
 
     def get(self, request):
         data = services.compute_funding_allocation_dashboard(run_id=request.query_params.get("run"))

@@ -8,6 +8,7 @@ from .models import (
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 DSS_ROLES = ["system_admin", "vprei"]
 DECISION_ROLES = DSS_ROLES + ["university_admin"]  # final approval: University President
+DSS_VIEW_ROLES = ["system_admin", "vprei", "university_admin", "crc_chair"]  # client Task 76: who may open the DSS
 
 
 class DecisionCriterionSerializer(serializers.ModelSerializer):

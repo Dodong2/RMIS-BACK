@@ -42,6 +42,7 @@ PERMISSIONS = {
     "dashboard.view_portfolio": ("dashboard", "View Analytics > Portfolio (counts across all projects)", "dashboard.views:ANALYTICS_ROLES"),
     "dashboard.manage_targets": ("dashboard", "Set Planning Office targets", "dashboard.serializers:MANAGE_ROLES"),
     "forecasting.run": ("forecasting", "Trigger ARIMA forecast runs", "forecasting.serializers:FORECAST_ROLES"),
+    "dss.view": ("decision_support", "Open the Decision Support System and read its data", "decision_support.serializers:DSS_VIEW_ROLES"),
     "dss.manage": ("decision_support", "Manage criteria, AHP runs, WSM recommendation runs", "decision_support.serializers:DSS_ROLES"),
     "dss.decide": ("decision_support", "Record funding decisions on recommendations", "decision_support.serializers:DECISION_ROLES"),
     "risk.manage_register": ("risk_indicators", "Maintain the project risk register", "risk_indicators.serializers:RISK_REGISTER_ROLES"),

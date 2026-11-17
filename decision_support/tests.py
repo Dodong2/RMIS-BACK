@@ -290,3 +290,49 @@ class EditWeightsTests(RunTestBase):
             {"ahp_run": self.model.id, "project_ids": [self.p1.id, self.p2.id]}, format="json",
         )
         self.assertEqual(response.status_code, 400)
+
+
+class DssAccessTests(RunTestBase):
+    """Task 76-D: only system_admin, vprei, university_admin and crc_chair can open the DSS (read)."""
+
+    ALLOWED = ("system_admin", "vprei", "university_admin", "crc_chair")
+    DENIED = ("riuh", "finance_budget", "procurement_officer_lib", "project_leader", "project_staff")
+
+    def read_urls(self):
+        _, data = self.run_with({
+            "budget_utilization_pct": {self.p1: 80.0, self.p2: 20.0},
+            "compliance_score": {self.p1: 0.0, self.p2: 1.0},
+        })
+        run = data["id"]
+        return [
+            "/api/decision-support/criteria/",
+            f"/api/decision-support/criteria/{self.budget.id}/",
+            "/api/decision-support/ahp-runs/",
+            f"/api/decision-support/ahp-runs/{self.model.id}/",
+            "/api/decision-support/recommendation-runs/",
+            f"/api/decision-support/recommendation-runs/{run}/",
+            f"/api/decision-support/recommendation-runs/{run}/sensitivity/?criterion={self.budget.id}&delta=0.1",
+            f"/api/decision-support/recommendation-runs/{run}/decisions/",
+            "/api/dashboard/funding-allocation/",
+        ]
+
+    def test_reads_are_allowed_only_for_the_four_dss_roles(self):
+        urls = self.read_urls()
+        for code in self.ALLOWED + self.DENIED:
+            client = self.client_for(self.make_user(code))
+            expected = 200 if code in self.ALLOWED else 403
+            for url in urls:
+                self.assertEqual(client.get(url).status_code, expected, f"{code} {url}")
+
+    def test_crc_chair_is_view_only(self):
+        client = self.client_for(self.make_user("crc_chair"))
+        b, c = str(self.budget.id), str(self.compliance.id)
+        self.assertEqual(client.post("/api/decision-support/criteria/", {"name": "X", "metric_key": "output_score"}, format="json").status_code, 403)
+        self.assertEqual(client.patch(f"/api/decision-support/criteria/{b}/", {"formula_mode": "standard"}, format="json").status_code, 403)
+        self.assertEqual(client.post(f"/api/decision-support/ahp-runs/{self.model.id}/weights/", {"weights": {b: 50, c: 50}}, format="json").status_code, 403)
+        self.assertEqual(client.post("/api/decision-support/recommendation-runs/trigger/", {"ahp_run": self.model.id}, format="json").status_code, 403)
+
+    def test_denied_roles_cannot_write_either(self):
+        client = self.client_for(self.make_user("finance_budget"))
+        self.assertEqual(client.post("/api/decision-support/criteria/", {"name": "X", "metric_key": "output_score"}, format="json").status_code, 403)
+        self.assertEqual(client.post("/api/decision-support/recommendation-runs/trigger/", {"ahp_run": self.model.id}, format="json").status_code, 403)
