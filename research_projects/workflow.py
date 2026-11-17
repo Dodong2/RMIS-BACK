@@ -36,11 +36,15 @@ APPROVAL_DOCUMENT_TYPES = ("notice_of_approval", "ntp")
 
 def review_status(project):
     """The project's review status code (REVIEW_STATUS_LABELS). No LIB yet = Draft (D3: submitting needs one)."""
-    budget = project.budgets.filter(is_current=True).order_by("-version_number").first()
+    current = getattr(project, "current_libs", None)  # Task 68-A: prefetched by the project list (to_attr)
+    if current is None:
+        budget = project.budgets.filter(is_current=True).order_by("-version_number").first()
+    else:
+        budget = current[0] if current else None
     if budget is None:
         return "draft"
     if budget.status == "returned":
-        last_hold = budget.reviews.filter(action__in=("held_crc", "held_budget", "returned")).last()
+        last_hold = next((r for r in reversed(budget.reviews.all()) if r.action in ("held_crc", "held_budget", "returned")), None)
         return "returned_budget" if last_hold and last_hold.action == "held_budget" else "returned_research"
     return FROM_LIB_STATUS[budget.status]
 

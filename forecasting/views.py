@@ -51,7 +51,8 @@ class ForecastRunListView(generics.ListAPIView):
     permission_classes = [ForecastRolePermission]
 
     def get_queryset(self):
-        qs = ForecastRun.objects.filter(project__in=forecastable_projects(self.request.user))
+        qs = (ForecastRun.objects.filter(project__in=forecastable_projects(self.request.user))
+              .select_related("project").prefetch_related("forecasts"))  # Task 68-A: not per run
         project_id = self.request.query_params.get("project")
         if project_id:
             qs = qs.filter(project_id=project_id)

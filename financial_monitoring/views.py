@@ -235,7 +235,9 @@ class ProcurementRequestListCreateView(BudgetScopedMixin, generics.ListCreateAPI
     serializer_class = ProcurementRequestSerializer
 
     def get_queryset(self):
-        qs = ProcurementRequest.objects.select_related("line_item__budget", "disbursement__recorded_by").order_by("-requested_at")
+        qs = ProcurementRequest.objects.select_related(
+            "line_item__budget", "disbursement__recorded_by", "requested_by", "received_by__role",  # Task 68-A: no per-row user/role query
+        ).order_by("-requested_at")
         params = self.request.query_params
         if params.get("project"):
             qs = qs.filter(line_item__budget__project_id=params["project"])

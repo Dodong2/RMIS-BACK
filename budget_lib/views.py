@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.db.models import Prefetch
 from django.http import HttpResponse
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
@@ -57,6 +58,12 @@ def lib_signal(budget):
     notify(groups, "budget.lib.updated", id=budget.id, project=budget.project_id)
 
 
+# Task 68-A (2026-11-17): what LineItemBudgetSerializer/LineItemSerializer read, fetched once per list instead of per row
+ITEM_EDITS = Prefetch("edits", queryset=LineItemEdit.objects.select_related("edited_by"))
+LIB_DETAILS = (Prefetch("line_items", queryset=LineItem.objects.prefetch_related(ITEM_EDITS)),
+               Prefetch("reviews", queryset=BudgetReview.objects.select_related("acted_by")))
+
+
 class BudgetListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generics.ListCreateAPIView):
     serializer_class = LineItemBudgetSerializer
 
@@ -72,7 +79,8 @@ class BudgetListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, generi
         lib_signal(budget)
 
     def get_queryset(self):
-        qs = LineItemBudget.objects.select_related("project").order_by("-created_at")
+        qs = (LineItemBudget.objects.select_related("project", "endorsed_by", "certified_by").prefetch_related(*LIB_DETAILS)
+              .order_by("-created_at"))
         project_id = self.request.query_params.get("project")
         if project_id:
             qs = qs.filter(project_id=project_id)
@@ -120,7 +128,7 @@ class LineItemListCreateView(ReadyForBudgetOfficerMixin, BudgetScopedMixin, gene
         return super().create(request, *args, **kwargs)
 
     def get_queryset(self):
-        qs = LineItem.objects.all().select_related("budget__project").order_by("category", "id")
+        qs = LineItem.objects.all().select_related("budget__project").prefetch_related(ITEM_EDITS).order_by("category", "id")
         budget_id = self.request.query_params.get("budget")
         project_id = self.request.query_params.get("project")
         is_app_flagged = self.request.query_params.get("is_app_flagged")

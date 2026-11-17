@@ -151,11 +151,12 @@ class LineItemBudgetSerializer(serializers.ModelSerializer):
         """Who put an On Hold LIB on hold: "crc" or "budget" (client Q2), None otherwise or for an older return."""
         if obj.status != "returned":
             return None
-        last = obj.reviews.filter(action__in=("held_crc", "held_budget", "returned")).order_by("-acted_at", "-id").first()
+        # Task 68-A: read from the (prefetched) reviews, already in acted_at, id order
+        last = next((r for r in reversed(obj.reviews.all()) if r.action in ("held_crc", "held_budget", "returned")), None)
         return {"held_crc": "crc", "held_budget": "budget"}.get(last.action) if last else None
 
     def get_total_amount(self, obj):
-        return obj.line_items.aggregate(total=Sum("amount"))["total"] or 0
+        return sum(item.amount for item in obj.line_items.all())  # Task 68-A: the (prefetched) items, same total
 
     def validate_project(self, project):
         ensure_in_scope(self, project)

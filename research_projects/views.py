@@ -3,13 +3,14 @@ from datetime import date
 
 import requests
 from django.db import transaction
+from django.db.models import Prefetch
 from django.http import HttpResponse
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.permissions import HasRole, ProjectVisibleMixin, acting_for, ensure_in_scope, role_can
-from budget_lib.models import allocation_periods
+from budget_lib.models import LineItemBudget, allocation_periods
 from budget_lib.events import log_registration_lib
 from budget_lib.serializers import LineItemBudgetSerializer, LineItemSerializer, total_cost_problem
 from config.concurrency import AtomicMutationMixin, idempotent, lock
@@ -113,7 +114,10 @@ class ProgramDetailView(AtomicMutationMixin, generics.RetrieveUpdateAPIView):
 
 class ProjectListCreateView(ProjectVisibleMixin, generics.ListCreateAPIView):
     project_lookup = ""
-    queryset = Project.objects.all().order_by("-created_at")
+    # Task 68-A (2026-11-17): the lead and the current LIB (review_status) in two queries for the whole list
+    queryset = Project.objects.select_related("lead").prefetch_related(Prefetch(
+        "budgets", queryset=LineItemBudget.objects.filter(is_current=True).order_by("-version_number").prefetch_related("reviews"),
+        to_attr="current_libs")).order_by("-created_at")
     serializer_class = ProjectSerializer
 
     @idempotent  # registration: a retried submit replays the first result instead of a duplicate-code error
