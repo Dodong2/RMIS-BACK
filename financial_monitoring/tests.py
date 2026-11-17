@@ -502,3 +502,25 @@ class ProcurementEmailTests(RMISTestCase):
         self.assertEqual(self.post("receive").status_code, 200)
         self.pr.refresh_from_db()
         self.assertEqual(self.pr.status, "under_review")
+
+
+class ProcurementEmailThreadTests(RMISTestCase):
+    """Task 68-D (2026-11-17): outside `manage.py test` the procurement e-mails go out in a background thread, so the
+    request returns before Brevo answers; every recipient still gets exactly one e-mail."""
+
+    def test_send_returns_before_brevo_answers_and_still_sends_each_once(self):
+        import threading
+        from unittest import mock
+
+        from financial_monitoring import notifications
+
+        release = threading.Event()
+        self.brevo_post.side_effect = lambda *a, **k: release.wait(5) and mock.Mock(ok=True, json=lambda: {"messageId": "x"})
+        with mock.patch.object(notifications, "SEND_INLINE", False):
+            notifications._send(["a@lspu.test", "b@lspu.test", "a@lspu.test"], "Subject", "<p>Hi</p>")
+            self.assertLessEqual(self.brevo_post.call_count, 1)  # still waiting on Brevo, the caller already returned
+            release.set()
+            for thread in threading.enumerate():
+                if thread.name == "procurement-email":
+                    thread.join(5)
+        self.assertEqual([c.kwargs["json"]["to"][0]["email"] for c in self.brevo_post.call_args_list], ["a@lspu.test", "b@lspu.test"])

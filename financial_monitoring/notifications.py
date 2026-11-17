@@ -1,7 +1,11 @@
 """Task 23 (2026-10-30): Brevo e-mails along the procurement workflow. Filed -> every active Procurement Officer - LIB of
 the project's campus; Received, Returned for Revision and Completed -> the requester; Completed also -> every active
 Finance/Accounting/Budget of the campus (now awaiting payment). Sent after commit; a failed send is logged by
-send_brevo_email and never undoes the step. Each step runs once per request under its row lock, so it can't send twice."""
+send_brevo_email and never undoes the step. Each step runs once per request under its row lock, so it can't send twice.
+Task 68-D (2026-11-17): the Brevo calls run in a background thread, so the request (and its toast) no longer waits for
+them; recipients and HTML are still built in the request thread, which keeps the database out of that thread."""
+import sys
+import threading
 from html import escape
 
 from django.conf import settings
@@ -35,9 +39,23 @@ def _link(label):
     return f"<p>{button(f'{settings.FRONTEND_URL}/procurement', label)}</p><p>Thank you.</p>"
 
 
+# `manage.py test` sends inline, so a test's patched Brevo sees every e-mail and no send outlives its test.
+SEND_INLINE = sys.argv[1:2] == ["test"]
+
+
 def _send(recipients, subject, html):
-    for email in dict.fromkeys(recipients):
-        send_brevo_email(email, subject, html)
+    emails = list(dict.fromkeys(recipients))  # evaluated here, in the request thread
+
+    def send_all():
+        for email in emails:
+            send_brevo_email(email, subject, html)
+
+    if SEND_INLINE:
+        send_all()
+    else:
+        # shortcut: a send still running when the process restarts (deploy) is lost; use a task queue if the client
+        # ever needs guaranteed delivery.
+        threading.Thread(target=send_all, daemon=True, name="procurement-email").start()
 
 
 def request_filed(procurement):
