@@ -106,6 +106,28 @@ class AllowedRoleWorkflowTests(ComplianceTestCase):
             }, format="json")
             self.assertEqual(case.status_code, 201, f"{code} {case.data}")
 
+    def test_each_allowed_role_runs_similarity_ai_and_coi_records(self):
+        # Task 79-C audit: the rest of Integrity Records for VP for REI and University Administration (and System Admin).
+        for code in ALLOWED:
+            user = self.make_user(code)
+            client = self.client_for(user)
+            sim = client.post("/api/compliance/similarity-checks/", {
+                "project": self.project.id, "document_type": "published_article", "similarity_index": "12.50", "checked_on": "2026-11-18",
+            }, format="json")
+            self.assertEqual((sim.status_code, sim.data.get("is_within_threshold")), (201, True), f"{code} {sim.data}")
+            ai = client.post("/api/compliance/ai-declarations/", {
+                "project": self.project.id, "tool_name": "ChatGPT", "purpose": "grammar", "extent": "Abstract only", "declared_on": "2026-11-18",
+            }, format="json")
+            self.assertEqual((ai.status_code, ai.data["declared_by"]), (201, user.id), f"{code} {ai.data}")
+            coi = client.post("/api/compliance/coi-disclosures/", {
+                "project": self.project.id, "discloser": user.id, "description": "Relative on panel", "disclosed_on": "2026-11-18",
+            }, format="json")
+            self.assertEqual(coi.status_code, 201, f"{code} {coi.data}")
+            status = client.patch(f"/api/compliance/coi-disclosures/{coi.data['id']}/", {"status": "resolved"}, format="json")
+            self.assertEqual((status.status_code, status.data["status"]), (200, "resolved"), code)
+            for kind, rid in (("similarity-checks", sim.data["id"]), ("ai-declarations", ai.data["id"]), ("coi-disclosures", coi.data["id"])):
+                self.assertEqual(client.post(f"/api/compliance/{kind}/{rid}/verify/").status_code, 200, f"{code} {kind}")
+
     def test_a_document_from_another_project_is_rejected(self):
         other = Project.objects.create(title="Q", project_code="Q-1", funding_type="core_funded", lead=self.leader)
         doc = Document.objects.create(project=other, document_type="other", version_number=1, storage_path="Q-1/o.pdf",
