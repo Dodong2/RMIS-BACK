@@ -21,11 +21,11 @@ RENEWAL_DECISION_ROLES = ["system_admin", "riuh", "vprei"]
 EXTENSION_REQUEST_ROLES = ["system_admin", "project_leader"]
 EXTENSION_ENDORSE_ROLES = ["system_admin", "crc_chair"]  # CRC/CRD (DRD merged in 2026-10-27)
 EXTENSION_APPROVE_ROLES = ["system_admin", "university_admin"]  # University President
-# R&D Quarterly Progress Reports (2026-10-14; Structure Module 9 + Clarification 1a/1b/1c). No system_admin: the
-# Project Leader prepares, RIUH / CRC Chair review and endorse, DRD / VPREI review and give final approval.
+# R&D Quarterly Progress Reports (2026-10-14). No system_admin. Client Task 84 (2026-11-18, replaces 2026-10-27):
+# PL Submit > RIUH Endorse > CRC/CRD Approve (final); VP for REI only reads.
 QUARTERLY_PREPARE_ROLES = ["project_leader"]
-QUARTERLY_REVIEW_ROLES = ["riuh", "crc_chair", "vprei"]
-QUARTERLY_APPROVE_ROLES = ["vprei"]  # CRC/CRD reviews only (client 2026-10-27)
+QUARTERLY_REVIEW_ROLES = ["riuh"]
+QUARTERLY_APPROVE_ROLES = ["crc_chair"]
 EXTENSION_MIN_LEAD_DAYS = 30  # "approved one (1) month before the expected date of project termination"
 
 

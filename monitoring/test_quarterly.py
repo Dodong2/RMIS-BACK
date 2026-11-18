@@ -1,6 +1,5 @@
 """R&D Quarterly Progress Reports (client 2026-10-14, new_feat.png / R&D.png; prototype QuarterlyReports.tsx).
-Roles from Structure Module 9 + Clarification 1a/1b/1c: the Project Leader prepares; RIUH / CRC Chair review and
-endorse; DRD / VPREI give final approval."""
+Client Task 84 (2026-11-18): PL Submit > RIUH Endorse > CRC/CRD Approve (final); VP for REI only reads."""
 import datetime
 from unittest import mock
 
@@ -48,6 +47,11 @@ class QuarterlyReportTests(RMISTestCase):
         report_id = self._create().data["id"]
         self._move(report_id, self.leader, "submitted")
         self._move(report_id, self.make_user("riuh"), "under_review")
+        return report_id
+
+    def _endorsed(self):
+        report_id = self._in_review()
+        self._move(report_id, self.make_user("riuh"), "endorsed")
         return report_id
 
     # --- create + prefill ---------------------------------------------------------------------------------------
@@ -116,7 +120,7 @@ class QuarterlyReportTests(RMISTestCase):
     # --- workflow ---------------------------------------------------------------------------------------------
 
     def test_full_chain_with_a_revision_bumps_the_version(self):
-        riuh, vprei = self.make_user("riuh"), self.make_user("vprei")
+        riuh, crc = self.make_user("riuh"), self.make_user("crc_chair")
         report_id = self._create().data["id"]
 
         self.assertEqual(self._move(report_id, self.leader, "submitted").status_code, 200)
@@ -125,11 +129,11 @@ class QuarterlyReportTests(RMISTestCase):
         self.assertEqual(self._move(report_id, self.leader, "submitted").status_code, 200)
         self.assertEqual(self._move(report_id, riuh, "under_review").status_code, 200)
         self.assertEqual(self._move(report_id, riuh, "endorsed", "Complete").status_code, 200)
-        response = self._move(report_id, vprei, "approved", "Approved.")
+        response = self._move(report_id, crc, "approved", "Approved.")
 
         self.assertEqual(response.status_code, 200, response.data)
         report = QuarterlyProgressReport.objects.get(pk=report_id)
-        self.assertEqual((report.status, report.version, report.approved_by), ("approved", 2, vprei))
+        self.assertEqual((report.status, report.version, report.approved_by), ("approved", 2, crc))
         self.assertEqual([c["remarks"] for c in response.data["review_history"]],
                          ["Attach the certified statement", "Complete", "Approved."])
 
@@ -142,14 +146,32 @@ class QuarterlyReportTests(RMISTestCase):
         report_id = self._in_review()
         self.assertEqual(self._move(report_id, self.make_user("riuh"), "returned_for_revision").status_code, 400)
 
-    def test_reviewer_endorses_but_cannot_approve(self):
-        report_id = self._in_review()
-        self.assertEqual(self._move(report_id, self.make_user("crc_chair"), "approved").status_code, 403)
-        self.assertEqual(self._move(report_id, self.make_user("crc_chair"), "endorsed").status_code, 200)
+    def test_only_riuh_starts_review_and_endorses(self):
+        report_id = self._create().data["id"]
+        self._move(report_id, self.leader, "submitted")
+        for code in ("crc_chair", "vprei"):
+            self.assertEqual(self._move(report_id, self.make_user(code), "under_review").status_code, 403)
+        self.assertEqual(self._move(report_id, self.make_user("riuh"), "under_review").status_code, 200)
+        for code in ("crc_chair", "vprei"):
+            self.assertEqual(self._move(report_id, self.make_user(code), "endorsed").status_code, 403)
+        self.assertEqual(self._move(report_id, self.make_user("riuh"), "endorsed").status_code, 200)
 
-    def test_final_approver_can_approve_straight_from_review(self):
+    def test_only_crc_approves_and_only_after_riuh_endorses(self):
         report_id = self._in_review()
-        self.assertEqual(self._move(report_id, self.make_user("vprei"), "approved").status_code, 200)
+        self.assertEqual(self._move(report_id, self.make_user("crc_chair"), "approved").status_code, 400)
+        self._move(report_id, self.make_user("riuh"), "endorsed")
+        for code in ("riuh", "vprei"):
+            self.assertEqual(self._move(report_id, self.make_user(code), "approved").status_code, 403)
+        self.assertEqual(self._move(report_id, self.make_user("crc_chair"), "approved").status_code, 200)
+
+    def test_crc_returns_only_what_riuh_endorsed(self):
+        report_id = self._in_review()
+        self.assertEqual(self._move(report_id, self.make_user("crc_chair"), "returned_for_revision", "x").status_code, 403)
+
+        self._move(report_id, self.make_user("riuh"), "endorsed")
+        self.assertEqual(self._move(report_id, self.make_user("riuh"), "returned_for_revision", "x").status_code, 403)
+        self.assertEqual(self._move(report_id, self.make_user("vprei"), "returned_for_revision", "x").status_code, 403)
+        self.assertEqual(self._move(report_id, self.make_user("crc_chair"), "returned_for_revision", "x").status_code, 200)
 
     def test_leader_and_system_admin_cannot_review(self):
         report_id = self._create().data["id"]
@@ -159,7 +181,7 @@ class QuarterlyReportTests(RMISTestCase):
 
     def test_invalid_jump_is_rejected(self):
         report_id = self._create().data["id"]
-        self.assertEqual(self._move(report_id, self.make_user("vprei"), "approved").status_code, 400)
+        self.assertEqual(self._move(report_id, self.make_user("crc_chair"), "approved").status_code, 400)
 
     def test_reviewer_outside_scope_cannot_review(self):
         report_id = self._create().data["id"]
@@ -201,8 +223,8 @@ class QuarterlyReportTests(RMISTestCase):
         client = self.client_for(vprei)
         self.assertEqual(client.get(f"{URL}export/", {"file_format": "pdf"}).status_code, 404)
 
-        report_id = self._in_review()
-        self._move(report_id, vprei, "approved", "Approved.")
+        report_id = self._endorsed()
+        self.assertEqual(self._move(report_id, self.make_user("crc_chair"), "approved", "Approved.").status_code, 200)
         pdf = client.get(f"{URL}export/", {"file_format": "pdf", "ids": str(report_id)})
         docx = client.get(f"{URL}export/", {"file_format": "docx"})
 

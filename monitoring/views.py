@@ -329,7 +329,7 @@ QUARTERLY_TRANSITIONS = {
     "under_review": (("submitted",), "monitoring.quarterly_review"),
     "returned_for_revision": (("under_review", "endorsed"), "monitoring.quarterly_review"),
     "endorsed": (("under_review",), "monitoring.quarterly_review"),
-    "approved": (("under_review", "endorsed"), "monitoring.quarterly_approve"),
+    "approved": (("endorsed",), "monitoring.quarterly_approve"),
 }
 
 
@@ -347,6 +347,8 @@ class QuarterlyReportTransitionView(APIView):
         if to_status not in QUARTERLY_TRANSITIONS:
             return Response({"status": f"must be one of {', '.join(QUARTERLY_TRANSITIONS)}."}, status=status.HTTP_400_BAD_REQUEST)
         sources, permission = QUARTERLY_TRANSITIONS[to_status]
+        if to_status == "returned_for_revision" and report.status == "endorsed":
+            permission = "monitoring.quarterly_approve"  # Task 84: CRC/CRD returns what RIUH endorsed
         if not role_can(request.user, permission) or (to_status == "submitted" and not is_report_owner(request.user, report)):
             return Response({"detail": "Your role can't do this on a quarterly report."}, status=status.HTTP_403_FORBIDDEN)
         if report.status not in sources:
