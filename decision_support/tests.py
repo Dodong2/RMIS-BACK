@@ -293,6 +293,74 @@ class EditWeightsTests(RunTestBase):
         self.assertEqual(response.status_code, 400)
 
 
+class IndicatorWeightTests(RunTestBase):
+    """Task 78-A: Weight (%) in Define Decision Indicator writes the model's own weights (same values as Edit Weights)."""
+
+    def post_indicator(self, criterion, weight, user=None, model=None):
+        return self.client_for(user or self.admin).post(
+            f"/api/decision-support/ahp-runs/{(model or self.model).id}/indicators/",
+            {"criterion": criterion.id, "weight": weight}, format="json",
+        )
+
+    def test_changing_one_weight_saves_it_and_blocks_the_run_until_the_total_is_100(self):
+        response = self.post_indicator(self.budget, 50)  # 50 + 30 = 80
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["weights"], {str(self.budget.id): 0.5, str(self.compliance.id): 0.3})
+        self.assertEqual((response.data["status"], response.data["weight_source"]), ("draft", "manual"))
+        trigger = self.client_for(self.admin).post(
+            "/api/decision-support/recommendation-runs/trigger/",
+            {"ahp_run": self.model.id, "project_ids": [self.p1.id, self.p2.id]}, format="json",
+        )
+        self.assertEqual(trigger.status_code, 400)
+        self.assertEqual(self.post_indicator(self.compliance, 50).data["status"], "finalized")  # 50 + 50
+
+    def test_new_indicator_is_added_to_the_model_and_its_weight_drives_the_score(self):
+        output = DecisionCriterion.objects.create(name="Monitoring", metric_key="monitoring_health")
+        self.post_indicator(self.budget, 40)
+        self.post_indicator(self.compliance, 40)
+        response = self.post_indicator(output, 20)  # 40 + 40 + 20 = 100
+        self.assertEqual(response.data["status"], "finalized", response.data)
+        self.assertCountEqual(response.data["criteria"], [self.budget.id, self.compliance.id, output.id])
+        scores, data = self.run_with({
+            "budget_utilization_pct": {self.p1: 80.0, self.p2: 20.0},
+            "compliance_score": {self.p1: 0.0, self.p2: 1.0},
+            "monitoring_health": {self.p1: 1.0, self.p2: 0.5},
+        })
+        # p1: 80 x 0.4 + 0 x 0.4 + 100 x 0.2 = 52 ; p2: 20 x 0.4 + 100 x 0.4 + 50 x 0.2 = 58
+        self.assertAlmostEqual(scores[self.p1.id]["composite_score"], 0.52)
+        self.assertAlmostEqual(scores[self.p2.id]["composite_score"], 0.58)
+        self.assertEqual(data["weights_snapshot"][str(output.id)], 0.2)
+
+    def test_invalid_weights_and_indicators_are_rejected_and_nothing_changes(self):
+        inactive = DecisionCriterion.objects.create(name="Old", metric_key="monitoring_health", is_active=False)
+        for weight in (0, 61, 50.5, "50", None):
+            response = self.post_indicator(self.budget, weight)
+            self.assertEqual(response.status_code, 400, weight)
+            self.assertIn("weight", response.data)
+        self.assertEqual(self.post_indicator(inactive, 20).status_code, 400)
+        self.model.refresh_from_db()
+        self.assertEqual((self.model.weights, self.model.status), ({str(self.budget.id): 0.7, str(self.compliance.id): 0.3}, "finalized"))
+        self.assertEqual(self.model.criteria.count(), 2)
+
+    def test_single_indicator_model_weight_is_100(self):
+        single = AHPMatrixRun.objects.create(label="One", created_by=self.admin)
+        single.criteria.set([self.budget])
+        self.assertEqual(self.post_indicator(self.budget, 60, model=single).status_code, 400)
+        response = self.post_indicator(self.budget, 100, model=single)
+        self.assertEqual((response.status_code, response.data["status"]), (200, "finalized"))
+
+    def test_only_dss_managers_can_set_indicator_weights(self):
+        for code in ("project_staff", "crc_chair", "finance_budget", "university_admin"):
+            self.assertEqual(self.post_indicator(self.budget, 40, self.make_user(code)).status_code, 403, code)
+
+    def test_earlier_runs_keep_their_weights(self):
+        raw = {"budget_utilization_pct": {self.p1: 80.0, self.p2: 20.0}, "compliance_score": {self.p1: 0.0, self.p2: 1.0}}
+        _, first = self.run_with(raw)
+        self.post_indicator(self.budget, 50)
+        run = FundingRecommendationRun.objects.get(pk=first["id"])
+        self.assertEqual(run.weights_snapshot, {str(self.budget.id): 0.7, str(self.compliance.id): 0.3})
+
+
 class DssAccessTests(RunTestBase):
     """Task 76-D: only system_admin, vprei, university_admin and crc_chair can open the DSS (read)."""
 

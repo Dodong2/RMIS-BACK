@@ -178,6 +178,40 @@ class AHPMatrixRunWeightsView(APIView):
         return Response(AHPMatrixRunSerializer(run).data)
 
 
+class AHPMatrixRunIndicatorView(APIView):
+    """POST {"criterion": id, "weight": percent}: Weight (%) in Define Decision Indicator — DSS-01/02. Adds the
+    indicator to the model (if it isn't there yet) and sets only its weight in the model's own `weights`, the same
+    values Edit Weights saves. The model can be run only while the weights add up to 100%; otherwise it goes back to
+    draft until the total is fixed. Earlier recommendation runs keep their weights_snapshot."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        if not role_can(request.user, "dss.manage"):
+            return Response({"detail": "You can't edit DSS weights."}, status=status.HTTP_403_FORBIDDEN)
+        criterion = DecisionCriterion.objects.filter(pk=request.data.get("criterion"), is_active=True).first()
+        if criterion is None:
+            return Response({"criterion": ["Pick an active indicator."]}, status=status.HTTP_400_BAD_REQUEST)
+        weight = request.data.get("weight")
+        with transaction.atomic():
+            run = lock(AHPMatrixRun.objects.all(), pk=pk)
+            ids = set(run.criteria.values_list("id", flat=True)) | {criterion.id}
+            low, high = (100, 100) if len(ids) == 1 else (MANUAL_WEIGHT_MIN, MANUAL_WEIGHT_MAX)
+            if type(weight) is not int or not low <= weight <= high:
+                return Response({"weight": [f"Weight must be a whole percent from {low}% to {high}%."]}, status=status.HTTP_400_BAD_REQUEST)
+            run.criteria.add(criterion)
+            weights = {k: v for k, v in run.weights.items() if int(k) in ids}
+            weights[str(criterion.id)] = weight / 100
+            complete = set(map(int, weights)) == ids and round(sum(weights.values()) * 100, 6) == 100
+            run.weights = weights
+            run.weight_source = "manual"
+            run.status = "finalized" if complete else "draft"
+            run.consistency_ratio = None
+            run.is_consistent = None
+            run.save(update_fields=["weights", "weight_source", "status", "consistency_ratio", "is_consistent"])
+        return Response(AHPMatrixRunSerializer(run).data)
+
+
 class FundingRecommendationRunTriggerView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_scope = "compute"
