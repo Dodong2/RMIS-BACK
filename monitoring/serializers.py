@@ -2,6 +2,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
+from accounts.permissions import visible_projects
 from budget_lib.models import LineItem
 from financial_monitoring.models import Disbursement
 
@@ -80,14 +81,32 @@ def compute_renewal_eligible(project, has_justification):
     return False
 
 
-class MonthlyProgressReportSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
+class ReportScopeMixin:
+    """Task 83-B (2026-11-18): a progress report goes only to a project the submitter can see (visible_projects: a
+    leader's own projects, staff's assigned ones, a campus role's campus), and its document must be that project's."""
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        request = self.context.get("request")
+        if project is not None and request is not None:
+            allowed = visible_projects(request.user)
+            if allowed is not None and not allowed.filter(pk=project.pk).exists():
+                raise serializers.ValidationError({"project": "You can only submit reports for projects in your scope."})
+        document = attrs.get("document")
+        if document is not None and project is not None and document.project_id != project.id:
+            raise serializers.ValidationError({"document": "This document belongs to another project."})
+        return attrs
+
+
+class MonthlyProgressReportSerializer(ReportScopeMixin, WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = MonthlyProgressReport
         fields = ["id", "project", "period", "narrative", "document", "submitted_by", "submitted_at"]
         read_only_fields = ["submitted_by"]
 
 
-class MidtermReportSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
+class MidtermReportSerializer(ReportScopeMixin, WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = MidtermReport
         fields = [
@@ -121,7 +140,7 @@ class MidtermReportSerializer(WorkAfterReviewMixin, serializers.ModelSerializer)
         return cleaned
 
 
-class TerminalReportSerializer(WorkAfterReviewMixin, serializers.ModelSerializer):
+class TerminalReportSerializer(ReportScopeMixin, WorkAfterReviewMixin, serializers.ModelSerializer):
     class Meta:
         model = TerminalReport
         fields = [

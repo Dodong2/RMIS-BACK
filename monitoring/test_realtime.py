@@ -4,6 +4,7 @@ import datetime
 
 from accounts.testing import RMISTestCase
 from budget_lib.models import LineItemBudget
+from personnel.models import ProjectAssignment
 from monitoring.models import ExtensionRequest, ProjectEvaluation, RenewalApplication, TerminalReport
 from realtime.consumers import campus_role_group
 from realtime.notify import to_role, to_user
@@ -28,6 +29,8 @@ class MonitoringSignalTests(RMISTestCase):
         self.project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=self.leader,
                                               target_end_date=datetime.date(2030, 12, 31))
         certify(self.project)
+        # Task 83-B: staff report only on projects they're assigned to
+        ProjectAssignment.objects.create(user=self.staff, project=self.project, start_date=datetime.date(2026, 1, 1))
         self.admin = self.client_for(self.make_user("system_admin"))
 
     def sent(self):
