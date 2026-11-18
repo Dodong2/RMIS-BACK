@@ -27,7 +27,15 @@ class ForecastRun(models.Model):
     # enough history to hold months out and still fit a model.
     mae = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     rmse = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
-    mape = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, help_text="Mean Absolute Percentage Error")
+    mape = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Mean Absolute Percentage Error")
+    BACKTEST_CHOICES = (
+        ("completed", "Completed"),
+        ("insufficient_history", "Insufficient history"),
+        ("failed", "Failed"),
+    )
+    # Client Task 78-C: why the metrics are (or aren't) there. Blank on runs made before it.
+    backtest_status = models.CharField(max_length=20, choices=BACKTEST_CHOICES, blank=True, default="")
+    backtest_note = models.CharField(max_length=300, blank=True, default="")
 
     # Overrun-risk flag: actual-to-date + forecast horizon vs. the current approved budget.
     approved_budget_total = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)

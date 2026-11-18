@@ -86,7 +86,8 @@ class OverrunTests(ForecastTestCase):
                                         recorded_by=self.finance)
         run = services.run_forecast(self.project, self.leader)
         self.assertEqual((run.status, run.months_of_history, run.forecasts.count()), ("success", 9, 3))
-        self.assertIsNotNone(run.mae)
+        # Task 78-C: 9 months forecasts but is below the 12-month backtest minimum.
+        self.assertEqual((run.mae, run.backtest_status), (None, "insufficient_history"))
 
     def test_short_history_is_still_insufficient_data(self):
         self.disburse(months=5)
@@ -206,3 +207,95 @@ class ActiveProjectsAndRolesTests(ForecastTestCase):
                 client.post(URL + "trigger/", {"project": self.project.pk}),
             ):
                 self.assertEqual(response.status_code, 403, code)
+
+
+class BacktestTests(ForecastTestCase):
+    """Client Task 78-C: backtest needs 12 months, holds out the latest 3 chronologically, months without a
+    disbursement count as 0. Expected metrics are computed by hand in each test."""
+
+    def series(self, amounts, start=(2025, 1)):
+        year, month = start
+        for amount in amounts:
+            if amount:
+                Disbursement.objects.create(line_item=self.item, amount=amount, disbursed_on=datetime.date(year, month, 15),
+                                            recorded_by=self.finance)
+            year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+
+    def run_stubbed(self, holdout_prediction):
+        """The ARIMA fit is stubbed: the backtest call (3 steps on the training months) returns holdout_prediction."""
+        calls = []
+
+        def fit(train, steps):
+            calls.append(list(train))
+            return (list(holdout_prediction), [[0, 1]] * steps)
+
+        with mock.patch.object(services, "_fit_and_forecast", side_effect=fit):
+            run = services.run_forecast(self.project, self.leader)
+        return run, calls
+
+    def test_fewer_than_12_months_is_not_backtested_and_says_how_many(self):
+        self.series([1000] * 6)
+        run, _ = self.run_stubbed([1, 1, 1])
+        self.assertEqual((run.status, run.months_of_history, run.mae, run.rmse, run.mape), ("success", 6, None, None, None))
+        self.assertEqual(run.backtest_status, "insufficient_history")
+        self.assertIn("at least 12 months", run.backtest_note)
+        self.assertIn("has 6", run.backtest_note)
+
+    def test_exactly_12_months_trains_on_the_first_9_and_scores_the_latest_3(self):
+        values = [500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1000, 2000, 4000]
+        self.series(values)
+        run, calls = self.run_stubbed([1100, 1800, 3000])
+        self.assertEqual(calls[0], [float(v) for v in values[:9]])  # chronological train, never shuffled
+        # errors 100, 200, 1000 -> MAE 433.33, RMSE sqrt((10000 + 40000 + 1000000) / 3) = 591.61,
+        # MAPE (100/1000 + 200/2000 + 1000/4000) / 3 x 100 = 15.00
+        self.assertEqual((float(run.mae), float(run.rmse), float(run.mape)), (433.33, 591.61, 15.0))
+        self.assertEqual((run.backtest_status, run.backtest_note, run.months_of_history), ("completed", "", 12))
+
+    def test_more_than_12_months_holds_out_the_latest_3(self):
+        values = [100] * 12 + [1000, 2000, 3000]
+        self.series(values)
+        run, calls = self.run_stubbed([1000, 2000, 3000])
+        self.assertEqual(len(calls[0]), 12)
+        self.assertEqual((float(run.mae), float(run.rmse), float(run.mape)), (0.0, 0.0, 0.0))
+
+    def test_zero_actual_holdout_months_are_left_out_of_mape_only(self):
+        self.series([100] * 9 + [1000, 0, 2000])  # month 11 has no disbursement = 0
+        run, _ = self.run_stubbed([1100, 300, 1800])
+        # errors 100, 300, 200 -> MAE 200, RMSE sqrt(140000 / 3) = 216.02; MAPE (0.10 + 0.10) / 2 x 100 = 10
+        self.assertEqual((float(run.mae), float(run.rmse), float(run.mape)), (200.0, 216.02, 10.0))
+
+    def test_all_zero_holdout_gives_no_mape_and_says_why(self):
+        # The series ends at the latest disbursement, so an all-zero holdout needs ₱0 disbursements recorded.
+        self.series([100] * 9)
+        for month in (10, 11, 12):
+            Disbursement.objects.create(line_item=self.item, amount=0, disbursed_on=datetime.date(2025, month, 15),
+                                        recorded_by=self.finance)
+        run, _ = self.run_stubbed([10, 20, 30])
+        # errors 10, 20, 30 -> MAE 20, RMSE sqrt(1400 / 3) = 21.60; MAPE not computed
+        self.assertEqual((run.months_of_history, float(run.mae), float(run.rmse), run.mape), (12, 20.0, 21.6, None))
+        self.assertEqual(run.backtest_status, "completed")
+        self.assertIn("MAPE unavailable", run.backtest_note)
+
+    def test_missing_months_count_as_zero_and_keep_the_calendar_spacing(self):
+        self.series([1000, 0, 0, 1000, 1000, 1000, 1000])
+        series = services.monthly_disbursement_series(self.project)
+        self.assertEqual([m.month for m, _ in series], [1, 2, 3, 4, 5, 6, 7])
+        self.assertEqual([v for _, v in series][:4], [1000.0, 0.0, 0.0, 1000.0])
+
+    def test_a_fit_error_with_enough_history_is_reported_as_failed_not_as_too_little_data(self):
+        self.series([1000] * 12)
+
+        def fit(train, steps):
+            if len(train) == 9:
+                raise ValueError("LU decomposition error")
+            return ([1.0] * steps, [[0, 1]] * steps)
+
+        with mock.patch.object(services, "_fit_and_forecast", side_effect=fit):
+            run = services.run_forecast(self.project, self.leader)
+        self.assertEqual((run.status, run.mae, run.backtest_status), ("success", None, "failed"))
+        self.assertIn("LU decomposition error", run.backtest_note)
+        self.assertNotIn("12 months", run.backtest_note)
+
+    def test_metric_formulas(self):
+        mae, rmse, mape = services.accuracy_metrics([0, 0, 0], [10, 20, 30])
+        self.assertEqual((mae, round(rmse, 4), mape), (20.0, 21.6025, None))

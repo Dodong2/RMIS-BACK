@@ -1,3 +1,5 @@
+import logging
+import math
 from datetime import date
 
 from django.db.models import Sum
@@ -6,9 +8,11 @@ from django.db.models.functions import TruncMonth
 from budget_lib.models import LineItem
 from financial_monitoring.models import Disbursement, ProcurementRequest
 
+logger = logging.getLogger(__name__)
+
 MIN_HISTORY_MONTHS = 6
-MIN_HISTORY_FOR_HOLDOUT = 9
-HOLDOUT_MONTHS = 3
+MIN_HISTORY_FOR_BACKTEST = 12  # client Task 78-C: below 12 months the accuracy figures would be misleading
+HOLDOUT_MONTHS = 3  # latest months, chronological (client: 3-6)
 FORECAST_HORIZON_MONTHS = 3
 ARIMA_ORDER = (1, 1, 1)
 CONFIDENCE_LEVEL = 0.95
@@ -16,15 +20,23 @@ CONFIDENCE_LEVEL = 0.95
 
 def monthly_disbursement_series(project):
     """Ordered [(month_start_date, total_amount), ...] across all of the
-    project's disbursements, regardless of which budget version they're under."""
+    project's disbursements, regardless of which budget version they're under.
+    Every calendar month from the first to the last disbursement is included; a
+    month with no disbursement is 0 (client Task 78-C), so the series is evenly spaced."""
     rows = (
         Disbursement.objects.filter(line_item__budget__project=project)
         .annotate(month=TruncMonth("disbursed_on"))
         .values("month")
         .annotate(total=Sum("amount"))
-        .order_by("month")
     )
-    return [(row["month"], float(row["total"])) for row in rows]
+    totals = {row["month"]: float(row["total"]) for row in rows}
+    if not totals:
+        return []
+    series, month, last = [], min(totals), max(totals)
+    while month <= last:
+        series.append((month, totals.get(month, 0.0)))
+        month = _next_month(month)
+    return series
 
 
 def _next_month(d: date) -> date:
@@ -44,24 +56,34 @@ def _fit_and_forecast(train_values, steps):
     return mean, ci
 
 
-def _backtest_accuracy(values):
-    """Fit on all but the last HOLDOUT_MONTHS, forecast that gap, compare to
-    what actually happened. Best-effort — returns (None, None, None) if the
-    fit fails or there isn't enough history to hold months out."""
-    if len(values) < MIN_HISTORY_FOR_HOLDOUT:
-        return None, None, None
+def accuracy_metrics(actual, predicted):
+    """(MAE, RMSE, MAPE) for aligned month lists. MAPE skips months whose actual is 0 and is None when all are 0."""
+    errors = [abs(a - p) for a, p in zip(actual, predicted)]
+    mae = sum(errors) / len(errors)
+    rmse = (sum(e**2 for e in errors) / len(errors)) ** 0.5
+    nonzero = [(a, e) for a, e in zip(actual, errors) if a != 0]
+    mape = (sum(e / abs(a) for a, e in nonzero) / len(nonzero) * 100) if nonzero else None
+    return mae, rmse, mape
+
+
+def backtest(values):
+    """Fit on all but the latest HOLDOUT_MONTHS (chronological, never shuffled), forecast those months and compare
+    with what actually happened. Returns (mae, rmse, mape, backtest_status, backtest_note)."""
+    if len(values) < MIN_HISTORY_FOR_BACKTEST:
+        return None, None, None, "insufficient_history", (
+            f"Not backtested: needs at least {MIN_HISTORY_FOR_BACKTEST} months of disbursement history, has {len(values)}."
+        )
     train, holdout = values[:-HOLDOUT_MONTHS], values[-HOLDOUT_MONTHS:]
     try:
         predicted, _ = _fit_and_forecast(train, HOLDOUT_MONTHS)
-    except Exception:
-        return None, None, None
-
-    errors = [abs(actual - pred) for actual, pred in zip(holdout, predicted)]
-    mae = sum(errors) / len(errors)
-    rmse = (sum(e**2 for e in errors) / len(errors)) ** 0.5
-    nonzero = [(actual, e) for actual, e in zip(holdout, errors) if actual != 0]
-    mape = (sum(e / actual for actual, e in nonzero) / len(nonzero) * 100) if nonzero else None
-    return mae, rmse, mape
+        if len(predicted) != HOLDOUT_MONTHS or not all(math.isfinite(p) for p in predicted):
+            raise ValueError("the model returned no usable predictions")
+    except Exception as exc:
+        logger.warning("Forecast backtest failed: %s", exc)
+        return None, None, None, "failed", f"Backtest failed: {str(exc)[:240]}"
+    mae, rmse, mape = accuracy_metrics(holdout, predicted)
+    note = "" if mape is not None else f"MAPE unavailable: actual disbursement was ₱0 in all {HOLDOUT_MONTHS} holdout months."
+    return mae, rmse, mape, "completed", note
 
 
 def _budget_snapshot(project):
@@ -92,19 +114,21 @@ def run_forecast(project, run_by):
 
     series = monthly_disbursement_series(project)
     months_of_history = len(series)
+    values = [amount for _, amount in series]
+    mae, rmse, mape, backtest_status, backtest_note = backtest(values)
+    backtest_fields = {"backtest_status": backtest_status, "backtest_note": backtest_note}
 
     if months_of_history < MIN_HISTORY_MONTHS:
         return ForecastRun.objects.create(
             project=project,
             run_by=run_by,
             months_of_history=months_of_history,
+            **backtest_fields,
             status="insufficient_data",
             error_message=f"Needs at least {MIN_HISTORY_MONTHS} months of disbursement history, has {months_of_history}.",
         )
 
-    values = [amount for _, amount in series]
     last_period = series[-1][0]
-    mae, rmse, mape = _backtest_accuracy(values)
 
     try:
         mean, ci = _fit_and_forecast(values, FORECAST_HORIZON_MONTHS)
@@ -113,6 +137,7 @@ def run_forecast(project, run_by):
             project=project,
             run_by=run_by,
             months_of_history=months_of_history,
+            **backtest_fields,
             status="failed",
             error_message=str(exc)[:300],
         )
@@ -127,6 +152,7 @@ def run_forecast(project, run_by):
         run_by=run_by,
         months_of_history=months_of_history,
         arima_order=str(ARIMA_ORDER),
+        **backtest_fields,
         status="success",
         mae=round(mae, 2) if mae is not None else None,
         rmse=round(rmse, 2) if rmse is not None else None,

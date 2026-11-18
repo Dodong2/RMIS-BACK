@@ -22,7 +22,7 @@ class ForecastRunSerializer(serializers.ModelSerializer):
         model = ForecastRun
         fields = [
             "id", "project", "run_by", "run_at", "months_of_history", "arima_order",
-            "status", "error_message", "mae", "rmse", "mape",
+            "status", "error_message", "mae", "rmse", "mape", "backtest_status", "backtest_note",
             "approved_budget_total", "actual_to_date", "projected_total_at_horizon",
             "is_overrun_risk", "unpaid_commitments", "forecasts",
         ]
