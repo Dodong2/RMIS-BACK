@@ -24,6 +24,14 @@ from .serializers import (
 )
 
 
+class ComplianceAccessMixin:
+    """Client Task 79 (2026-11-18): every Compliance endpoint needs compliance.view (System Admin, VP for REI,
+    University Administration), on top of the view's own read/write rule."""
+
+    def get_permissions(self):
+        return [HasRole("compliance.view"), *super().get_permissions()]
+
+
 class ManageWritesMixin:
     """Authenticated read, compliance.manage (riuh/system_admin) write."""
 
@@ -57,7 +65,7 @@ class ProjectScopedMixin:
         return qs
 
 
-class EthicsReviewListCreateView(EncodeWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
+class EthicsReviewListCreateView(ComplianceAccessMixin, EncodeWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
     queryset = EthicsReviewReference.objects.all().order_by("-created_at")
     serializer_class = EthicsReviewReferenceSerializer
 
@@ -65,12 +73,12 @@ class EthicsReviewListCreateView(EncodeWritesMixin, ProjectScopedMixin, generics
         serializer.save(recorded_by=self.request.user)
 
 
-class EthicsReviewDetailView(EncodeWritesMixin, generics.RetrieveUpdateAPIView):
+class EthicsReviewDetailView(ComplianceAccessMixin, EncodeWritesMixin, generics.RetrieveUpdateAPIView):
     queryset = EthicsReviewReference.objects.all()
     serializer_class = EthicsReviewReferenceSerializer
 
 
-class SimilarityCheckListCreateView(EncodeWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
+class SimilarityCheckListCreateView(ComplianceAccessMixin, EncodeWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
     queryset = SimilarityCheckRecord.objects.all().order_by("-checked_on")
     serializer_class = SimilarityCheckRecordSerializer
 
@@ -78,12 +86,12 @@ class SimilarityCheckListCreateView(EncodeWritesMixin, ProjectScopedMixin, gener
         serializer.save(recorded_by=self.request.user)
 
 
-class SimilarityCheckDetailView(EncodeWritesMixin, generics.RetrieveUpdateAPIView):
+class SimilarityCheckDetailView(ComplianceAccessMixin, EncodeWritesMixin, generics.RetrieveUpdateAPIView):
     queryset = SimilarityCheckRecord.objects.all()
     serializer_class = SimilarityCheckRecordSerializer
 
 
-class AIUseDeclarationListCreateView(ProjectScopedMixin, generics.ListCreateAPIView):
+class AIUseDeclarationListCreateView(ComplianceAccessMixin, ProjectScopedMixin, generics.ListCreateAPIView):
     """Any authenticated user may declare their own AI use; no gatekeeping needed."""
 
     queryset = AIUseDeclaration.objects.all().order_by("-created_at")
@@ -94,13 +102,13 @@ class AIUseDeclarationListCreateView(ProjectScopedMixin, generics.ListCreateAPIV
         serializer.save(declared_by=self.request.user)
 
 
-class AIUseDeclarationDetailView(generics.RetrieveAPIView):
+class AIUseDeclarationDetailView(ComplianceAccessMixin, generics.RetrieveAPIView):
     queryset = AIUseDeclaration.objects.all()
     serializer_class = AIUseDeclarationSerializer
     permission_classes = [permissions.IsAuthenticated]
 
 
-class COIDisclosureListCreateView(ProjectScopedMixin, generics.ListCreateAPIView):
+class COIDisclosureListCreateView(ComplianceAccessMixin, ProjectScopedMixin, generics.ListCreateAPIView):
     """Any authenticated user may disclose their own conflict of interest."""
 
     queryset = ConflictOfInterestDisclosure.objects.all().order_by("-created_at")
@@ -111,14 +119,14 @@ class COIDisclosureListCreateView(ProjectScopedMixin, generics.ListCreateAPIView
         serializer.save(recorded_by=self.request.user)
 
 
-class COIDisclosureDetailView(ManageWritesMixin, generics.RetrieveUpdateAPIView):
+class COIDisclosureDetailView(ComplianceAccessMixin, ManageWritesMixin, generics.RetrieveUpdateAPIView):
     """Status/mitigation updates are RIUH-only; the initial disclosure is self-service."""
 
     queryset = ConflictOfInterestDisclosure.objects.all()
     serializer_class = ConflictOfInterestDisclosureSerializer
 
 
-class MisconductCaseListCreateView(ManageWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
+class MisconductCaseListCreateView(ComplianceAccessMixin, ManageWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
     queryset = MisconductCaseReference.objects.all().order_by("-reported_on")
     serializer_class = MisconductCaseReferenceSerializer
 
@@ -126,12 +134,12 @@ class MisconductCaseListCreateView(ManageWritesMixin, ProjectScopedMixin, generi
         serializer.save(reported_by=self.request.user)
 
 
-class MisconductCaseDetailView(ManageWritesMixin, generics.RetrieveUpdateAPIView):
+class MisconductCaseDetailView(ComplianceAccessMixin, ManageWritesMixin, generics.RetrieveUpdateAPIView):
     queryset = MisconductCaseReference.objects.all()
     serializer_class = MisconductCaseReferenceSerializer
 
 
-class VerifyRecordView(APIView):
+class VerifyRecordView(ComplianceAccessMixin, APIView):
     """RIUH verifies a leader-encoded compliance record. POST sets verified_by/at."""
 
     permission_classes = [HasRole("compliance.manage")]
@@ -148,7 +156,7 @@ class VerifyRecordView(APIView):
         return Response(self.serializer_class(record).data)
 
 
-class ComplianceRequirementListCreateView(EncodeWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
+class ComplianceRequirementListCreateView(ComplianceAccessMixin, EncodeWritesMixin, ProjectScopedMixin, generics.ListCreateAPIView):
     serializer_class = ComplianceRequirementSerializer
     queryset = ComplianceRequirement.objects.order_by("deadline")
 
@@ -166,7 +174,7 @@ class ComplianceRequirementListCreateView(EncodeWritesMixin, ProjectScopedMixin,
         serializer.save(created_by=self.request.user)
 
 
-class ComplianceRequirementDetailView(EncodeWritesMixin, generics.RetrieveUpdateAPIView):
+class ComplianceRequirementDetailView(ComplianceAccessMixin, EncodeWritesMixin, generics.RetrieveUpdateAPIView):
     serializer_class = ComplianceRequirementSerializer
     queryset = ComplianceRequirement.objects.all()
 
@@ -174,7 +182,7 @@ class ComplianceRequirementDetailView(EncodeWritesMixin, generics.RetrieveUpdate
         serializer.save()  # requirements have their own review flow, not RIUH verification
 
 
-class ComplianceRequirementSubmitView(APIView):
+class ComplianceRequirementSubmitView(ComplianceAccessMixin, APIView):
     """The responsible person (or an encoder) submits: POST {"document": <id>?}."""
 
     permission_classes = [permissions.IsAuthenticated]
@@ -192,7 +200,7 @@ class ComplianceRequirementSubmitView(APIView):
         return Response(serializer.data)
 
 
-class ComplianceRequirementReviewView(APIView):
+class ComplianceRequirementReviewView(ComplianceAccessMixin, APIView):
     """RIUH reviews: POST {"status": "compliant" | "returned" | "non_compliant", "review_remarks": ...}."""
 
     permission_classes = [HasRole("compliance.manage")]

@@ -1,4 +1,4 @@
-"""2026-10-12 concurrency audit: RIUH verification is stamped once, under a row lock."""
+"""2026-10-12 concurrency audit: verification is stamped once, under a row lock (verifiers per client Task 79)."""
 from accounts.testing import RMISTestCase
 from compliance.models import EthicsReviewReference
 from research_projects.models import Project
@@ -9,7 +9,7 @@ class VerifyOnceTests(RMISTestCase):
         leader = self.make_user("project_leader")
         project = Project.objects.create(title="P", project_code="P-1", funding_type="core_funded", lead=leader)
         record = EthicsReviewReference.objects.create(project=project, review_body="REC", recorded_by=leader)
-        first, second = self.make_user("riuh"), self.make_user("system_admin")
+        first, second = self.make_user("vprei"), self.make_user("system_admin")
         url = f"/api/compliance/ethics-reviews/{record.id}/verify/"
 
         self.assertEqual(self.client_for(first).post(url).status_code, 200)

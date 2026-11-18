@@ -1,6 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
+from accounts.permissions import role_can
 from research_projects.workflow import WorkAfterReviewMixin
 from .models import (
     AI_CONTENT_THRESHOLD,
@@ -13,9 +14,11 @@ from .models import (
 )
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
-MANAGE_ROLES = ["system_admin", "riuh"]
-# Leaders encode compliance records; RIUH verifies (client clarification Q1a).
-ENCODE_ROLES = MANAGE_ROLES + ["project_leader"]
+# Client Task 79 (2026-11-18): only System Admin, VP for REI and University Administration have Compliance, and they
+# run all of it (replaces clarification Q1a's "leaders encode, RIUH verifies").
+COMPLIANCE_ROLES = ["system_admin", "vprei", "university_admin"]
+MANAGE_ROLES = COMPLIANCE_ROLES
+ENCODE_ROLES = COMPLIANCE_ROLES
 
 
 def validate_study_belongs_to_project(attrs, instance):
@@ -121,4 +124,9 @@ class ComplianceRequirementSerializer(serializers.ModelSerializer):
         document = attrs.get("document", getattr(self.instance, "document", None))
         if document and document.project_id != project.id:
             raise serializers.ValidationError({"document": "Document belongs to a different project."})
+        responsible = attrs.get("responsible")
+        if responsible is not None and not (responsible.is_active and role_can(responsible, "compliance.view")):
+            raise serializers.ValidationError(
+                {"responsible": "Assign this to System Admin, VP for REI or University Administration (only they have Compliance)."}
+            )
         return attrs

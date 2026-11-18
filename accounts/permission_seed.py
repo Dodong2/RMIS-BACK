@@ -25,6 +25,7 @@ PERMISSIONS = {
     "budget_sync.manage": ("budget_sync", "Import Budget Office workbooks and link records", "budget_sync.serializers:SYNC_ROLES"),
     "compliance.manage": ("compliance", "Verify/review compliance records, misconduct cases", "compliance.serializers:MANAGE_ROLES"),
     "compliance.encode": ("compliance", "Encode compliance records and requirements", "compliance.serializers:ENCODE_ROLES"),
+    "compliance.view": ("compliance", "Open Compliance Tracking and read its records", "compliance.serializers:COMPLIANCE_ROLES"),
     "documents.manage": ("document_management", "Review and archive documents", "document_management.serializers:MANAGE_ROLES"),
     "outputs.manage": ("outputs", "Maintain SENSE publisher list", "outputs.serializers:MANAGE_ROLES"),
     "outputs.report": ("outputs", "Record publications, IP, expected outputs, outcomes", "outputs.serializers:REPORT_ROLES"),

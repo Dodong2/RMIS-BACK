@@ -54,7 +54,7 @@ class BudgetDashboardView(APIView):
 
 
 class ComplianceDashboardView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [HasRole("compliance.view")]  # client Task 79: Compliance is for 3 roles only
 
     def get(self, request):
         return Response(services.compute_compliance_dashboard(

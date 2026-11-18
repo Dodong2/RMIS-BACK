@@ -312,7 +312,8 @@ class DashboardRoleScopeTests(RMISTestCase):
 
     def test_project_staff_counts_only_projects_they_belong_to(self):
         self.assertEqual(self.get(self.staff, "dashboard/projects/")["total_projects"], 1)
-        self.assertEqual(self.get(self.staff, "dashboard/compliance/")["ai_use_declarations"], 1)
+        # Client Task 79 (2026-11-18): Compliance, incl. its dashboard, is for System Admin, VP for REI and University Administration only.
+        self.assertEqual(self.client_for(self.staff).get("/api/dashboard/compliance/").status_code, 403)
         self.assertEqual([r["project"] for r in self.get(self.staff, "dashboard/tasks/")], [self.mine.pk])
         self.assertEqual(self.get(self.staff, "risk/dashboard/")["total_projects"], 1)
 
@@ -359,7 +360,8 @@ class DashboardRoleScopeTests(RMISTestCase):
             LineItemBudget.objects.create(project=project, version_number=1, status="submitted")
 
         self.assertEqual(self.get(crc, "dashboard/projects/")["by_campus"], {"Siniloan": 1})
-        self.assertEqual(self.get(crc, "dashboard/compliance/")["ai_use_declarations"], 1)
+        # Client Task 79 (2026-11-18): Compliance, incl. its dashboard, is for System Admin, VP for REI and University Administration only.
+        self.assertEqual(self.client_for(crc).get("/api/dashboard/compliance/").status_code, 403)
 
     def test_university_wide_roles_count_every_project(self):
         for role in ("system_admin", "vprei"):
