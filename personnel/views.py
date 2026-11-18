@@ -117,7 +117,8 @@ def scope_tasks(user, qs):
     if code == "project_staff":
         return qs.filter(assignee=user)
     if code == "riuh":
-        return qs.filter(project__in=visible_projects(user).values("pk"))
+        projects = visible_projects(user)  # None = an RIUH without campus/college: not limited
+        return qs if projects is None else qs.filter(project__in=projects.values("pk"))
     return qs
 
 

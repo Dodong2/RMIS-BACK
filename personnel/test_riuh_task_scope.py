@@ -34,6 +34,11 @@ class RIUHTaskScopeTests(RMISTestCase):
         self.assertEqual(self.riuh.get(f"{URL}{self.tasks['own'].pk}/updates/").status_code, 200)
         self.assertEqual(self.riuh.get(f"{URL}{self.tasks['other_campus'].pk}/updates/").status_code, 404)
 
+    def test_riuh_without_campus_or_college_is_not_limited(self):
+        unscoped = self.client_for(self.make_user("riuh"))
+        self.assertEqual(len(unscoped.get(URL).data), 3)
+        self.assertEqual(unscoped.get(f"{URL}{self.tasks['other_campus'].pk}/updates/").status_code, 200)
+
     def test_other_roles_unchanged(self):
         self.assertEqual(len(self.client_for(self.make_user("system_admin")).get(URL).data), 3)
         self.assertEqual(len(self.client_for(self.staff).get(URL).data), 3)
