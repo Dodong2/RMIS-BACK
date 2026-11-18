@@ -125,6 +125,20 @@ class AllowedRoleWorkflowTests(ComplianceTestCase):
         self.requirement(self.make_user("university_admin"), by=self.admin)
 
 
+class AssignableUsersTests(ComplianceTestCase):
+    def test_lists_only_active_accounts_of_the_three_roles_and_only_for_them(self):
+        vprei, ua = self.make_user("vprei"), self.make_user("university_admin")
+        inactive = self.make_user("vprei", is_active=False)
+        self.make_user("riuh")
+        response = self.client_for(vprei).get("/api/compliance/assignable-users/")
+        self.assertEqual(response.status_code, 200)
+        ids = {u["id"] for u in response.data}
+        self.assertEqual(ids, {self.admin.id, vprei.id, ua.id})
+        self.assertNotIn(inactive.id, ids)
+        for code in DENIED:
+            self.assertEqual(self.client_for(self.make_user(code)).get("/api/compliance/assignable-users/").status_code, 403, code)
+
+
 class PermissionParityTests(RMISTestCase):
     def test_migrated_grants_match_the_seed_source(self):
         from accounts.models import RolePermission

@@ -7,6 +7,7 @@ from .serializers import (
     SimilarityCheckRecordSerializer,
 )
 from .views import (
+    ComplianceAssignableUsersView,
     ComplianceRequirementDetailView,
     ComplianceRequirementListCreateView,
     ComplianceRequirementReviewView,
@@ -37,6 +38,7 @@ urlpatterns = [
     path("similarity-checks/<int:pk>/verify/", VerifyRecordView.as_view(model=SimilarityCheckRecord, serializer_class=SimilarityCheckRecordSerializer)),
     path("ai-declarations/<int:pk>/verify/", VerifyRecordView.as_view(model=AIUseDeclaration, serializer_class=AIUseDeclarationSerializer)),
     path("coi-disclosures/<int:pk>/verify/", VerifyRecordView.as_view(model=ConflictOfInterestDisclosure, serializer_class=ConflictOfInterestDisclosureSerializer)),
+    path("assignable-users/", ComplianceAssignableUsersView.as_view()),
     path("requirements/", ComplianceRequirementListCreateView.as_view()),
     path("requirements/<int:pk>/", ComplianceRequirementDetailView.as_view()),
     path("requirements/<int:pk>/submit/", ComplianceRequirementSubmitView.as_view()),

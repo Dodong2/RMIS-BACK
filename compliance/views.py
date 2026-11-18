@@ -4,7 +4,9 @@ from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import User
 from accounts.permissions import HasRole, role_can
+from accounts.serializers import UserListSerializer
 from config.concurrency import lock
 from .models import (
     ComplianceRequirement,
@@ -218,3 +220,16 @@ class ComplianceRequirementReviewView(ComplianceAccessMixin, APIView):
         requirement.reviewed_by, requirement.reviewed_at = request.user, timezone.now()
         requirement.save()
         return Response(ComplianceRequirementSerializer(requirement).data)
+
+
+class ComplianceAssignableUsersView(ComplianceAccessMixin, generics.ListAPIView):
+    """Task 79-B: people a requirement can be assigned to = active accounts whose role has Compliance."""
+
+    serializer_class = UserListSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            User.objects.filter(is_active=True, is_pending_role=False, role__role_permissions__permission__code="compliance.view")
+            .select_related("role").distinct().order_by("first_name", "last_name", "email")
+        )
