@@ -42,6 +42,8 @@ class ForecastRun(models.Model):
     actual_to_date = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     projected_total_at_horizon = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     is_overrun_risk = models.BooleanField(default=False)
+    # Client Task 86-A (Figma BF-04): Run is a preview, Save Forecast keeps it. Runs before 86-A count as saved.
+    is_saved = models.BooleanField(default=True)
 
     class Meta:
         ordering = ["-run_at"]

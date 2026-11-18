@@ -24,7 +24,7 @@ class ForecastRunSerializer(serializers.ModelSerializer):
             "id", "project", "run_by", "run_at", "months_of_history", "arima_order",
             "status", "error_message", "mae", "rmse", "mape", "backtest_status", "backtest_note",
             "approved_budget_total", "actual_to_date", "projected_total_at_horizon",
-            "is_overrun_risk", "unpaid_commitments", "forecasts",
+            "is_overrun_risk", "is_saved", "unpaid_commitments", "forecasts",
         ]
         read_only_fields = [f for f in fields if f != "project"]
 

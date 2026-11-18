@@ -436,7 +436,7 @@ def compute_forecasting_dashboard(campus=None, funding_type=None, college=None, 
     projects = _scoped_projects(campus, funding_type, college, user=user, budget=True)
     runs = []
     for project in projects:
-        run = ForecastRun.objects.filter(project=project, status="success").order_by("-run_at").first()
+        run = ForecastRun.objects.filter(project=project, status="success", is_saved=True).order_by("-run_at").first()
         if run:
             runs.append(run)
     monthly = {}

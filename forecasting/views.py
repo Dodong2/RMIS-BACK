@@ -42,8 +42,30 @@ class ForecastRunTriggerView(APIView):
 
     def post(self, request):
         project = get_object_or_404(forecastable_projects(request.user), pk=request.data.get("project"))
-        run = services.run_forecast(project, request.user)
+        try:
+            horizon = int(request.data.get("horizon", services.FORECAST_HORIZON_MONTHS))
+        except (TypeError, ValueError):
+            horizon = 0
+        if not 1 <= horizon <= services.MAX_HORIZON_MONTHS:
+            return Response({"horizon": f"must be 1 to {services.MAX_HORIZON_MONTHS} months."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        run = services.run_forecast(project, request.user, horizon)
         return Response(ForecastRunSerializer(run).data, status=status.HTTP_201_CREATED)
+
+
+class ForecastRunSaveView(APIView):
+    """Save Forecast (client Task 86-A): keeps the caller's own preview; it then shows under Saved Forecasts."""
+
+    permission_classes = [ForecastRolePermission]
+
+    def post(self, request, pk):
+        run = get_object_or_404(
+            ForecastRun.objects.filter(project__in=forecastable_projects(request.user), run_by=request.user), pk=pk,
+        )
+        if not run.is_saved:
+            run.is_saved = True
+            run.save(update_fields=["is_saved"])
+        return Response(ForecastRunSerializer(run).data)
 
 
 class ForecastRunListView(generics.ListAPIView):
@@ -51,7 +73,7 @@ class ForecastRunListView(generics.ListAPIView):
     permission_classes = [ForecastRolePermission]
 
     def get_queryset(self):
-        qs = (ForecastRun.objects.filter(project__in=forecastable_projects(self.request.user))
+        qs = (ForecastRun.objects.filter(project__in=forecastable_projects(self.request.user), is_saved=True)
               .select_related("project").prefetch_related("forecasts"))  # Task 68-A: not per run
         project_id = self.request.query_params.get("project")
         if project_id:

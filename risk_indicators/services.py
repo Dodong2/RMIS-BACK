@@ -104,7 +104,7 @@ def _procurement_delay(project):
 
 def _forecast_overrun(project):
     # Client Q7: forecast above the adjusted budget = 3x4 (High).
-    latest = ForecastRun.objects.filter(project=project, status="success").order_by("-run_at").first()
+    latest = ForecastRun.objects.filter(project=project, status="success", is_saved=True).order_by("-run_at").first()
     if latest is None:
         return _scored(False, 3, 4, has_forecast=False, is_overrun_risk=None)
     return _scored(bool(latest.is_overrun_risk), 3, 4, has_forecast=True, is_overrun_risk=latest.is_overrun_risk)

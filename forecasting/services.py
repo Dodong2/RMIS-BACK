@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 MIN_HISTORY_MONTHS = 6
 MIN_HISTORY_FOR_BACKTEST = 12  # client Task 78-C: below 12 months the accuracy figures would be misleading
 HOLDOUT_MONTHS = 3  # latest months, chronological (client: 3-6)
-FORECAST_HORIZON_MONTHS = 3
+FORECAST_HORIZON_MONTHS = 3  # default; client Task 86-A lets the user pick 1..MAX_HORIZON_MONTHS
+MAX_HORIZON_MONTHS = 24
 ARIMA_ORDER = (1, 1, 1)
 CONFIDENCE_LEVEL = 0.95
 
@@ -109,9 +110,11 @@ def unpaid_commitments(project):
     )
 
 
-def run_forecast(project, run_by):
+def run_forecast(project, run_by, horizon=FORECAST_HORIZON_MONTHS):
+    """A preview run (is_saved=False); it replaces the same user's earlier unsaved preview of the project."""
     from .models import ForecastRun, MonthlyForecast
 
+    ForecastRun.objects.filter(project=project, run_by=run_by, is_saved=False).delete()
     series = monthly_disbursement_series(project)
     months_of_history = len(series)
     values = [amount for _, amount in series]
@@ -122,6 +125,7 @@ def run_forecast(project, run_by):
         return ForecastRun.objects.create(
             project=project,
             run_by=run_by,
+            is_saved=False,
             months_of_history=months_of_history,
             **backtest_fields,
             status="insufficient_data",
@@ -131,11 +135,12 @@ def run_forecast(project, run_by):
     last_period = series[-1][0]
 
     try:
-        mean, ci = _fit_and_forecast(values, FORECAST_HORIZON_MONTHS)
+        mean, ci = _fit_and_forecast(values, horizon)
     except Exception as exc:
         return ForecastRun.objects.create(
             project=project,
             run_by=run_by,
+            is_saved=False,
             months_of_history=months_of_history,
             **backtest_fields,
             status="failed",
@@ -150,6 +155,7 @@ def run_forecast(project, run_by):
     run = ForecastRun.objects.create(
         project=project,
         run_by=run_by,
+        is_saved=False,
         months_of_history=months_of_history,
         arima_order=str(ARIMA_ORDER),
         **backtest_fields,

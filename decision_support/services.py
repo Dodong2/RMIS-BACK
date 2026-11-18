@@ -91,7 +91,7 @@ def _renewal_eligible(project):
 
 
 def _overrun_risk_inverse(project):
-    latest = ForecastRun.objects.filter(project=project, status="success").order_by("-run_at").first()
+    latest = ForecastRun.objects.filter(project=project, status="success", is_saved=True).order_by("-run_at").first()
     if latest is None:
         return 0.5  # neutral — no forecast run yet
     return 0.0 if latest.is_overrun_risk else 1.0
