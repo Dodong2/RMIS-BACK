@@ -38,6 +38,15 @@ LEADER_ROLES = ["project_leader"]
 CAMPUS_SCOPED_ROLES = ["crc_chair", "finance_budget", "procurement_officer_lib", "riuh"]
 
 
+def scope_college(user):
+    """The college a campus role is limited to: the admin-set scope["college"], else (Task 85-A, client 2026-11-18) the
+    RIUH's own College Unit. Other campus roles stay campus-wide without an admin scope."""
+    college = (user.scope or {}).get("college")
+    if not college and user.role and user.role.code == "riuh":
+        college = user.college_unit
+    return college or None
+
+
 def acting_for(user):
     """IDs of the suspended users this user is currently the temporary replacement for (client clarification Q3)."""
     from datetime import date
@@ -75,7 +84,7 @@ def scoped_projects(user):
         ).distinct()
     if code == "project_staff" or code is None:
         return Project.objects.none()
-    college = (user.scope or {}).get("college")
+    college = scope_college(user)
     if code in CAMPUS_SCOPED_ROLES and (user.campus or college):
         qs = Project.objects.all()
         if user.campus:
@@ -178,7 +187,7 @@ def _on_own_campus(user, queryset):
     """Task 70 (2026-11-17): CRC/CRD, Finance, RIUH and Procurement see documents of their own campus (and college, when
     their scope names one) only, like scoped_projects (client 2026-10-27). An account without a campus isn't limited.
     Only the campus part: the draft rule of scoped_projects isn't applied to documents."""
-    college = (user.scope or {}).get("college")
+    college = scope_college(user)
     if user.campus:
         queryset = queryset.filter(project__campus__iexact=user.campus)
     if college:
