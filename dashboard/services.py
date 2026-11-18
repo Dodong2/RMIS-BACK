@@ -514,13 +514,25 @@ def compute_task_dashboard(project_id=None, user=None):
     ]
 
 
+PROCUREMENT_PENDING = ("requested", "under_review")
+
+
+def first_decision(events):
+    """Task 82: when the Procurement Office first decided on a request (moved it out of Submitted/Under Review:
+    accepted, returned or cancelled). Events are newest first and recorded from 2026-10-22 on; None if none yet."""
+    for e in reversed(events):
+        if e.from_status in PROCUREMENT_PENDING and e.to_status not in PROCUREMENT_PENDING:
+            return e.created_at
+    return None
+
+
 def compute_procurement_dashboard(user):
     """Procurement Officer - LIB dashboard (Figma ProcurementOfficerDashboard, 2026-10-22): every procurement request
     in the user's scope (scoped_projects: all, or the admin-set campus/college) with its LIB figures, plus the status
     history. The same for every account of the role with the same scope. Totals and charts are computed from these
     rows on the page (src/lib/procurementDashboard.ts) so its filters stay client-side."""
     requests = ProcurementRequest.objects.select_related(
-        "line_item__budget__project", "requested_by", "received_by",
+        "line_item__budget__project__lead", "requested_by", "received_by",
     ).prefetch_related("events").order_by("-requested_at")
     allowed = scoped_projects(user)
     if allowed is not None:
@@ -570,6 +582,8 @@ def compute_procurement_dashboard(user):
             "released": released.get(pr.pk, 0),
             "processing_days": (end - pr.requested_at).days if end else None,
             "returned_count": sum(1 for e in events if e.to_status == "returned_for_revision"),
+            "project_leader": project.lead.display_name if project.lead else "",
+            "decided_at": first_decision(events),
         })
 
     status_labels = dict(ProcurementRequest.STATUS_CHOICES)

@@ -14,6 +14,8 @@ ANALYTICS_ROLES = [
     "system_admin", "vprei", "university_admin", "crc_chair", "riuh", "finance_budget",
     "procurement_officer_lib", "project_leader",
 ]
+# Client Task 82 (2026-11-18): Procurement Analytics; seed source for procurement.view_analytics.
+PROCUREMENT_ANALYTICS_ROLES = ["system_admin", "procurement_officer_lib", "university_admin"]
 
 
 class PlanningTargetListCreateView(generics.ListCreateAPIView):
@@ -176,9 +178,10 @@ class TaskDashboardView(APIView):
 
 
 class ProcurementDashboardView(APIView):
-    """Procurement Officer - LIB dashboard (2026-10-22): the Procurement Office (and System Admin), any account."""
+    """Procurement Officer - LIB dashboard (2026-10-22) and Procurement Analytics (Task 82): System Admin, Procurement
+    Officer - LIB and University Administration."""
 
-    permission_classes = [HasRole("financial.update_procurement")]
+    permission_classes = [HasRole("procurement.view_analytics")]
 
     def get(self, request):
         return Response(services.compute_procurement_dashboard(request.user))

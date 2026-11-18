@@ -124,10 +124,37 @@ class ProcurementDashboardTests(RMISTestCase):
         self.assertEqual(carla.post(f"{PR_URL}{mine.id}/receive/").status_code, 200)
         self.assertEqual(ProcurementRequest.objects.get(pk=theirs.pk).status, "requested")
 
-    def test_only_the_procurement_office_and_admin_open_it(self):
-        self.assertEqual(self.client_for(self.make_user("system_admin")).get(URL).status_code, 200)
-        for role in ("finance_budget", "project_leader", "vprei", "project_staff"):
+    def test_only_procurement_analytics_roles_open_it(self):
+        """Task 82: System Admin, Procurement Officer - LIB and University Administration; every other role 403."""
+        self.file(self.item, 1000)
+        for role in ("system_admin", "procurement_officer_lib", "university_admin"):
+            response = self.client_for(self.make_user(role)).get(URL)
+            self.assertEqual(response.status_code, 200, role)
+            self.assertEqual(len(response.data["requests"]), 1, role)
+        for role in ("vprei", "crc_chair", "riuh", "finance_budget", "project_leader", "project_staff"):
             self.assertEqual(self.client_for(self.make_user(role)).get(URL).status_code, 403, role)
+        self.assertEqual(self.client.get(URL).status_code, 401)
+
+    def test_project_leader_and_first_decision(self):
+        """Task 82: each row names the project's leader and when the Procurement Office first decided on it (accepted,
+        returned or cancelled), not when it was received; still pending = None."""
+        returned, accepted, pending = self.file(self.item, 1000), self.file(self.item, 1000), self.file(self.item, 1000)
+        self.ana_client.post(f"{PR_URL}{returned.id}/receive/")
+        self.move(self.ben_client, returned, "returned_for_revision", "Attach a quotation")
+        self.assertEqual(self.leader_client.post(f"{PR_URL}{returned.id}/resubmit/", {"amount": "900"}).status_code, 200)
+        self.ana_client.post(f"{PR_URL}{returned.id}/receive/")
+        self.move(self.ana_client, returned, "for_procurement")
+        self.ana_client.post(f"{PR_URL}{accepted.id}/receive/")
+        self.move(self.ana_client, accepted, "for_procurement")
+        self.ana_client.post(f"{PR_URL}{pending.id}/receive/")
+
+        data = self.ana_client.get(URL).data
+        first_return = ProcurementStatusEvent.objects.get(procurement=returned, to_status="returned_for_revision")
+        accept = ProcurementStatusEvent.objects.get(procurement=accepted, to_status="for_procurement")
+        self.assertEqual(self.row(data, returned)["decided_at"], first_return.created_at)
+        self.assertEqual(self.row(data, accepted)["decided_at"], accept.created_at)
+        self.assertIsNone(self.row(data, pending)["decided_at"])
+        self.assertEqual({r["project_leader"] for r in data["requests"]}, {"Lea Lim"})
 
     def test_events_are_recorded_for_every_transition(self):
         pr = self.file(self.item, 2000)
