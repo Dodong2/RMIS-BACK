@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from accounts.permissions import HasRole, role_can
+from accounts.permissions import HasRole, role_can, visible_projects
 from config.concurrency import AtomicMutationMixin, idempotent, lock
 from research_projects.models import Project
 from research_projects.workflow import ensure_work_allowed
@@ -111,6 +111,16 @@ class AssignmentDetailView(ManageWritesMixin, generics.RetrieveUpdateAPIView):
     serializer_class = ProjectAssignmentSerializer
 
 
+def scope_tasks(user, qs):
+    """Staff see their own tasks; RIUH sees tasks of its projects only (Task 85-B: campus + College Unit)."""
+    code = user.role.code if user.role else None
+    if code == "project_staff":
+        return qs.filter(assignee=user)
+    if code == "riuh":
+        return qs.filter(project__in=visible_projects(user).values("pk"))
+    return qs
+
+
 class TaskListCreateView(generics.ListCreateAPIView):
     serializer_class = TaskSerializer
 
@@ -120,10 +130,7 @@ class TaskListCreateView(generics.ListCreateAPIView):
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Task.objects.all().order_by("due_date", "-created_at")
-        if user.role and user.role.code == "project_staff":
-            qs = qs.filter(assignee=user)
+        qs = scope_tasks(self.request.user, Task.objects.all().order_by("due_date", "-created_at"))
         for param in ("project", "study", "milestone", "assignee", "status", "priority"):
             value = self.request.query_params.get(param)
             if value:
@@ -164,11 +171,7 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        user = self.request.user
-        if user.role and user.role.code == "project_staff":
-            qs = qs.filter(assignee=user)
-        return qs
+        return scope_tasks(self.request.user, super().get_queryset())
 
     def perform_update(self, serializer):
         previous = serializer.instance.assignee
@@ -195,12 +198,7 @@ class TaskUpdateListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_task(self):
-        # Reuse TaskDetailView's visibility rule (project_staff only see their own tasks).
-        tasks = Task.objects.all()
-        user = self.request.user
-        if user.role and user.role.code == "project_staff":
-            tasks = tasks.filter(assignee=user)
-        return generics.get_object_or_404(tasks, pk=self.kwargs["pk"])
+        return generics.get_object_or_404(scope_tasks(self.request.user, Task.objects.all()), pk=self.kwargs["pk"])
 
     def get_queryset(self):
         return self.get_task().updates.select_related("author").order_by("-created_at", "-id")
