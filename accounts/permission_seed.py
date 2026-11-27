@@ -40,6 +40,7 @@ PERMISSIONS = {
     "monitoring.quarterly_prepare": ("monitoring", "Prepare and submit R&D quarterly progress reports", "monitoring.serializers:QUARTERLY_PREPARE_ROLES"),
     "monitoring.quarterly_review": ("monitoring", "Review, return and endorse R&D quarterly progress reports", "monitoring.serializers:QUARTERLY_REVIEW_ROLES"),
     "monitoring.quarterly_approve": ("monitoring", "Give final approval to R&D quarterly progress reports", "monitoring.serializers:QUARTERLY_APPROVE_ROLES"),
+    "progress_reports.view": ("monitoring", "Open Project Progress Reports (report status and forms per project)", "monitoring.views:PROGRESS_REPORT_ROLES"),
     "dashboard.view_portfolio": ("dashboard", "View Analytics > Portfolio (counts across all projects)", "dashboard.views:ANALYTICS_ROLES"),
     "transactions.view": ("budget_lib", "Open Transactions (approved and processed budget/procurement actions)", "budget_lib.views:TRANSACTION_ROLES"),
     "procurement.view_analytics": ("dashboard", "Open Procurement Analytics (procurement requests and figures)", "dashboard.views:PROCUREMENT_ANALYTICS_ROLES"),
