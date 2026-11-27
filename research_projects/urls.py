@@ -1,4 +1,6 @@
 from django.urls import path
+
+from .milestone_changes import MilestoneChangeActionView, MilestoneChangeListCreateView
 from .views import (
     ADMIN_CHOICES,
     AdminChoiceListCreateView,
@@ -56,6 +58,8 @@ urlpatterns = [
     path("studies/<int:pk>/", StudyDetailView.as_view()),
     path("milestones/", MilestoneListCreateView.as_view()),
     path("milestones/<int:pk>/", MilestoneDetailView.as_view()),
+    path("milestone-changes/", MilestoneChangeListCreateView.as_view()),
+    path("milestone-changes/<int:pk>/<str:action>/", MilestoneChangeActionView.as_view()),
 ]
 
 for prefix, (model, serializer) in ADMIN_CHOICES.items():

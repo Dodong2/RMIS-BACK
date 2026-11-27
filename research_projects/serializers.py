@@ -609,6 +609,8 @@ class WorkPlanMilestoneSerializer(serializers.ModelSerializer):
         project = attrs.get("project", getattr(self.instance, "project", None))
         ensure_in_scope(self, project)
         ensure_registration_open(project, registration_changes(self, attrs))
+        if self.instance is not None and self.instance.change_requests.filter(status="pending").exists():
+            raise serializers.ValidationError("This milestone has a change waiting for RIUH confirmation.")
         start = attrs.get("start_date", getattr(self.instance, "start_date", None))
         target = attrs.get("target_date", getattr(self.instance, "target_date", None))
         if start and target and start > target:

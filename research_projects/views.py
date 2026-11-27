@@ -5,7 +5,7 @@ import requests
 from django.db import transaction
 from django.db.models import Prefetch
 from django.http import HttpResponse
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, serializers, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -540,4 +540,6 @@ class MilestoneDetailView(ProjectVisibleMixin, generics.RetrieveUpdateDestroyAPI
     def perform_destroy(self, instance):
         ensure_in_scope(self.get_serializer(), instance.project)
         ensure_registration_open(instance.project)
+        if instance.change_requests.filter(status="pending").exists():
+            raise serializers.ValidationError("This milestone has a change waiting for RIUH confirmation.")
         instance.delete()

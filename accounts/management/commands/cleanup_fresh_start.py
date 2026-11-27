@@ -33,7 +33,7 @@ CLEAR = [
     "accounts.User", "accounts.AuditLog", "accounts.TemporaryReplacement", "accounts.IdempotencyKey", "accounts.ReminderLog",
     "research_projects.Program", "research_projects.Project", "research_projects.ProjectTeamMember",
     "research_projects.TargetBeneficiary", "research_projects.ProjectEndorser", "research_projects.ProjectStatusHistory",
-    "research_projects.Study", "research_projects.WorkPlanMilestone",
+    "research_projects.Study", "research_projects.WorkPlanMilestone", "research_projects.MilestoneChangeRequest",
     "personnel.StaffProfile", "personnel.ProjectAssignment", "personnel.Task", "personnel.TaskDeliverable",
     "personnel.TaskUpdate", "personnel.PersonnelChange", "personnel.PropertyClearance",
     "budget_lib.LineItemBudget", "budget_lib.BudgetReview", "budget_lib.LineItem", "budget_lib.LineItemEdit",

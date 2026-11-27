@@ -324,3 +324,38 @@ class WorkPlanMilestone(models.Model):
 
     def __str__(self):
         return self.title
+
+class MilestoneChangeRequest(models.Model):
+    """Client Task 90 (2026-11-27): once registration is closed, a Project Leader proposes a change to a Work Plan
+    milestone; it is applied only when the RIUH confirms it, then the campus CRC/CRD is notified. While pending, the
+    milestone can't be changed again. `previous`/`proposed` hold only the changed fields (dates as yyyy-mm-dd)."""
+
+    STATUS_CHOICES = (
+        ("pending", "Pending RIUH Confirmation"),
+        ("confirmed", "Confirmed"),
+        ("returned", "Returned"),
+    )
+    FIELDS = ("title", "start_date", "target_date", "objective", "deliverable", "remarks")
+
+    milestone = models.ForeignKey(WorkPlanMilestone, on_delete=models.CASCADE, related_name="change_requests")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="milestone_change_requests")
+    previous = models.JSONField(default=dict)
+    proposed = models.JSONField(default=dict)
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="milestone_changes_submitted")
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="milestone_changes_reviewed"
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_remarks = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-submitted_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["milestone"], condition=models.Q(status="pending"), name="one_pending_change_per_milestone"),
+        ]
+
+    def __str__(self):
+        return f"{self.milestone} ({self.status})"
