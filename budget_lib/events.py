@@ -3,8 +3,9 @@ been checked and saved, inside the view's transaction.atomic(), so a refused or 
 The actor is always request.user and the project comes from the record that changed, never from the request body."""
 from .models import BudgetEventLog
 
-# Carl's Q5 (2026-11-06): the three budget/procurement roles, plus system_admin so a misused admin account is traced
-LOGGED_ROLES = ("project_leader", "procurement_officer_lib", "finance_budget", "system_admin")
+# Carl's Q5 (2026-11-06): the three budget/procurement roles, plus system_admin so a misused admin account is traced.
+# Task 88-A (2026-11-27): CRC/CRD too, for the Transactions page; its earlier actions have no rows.
+LOGGED_ROLES = ("project_leader", "procurement_officer_lib", "finance_budget", "system_admin", "crc_chair")
 LINE_ITEM_FIELDS = ("category", "description", "specification", "unit", "quantity", "unit_cost", "amount", "allocations",
                     "justification", "fiscal_year")
 

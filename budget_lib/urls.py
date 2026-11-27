@@ -10,6 +10,9 @@ from .views import (
     LibItemListCreateView,
     LineItemDetailView,
     LineItemListCreateView,
+    TransactionExportView,
+    TransactionFiltersView,
+    TransactionListView,
 )
 
 urlpatterns = [
@@ -22,4 +25,7 @@ urlpatterns = [
     path("line-items/<int:pk>/", LineItemDetailView.as_view()),
     path("lib-items/", LibItemListCreateView.as_view()),
     path("lib-items/<int:pk>/", LibItemDetailView.as_view()),
+    path("transactions/", TransactionListView.as_view()),
+    path("transactions/filters/", TransactionFiltersView.as_view()),
+    path("transactions/export/", TransactionExportView.as_view()),
 ]

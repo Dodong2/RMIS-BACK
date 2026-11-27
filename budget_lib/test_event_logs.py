@@ -1,5 +1,5 @@
 """Event Logs Budget (client Task 46, 2026-11-06): a database-only record of who did which LIB action on which project.
-Logged roles (Carl's Q5): project_leader, procurement_officer_lib, finance_budget and system_admin; crc_chair is not."""
+Logged roles (Carl's Q5): project_leader, procurement_officer_lib, finance_budget and system_admin; crc_chair since Task 88-A (2026-11-27)."""
 import datetime
 from datetime import date
 from decimal import Decimal
@@ -51,10 +51,10 @@ class BudgetEventLogTests(RMISTestCase):
 
     def test_full_chain_logs_the_logged_roles_only(self):
         self.act(self.leader, "submit")
-        self.act(self.crc, "for-checking")  # CRC/CRD is not a logged role (Q5)
+        self.act(self.crc, "for-checking")  # CRC/CRD is logged since Task 88-A
         self.act(self.officer, "start-certification")
         self.act(self.officer, "certify")
-        self.assertEqual(self.events(), ["LIB_SUBMITTED", "LIB_CERTIFICATION_STARTED", "LIB_CERTIFIED"])
+        self.assertEqual(self.events(), ["LIB_SUBMITTED", "LIB_MARKED_FOR_CHECKING", "LIB_CERTIFICATION_STARTED", "LIB_CERTIFIED"])
         certified = BudgetEventLog.objects.get(event="LIB_CERTIFIED")
         self.assertEqual((certified.actor_role, certified.previous, certified.new),
                          ("finance_budget", {"status": "certifying"}, {"status": "certified"}))

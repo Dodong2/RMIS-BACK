@@ -1,21 +1,25 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.http import HttpResponse
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import generics, permissions, status
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_can
+from accounts.permissions import BudgetScopedMixin, HasRole, acting_for, role_can, scoped_projects
 from config.concurrency import lock, lock_line_items
 from realtime.consumers import campus_role_group
 from realtime.notify import notify, project_audience
 from research_projects.workflow import missing_approval_documents, missing_registration_rows
 from .events import changed_values, line_item_values, log_budget_event
-from .models import BudgetReview, LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
+from .models import BudgetEventLog, BudgetReview, LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
 from .notifications import lib_updated, project_activated, proposal_submitted, ready_for_budget_review
-from .serializers import (LibItemSerializer, LineItemBudgetSerializer, LineItemSerializer, catalog_item_name, clean_allocations,
+from .serializers import (LibItemSerializer, TransactionSerializer, LineItemBudgetSerializer, LineItemSerializer, catalog_item_name, clean_allocations,
                           line_total, review_budget, total_cost_problem)
 
 # Lead proponents encode their own LIB (Manual; client clarification Q12), limited to their projects by
@@ -443,3 +447,103 @@ class LibItemDetailView(generics.RetrieveUpdateDestroyAPIView):
         if LineItem.objects.filter(category=item.category, description__iexact=item.name).exists():
             return Response({"detail": "LIBs use this item, so it can't be deleted. Deactivate it instead."}, status=status.HTTP_400_BAD_REQUEST)
         return super().destroy(request, *args, **kwargs)
+
+
+# Task 88-A (2026-11-27): Transactions page = the Event Logs Budget rows, read-only. Seed source for transactions.view.
+TRANSACTION_ROLES = ["system_admin", "finance_budget", "procurement_officer_lib"]
+
+
+def transactions_for(request):
+    """BudgetEventLog rows the user may see, filtered by the query params. Campus roles see only projects in their
+    scoped_projects (a project's campus = its leader's); rows of a deleted project are then hidden, admin keeps them.
+    Filters: project (id at the time, also for deleted ones), date_from/date_to (yyyy-mm-dd), college, leader (user
+    id), event, q (code, title, actor, description)."""
+    params = request.query_params
+    qs = BudgetEventLog.objects.select_related("project__lead")
+    scope = scoped_projects(request.user)
+    if scope is not None:
+        qs = qs.filter(project__in=scope)
+    for name, lookup in (("date_from", "created_at__date__gte"), ("date_to", "created_at__date__lte")):
+        if params.get(name):
+            day = parse_date(params[name])
+            if day is None:
+                raise ValidationError({name: "Use the date format yyyy-mm-dd."})
+            qs = qs.filter(**{lookup: day})
+    for name, lookup in (("project", "project_ref"), ("leader", "project__lead")):
+        if params.get(name):
+            if not params[name].isdigit():
+                raise ValidationError({name: "Must be an id."})
+            qs = qs.filter(**{lookup: int(params[name])})
+    if params.get("college"):
+        qs = qs.filter(project__college__iexact=params["college"])
+    if params.get("event"):
+        qs = qs.filter(event=params["event"])
+    if params.get("q"):
+        q = params["q"].strip()
+        qs = qs.filter(Q(project_code__icontains=q) | Q(project_title__icontains=q) | Q(actor_name__icontains=q)
+                       | Q(description__icontains=q))
+    return qs
+
+
+class TransactionPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class TransactionListView(generics.ListAPIView):
+    """GET budget/transactions/?page=&page_size=&<filters>: {count, next, previous, results}, newest first."""
+
+    permission_classes = [permissions.IsAuthenticated, HasRole("transactions.view")]
+    serializer_class = TransactionSerializer
+    pagination_class = TransactionPagination
+
+    def get_queryset(self):
+        return transactions_for(self.request)
+
+
+class TransactionFiltersView(APIView):
+    """GET budget/transactions/filters/: the choices for the page's dropdowns, from the rows the user may see."""
+
+    permission_classes = [permissions.IsAuthenticated, HasRole("transactions.view")]
+
+    def get(self, request):
+        scope = scoped_projects(request.user)
+        logs = BudgetEventLog.objects.all() if scope is None else BudgetEventLog.objects.filter(project__in=scope)
+        projects = {}
+        for ref, code, title in logs.order_by("project_ref", "-created_at").values_list("project_ref", "project_code", "project_title"):
+            projects.setdefault(ref, {"id": ref, "project_code": code, "project_title": title})
+        live = logs.exclude(project=None)
+        leaders = {}
+        for user_id, first, last, email in live.values_list("project__lead", "project__lead__first_name",
+                                                            "project__lead__last_name", "project__lead__email").distinct():
+            leaders[user_id] = {"id": user_id, "name": f"{first} {last}".strip() or email}
+        return Response({
+            "projects": sorted(projects.values(), key=lambda p: p["project_code"]),
+            "colleges": sorted({c for c in live.values_list("project__college", flat=True) if c}),
+            "leaders": sorted(leaders.values(), key=lambda u: u["name"]),
+            "events": sorted(set(logs.values_list("event", flat=True))),
+        })
+
+
+class TransactionExportView(APIView):
+    """GET budget/transactions/export/?file_format=xlsx|pdf&<same filters>: every matching row (not one page)."""
+
+    permission_classes = [permissions.IsAuthenticated, HasRole("transactions.view")]
+
+    def get(self, request):
+        from reports.renderers import CONTENT_TYPES, render
+
+        fmt = request.query_params.get("file_format", "xlsx")
+        if fmt not in ("xlsx", "pdf"):
+            return Response({"detail": "Choose xlsx or pdf."}, status=status.HTTP_400_BAD_REQUEST)
+        rows = [{
+            "Date": log.display_time, "Project": log.project_code, "Title": log.project_title,
+            "College": log.project.college if log.project else "",
+            "Project Leader": log.project.lead.display_name if log.project else "",
+            "By": log.actor_name, "Role": log.actor_role, "Action": log.event, "Description": log.description,
+            "Remarks": log.remarks, "Amount": log.amount if log.amount is not None else "",
+        } for log in transactions_for(request)]
+        response = HttpResponse(render(fmt, "Transactions", rows), content_type=CONTENT_TYPES[fmt])
+        response["Content-Disposition"] = f'attachment; filename="transactions_{timezone.now():%Y%m%d%H%M%S}.{fmt}"'
+        return response

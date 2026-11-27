@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.permissions import ensure_in_scope
-from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, BudgetReview, LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
+from .models import INSTITUTIONAL_DRY_RESEARCH_CAP, BudgetEventLog, BudgetReview, LibItem, LineItem, LineItemBudget, LineItemEdit, allocation_periods
 
 # Seed source for the permission table (accounts/permission_seed.py); gates use permission codes.
 CERTIFY_ROLES = ["system_admin", "finance_budget"]
@@ -219,3 +219,23 @@ def review_budget(budget, user, status, action, remarks=""):
             row.pop("edits", None)
     BudgetReview.objects.create(budget=budget, action=action, remarks=remarks, acted_by=user, snapshot=snapshot)
     return budget
+
+
+class TransactionSerializer(serializers.ModelSerializer):
+    """One Transactions page row (Task 88-A): a BudgetEventLog row plus the project's current College Unit and
+    Project Leader (blank once the project is deleted; code and title stay as they were logged)."""
+
+    display_time = serializers.CharField(read_only=True)
+    college = serializers.SerializerMethodField()
+    project_leader = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BudgetEventLog
+        fields = ["id", "created_at", "display_time", "project", "project_ref", "project_code", "project_title", "college",
+                  "project_leader", "actor_name", "actor_role", "event", "description", "remarks", "amount", "previous", "new"]
+
+    def get_college(self, log):
+        return log.project.college if log.project else ""
+
+    def get_project_leader(self, log):
+        return log.project.lead.display_name if log.project else ""
